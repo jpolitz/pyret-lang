@@ -21,6 +21,7 @@ build/phase1
 build/phase2
 build/phase3
 build/release
+build/docs
 deps/closure-compiler
 node_modules/
 *#
