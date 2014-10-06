@@ -291,8 +291,6 @@ define(["js/runtime-anf", "./eval-matchers"], function(rtLib, e) {
           "package",
           "namespace",
           "use",
-          "public",
-          "private",
           "protected",
           "static",
           "const",

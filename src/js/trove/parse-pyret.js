@@ -83,10 +83,50 @@ define(["js/runtime-util", "js/ffi-helpers", "trove/ast", "trove/srcloc", "js/di
                 // (provide-stmt PROVIDE STAR)
                 return RUNTIME.getField(ast, 's-provide-all')
                   .app(pos(node.pos));
+              } else if (node.kids.length > 2 && node.kids[1].name === 'COLON') {
+                var bindings = makeList(node.kids.slice(2, -1).map(tr));
+                return RUNTIME.getField(ast, 's-provide-block')
+                  .app(pos(node.pos), bindings)
               } else {
                 // (provide-stmt PROVIDE stmt END)
                 return RUNTIME.getField(ast, 's-provide')
                   .app(pos(node.pos), tr(node.kids[1]))
+              }
+            },
+            'provide-binding': function(node) {
+              return tr(node.kids[0]);
+            },
+            'provide-expr': function(node) {
+              var pub = RUNTIME.getField(ast, 'Public');
+              var priv = RUNTIME.getField(ast, 'Private');
+              if (node.kids[0].name === "NAME") {
+                // (provide-expr [COLONCOLON ann] EQUALS binop-expr)
+                var hasAnn = (node.kids[1].name == "COLONCOLON")
+                var exprIndex = hasAnn ? 4 : 2;
+                var ann = hasAnn ? tr(node.kids[2]) : RUNTIME.getField(ast, 'a-blank');
+                var bind = RUNTIME.getField(ast, 's-bind')
+                  .app(pos(node.pos), RUNTIME.pyretFalse, name(node.kids[0]), ann);
+                var expr = tr(node.kids[exprIndex]);
+                return RUNTIME.getField(ast, 's-provide-value')
+                  .app(pos(node.pos), bind, expr);
+              } else if (node.kids[0].name === "DATA") {
+                // (provide-expr DATA NAME)
+                return RUNTIME.getField(ast, 's-provide-data')
+                    .app(pos(node.pos), pub, name(node.kids[1]));
+              } else if (node.kids[1].name === "DATA") {
+                // (provide-expr (PUBLIC|PRIVATE) DATA NAME)
+                var visibility = (node.kids[0].name === "PRIVATE") ? priv : pub;
+                return RUNTIME.getField(ast, 's-provide-data')
+                    .app(pos(node.pos), visibility, name(node.kids[2]));
+              } else if (node.kids[0].name === "TYPE") {
+                // (provide-expr TYPE NAME EQUALS ann)
+                return RUNTIME.getField(ast, 's-provide-type')
+                    .app(pos(node.pos), pub, name(node.kids[1]), tr(node.kids[3]));
+              } else {
+                // (provide-expr (PUBLIC|PRIVATE) TYPE NAME EQUALS ann)
+                var visibility = (node.kids[0].name === "PRIVATE") ? priv : pub;
+                return RUNTIME.getField(ast, 's-provide-type')
+                    .app(pos(node.pos), pub, name(node.kids[2]), tr(node.kids[4]));
               }
             },
             'provide-types-stmt': function(node) {

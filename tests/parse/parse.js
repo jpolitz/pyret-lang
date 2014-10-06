@@ -233,6 +233,18 @@ R(["../../../build/phase1/js/pyret-tokenizer", "../../../build/phase1/js/pyret-p
       expect(parse("newtype (Number -> String)")).toBe(false);
     });
 
+    it("should parse provide block", function() {
+      expect(parse("provide: a = 5 + 5 end")).not.toBe(false);
+      expect(parse("provide: a :: Number = 5 + 5 end")).not.toBe(false);
+      expect(parse("provide: public data Foo end")).not.toBe(false);
+      expect(parse("provide: data Foo end")).not.toBe(false);
+      expect(parse("provide: private data Bar end")).not.toBe(false);
+      expect(parse("provide: public type Foo = { a :: String } end")).not.toBe(false);
+      expect(parse("provide: type Foo = Number end")).not.toBe(false);
+      expect(parse("provide: private type Bar = List<Number> end")).not.toBe(false);
+      expect(parse("provide: a = 5 + 5, data Foo, private type Bar = Number end")).not.toBe(false);
+    });
+
     it("should parse provide-types", function() {
       expect(parse("provide-types { List :: List }")).not.toBe(false);
       expect(parse("provide-types { List :: List, x :: (Number -> String) }")).not.toBe(false);

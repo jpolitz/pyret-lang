@@ -251,6 +251,11 @@ data Provide:
   | s-provide-all(l :: Loc) with:
     label(self): "s-provide-all" end,
     tosource(self): str-provide-star end
+  | s-provide-block(l :: Loc, provided :: List<ProvideExpr>) with:
+    label(self): "s-provide-block" end,
+    tosource(self):
+      raise("NYI")
+    end
   | s-provide-none(l :: Loc) with:
     label(self): "s-provide-none" end,
     tosource(self): PP.mt-doc end
@@ -258,6 +263,24 @@ sharing:
   visit(self, visitor):
     self._match(visitor, lam(): raise("No visitor field for " + self.label()) end)
   end
+end
+
+data ProvideExpr:
+  | s-provide-value(l :: Loc, bind :: Bind, value :: Expr) with:
+    label(self): "s-provide-value" end
+  | s-provide-data(l :: Loc, visibility :: Visibility, name :: Name) with:
+    label(self): "s-provide-data" end
+  | s-provide-type(l :: Loc, visibility :: Visibility, name :: Name, ann :: Ann) with:
+    label(self): "s-provide-type" end
+sharing:
+  visit(self, visitor):
+    self._match(visitor, lam(): raise("No visitor field for " + self.label()) end)
+  end
+end
+
+data Visibility:
+  | Public
+  | Private
 end
 
 data ProvideTypes:
@@ -1355,6 +1378,18 @@ default-map-visitor = {
   s-provide(self, l, expr):
     s-provide(l, expr.visit(self))
   end,
+  s-provide-block(self, l, provided :: List<ProvideExpr>):
+    s-provide-block(l, provided.map(_.visit(self)))
+  end,
+  s-provide-value(self, l, bind, value):
+    s-provide-value(l, bind.visit(self), value.visit(self))
+  end,
+  s-provide-data(self, l, visibility, name):
+    s-provide-data(l, visibility, name.visit(self))
+  end,
+  s-provide-type(self, l, visibility, _from, _to):
+    s-provide-type(l, visibility, _from.visit(self), _to.visit(self))
+  end,
   s-provide-all(self, l):
     s-provide-all(l)
   end,
@@ -1836,6 +1871,18 @@ default-iter-visitor = {
   end,
   s-provide(self, l, expr):
     expr.visit(self)
+  end,
+  s-provide-block(self, l, provided):
+    lists.all(_.visit(self), provided)
+  end,
+  s-provide-value(self, l, bind, value):
+    bind.visit(self) and value.visit(self)
+  end,
+  s-provide-data(self, l, visibility, name):
+    name.visit(self)
+  end,
+  s-provide-type(self, l, visibility, _from, _to):
+    _from.visit(self) and _to.visit(self)
   end,
   s-provide-all(self, l):
     true
