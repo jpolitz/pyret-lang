@@ -2675,12 +2675,17 @@ function isMethod(obj) { return obj instanceof PMethod; }
     function callCC(f) {
       checkFunction(f);
       pauseStack(function(restarter) {
-        safeCall(function() {
+        runThunk(function() {
           return f.app(makeFunction(function(v) {
             restarter.resume(v);
           }));
         }, function(result) {
-          restarter.resume(result);
+          if(isSuccessResult(result)) {
+            restarter.resume(result.result);
+          }
+          else {
+            restarter.error(result.exn);
+          }
         });
       });
     }
