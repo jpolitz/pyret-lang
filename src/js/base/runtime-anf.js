@@ -2677,7 +2677,9 @@ function isMethod(obj) { return obj instanceof PMethod; }
       pauseStack(function(restarter) {
         runThunk(function() {
           return f.app(makeFunction(function(v) {
-            restarter.resume(v);
+            pauseStack(function(_) {
+              restarter.resume(v);
+            });
           }));
         }, function(result) {
           if(isSuccessResult(result)) {
