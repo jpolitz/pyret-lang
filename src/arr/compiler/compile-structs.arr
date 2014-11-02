@@ -229,6 +229,7 @@ runtime-builtins = lists.map(builtin-id, [list:
   "gensym",
   "random",
   "run-task",
+  "call-cc",
   "_plus",
   "_minus",
   "_times",

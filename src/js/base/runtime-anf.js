@@ -2671,6 +2671,19 @@ function isMethod(obj) { return obj instanceof PMethod; }
       var pause = new PausePackage();
       throw makePause(pause, resumer);
     }
+    
+    function callCC(f) {
+      checkFunction(f);
+      pauseStack(function(restarter) {
+        safeCall(function() {
+          return f.app(makeFunction(function(v) {
+            restarter.resume(v);
+          }));
+        }, function(result) {
+          restarter.resume(result);
+        });
+      });
+    }
 
     function PausePackage() {
       this.resumeVal = null;
@@ -3527,6 +3540,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
           'Any': AnyC,
 
           'run-task': makeFunction(execThunk),
+          'call-cc': makeFunction(callCC),
 
           'gensym': gensym,
           'random': makeFunction(random),
