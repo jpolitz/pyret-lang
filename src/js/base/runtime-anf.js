@@ -2408,6 +2408,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
     function finishSuccess(answer) {
       RUN_ACTIVE = false;
       delete activeThreads[thisThread.id];
+      threadIsCurrentlyPaused = true;
       onDone(new SuccessResult(answer, getStats()));
     }
 
@@ -2439,26 +2440,20 @@ function isMethod(obj) { return obj instanceof PMethod; }
     // Special case of the first thread to run in between breaks.
     // This is the only thread notified of the break, others just die
     // silently.
-    if(Object.keys(activeThreads).length === 0) {
       var breakFun = function() {
         threadIsCurrentlyPaused = true;
         threadIsDead = true;
         finishFailure(new PyretFailException(ffi.userBreak));
       };
-    }
-    else {
-      var breakFun = function() {
-        threadIsCurrentlyPaused = true;
-        threadIsDead = true;
-      };
-    }
 
     var thisThread = {
       handlers: {
-        resume: function(restartVal) {
-          if(!threadIsCurrentlyPaused) { throw new Error("Stack already running"); }
+        resume: function(restartVal, stackCopy) {
+          //if(!threadIsCurrentlyPaused) { throw new Error("Stack already running"); }
           if(threadIsDead) { throw new Error("Failed to resume; thread has been killed"); }
           threadIsCurrentlyPaused = false;
+          theOneTrueStackHeight = stackCopy.length;
+          theOneTrueStack = stackCopy.slice();
           val = restartVal;
           TOS++;
           RUN_ACTIVE = true;
@@ -2555,6 +2550,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
             if(isPause(e)) {
               thisThread.pause();
               e.pause.setHandlers(thisThread.handlers);
+              e.pause.stackCopy = theOneTrueStack.filter(function(v) { return v !== undefined; });
               if(e.resumer) { e.resumer(e.pause); }
               return;
             }
@@ -2697,6 +2693,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
       this.errorVal = null;
       this.breakFlag = false;
       this.handlers = null;
+      this.stackCopy = null;
     }
     PausePackage.prototype = {
       setHandlers: function(handlers) {
@@ -2704,7 +2701,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
           handlers.break();
         }
         else if (this.resumeVal !== null) {
-          handlers.resume(this.resumeVal);
+          handlers.resume(this.resumeVal, this.stackCopy);
         }
         else if (this.errorVal !== null) {
           handlers.error(this.errorVal);
@@ -2740,7 +2737,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
           throw "Cannot resume with error or break requested";
         }
         if(this.handlers !== null) {
-          this.handlers.resume(val);
+          this.handlers.resume(val, this.stackCopy);
         }
         else {
           this.resumeVal = val;
