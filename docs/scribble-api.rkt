@@ -29,6 +29,7 @@
          render-fun-helper
          re-export from
          pyret pyret-id pyret-method pyret-block
+         internal-id
          tag-name
          type-spec
          data-spec
@@ -65,6 +66,9 @@
          append-gen-docs
          curr-module-name
          make-header-elt-for
+         code-style
+         div-style
+         tag-name
          )
 
 ;;;;;;;;; Parameters and Constants ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -229,6 +233,9 @@
   (seclink (xref mod id) (tt id)))
 (define (pyret-method datatype id (mod (curr-module-name)))
   (seclink (xref mod datatype id) (tt (string-append "." id))))
+
+(define (internal-id object id)
+  (seclink (xref object id) (tt (list object "." id))))
 
 ;;;;;;;;;; Cross-Reference Infrastructure ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
