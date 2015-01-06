@@ -8,5 +8,6 @@ its Javascript representations and FFI.}
 @(table-of-contents)
 
 @include-section["internal/runtime.scrbl"]
+@include-section["internal/ffi-helpers.scrbl"]
 @include-section["internal/running.scrbl"]
 

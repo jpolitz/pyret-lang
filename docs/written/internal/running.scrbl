@@ -215,6 +215,24 @@ myRuntime.pauseStack(function(restarter) {
 });
 }
 
+Some things to note:
+
+@itemlist[
+
+  @item{
+    It is an error to call more than one of @tt{resume}/@tt{error}/@tt{break}:
+    a @tt{Restarter} is not a continuation that can be invoked multiple times.
+  }
+
+  @item{
+    If none of the callbacks are ever called, from the point of view of the
+    running Pyret process, the program is in an infinite loop (for example, the
+    IDE may show a "running" GIF forever).  This includes the case where
+    executing the callback ends in an error.  So, using @tt{pauseStack}
+    requires some care in writing robust JavaScript code, or odd behavior can
+    result.
+  }
+]
 
 
 

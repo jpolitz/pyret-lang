@@ -92,9 +92,45 @@ overflows and can represent very large and very small rationals exactly.
 
 @doc-internal["Runtime" "makeMethodN" (list "JSFunction") "PyretMethod"]
 
+@doc-internal["Runtime" "makeOpaque" (list "Any") "PyretOpaque"]
+
 @subsection{Interacting with Objects}
 
 @doc-internal["Runtime" "getField" (list "PyretObject" "JSString") "PyretValue"]
 
+@doc-internal["Runtime" "getColonField" (list "PyretObject" "JSString") "PyretValue"]
+
 @doc-internal["Runtime" "getFields" (list "PyretObject") "JSArray<String>"]
 
+@doc-internal["Runtime" "hasField" (list "PyretObject" "JSString") "JSBoolean"]
+
+@subsection{Assertions}
+
+@doc-internal["Runtime" "checkArity" (list "JSNumber" "Arguments" "JSString") "Undefined"]
+
+@doc-internal["Runtime" "checkNumber" (list "Any") "Undefined"]
+@doc-internal["Runtime" "checkString" (list "Any") "Undefined"]
+@doc-internal["Runtime" "checkBoolean" (list "Any") "Undefined"]
+@doc-internal["Runtime" "checkObject" (list "Any") "Undefined"]
+@doc-internal["Runtime" "checkFunction" (list "Any") "Undefined"]
+@doc-internal["Runtime" "checkMethod" (list "Any") "Undefined"]
+@doc-internal["Runtime" "checkArray" (list "Any") "Undefined"]
+@doc-internal["Runtime" "checkOpaque" (list "Any") "Undefined"]
+@doc-internal["Runtime" "checkPyretVal" (list "Any") "Undefined"]
+
+@subsection{Equality}
+
+@doc-internal["Runtime" "combineEquality" (list "EqualityResult" "EqualityResult") "EqualityResult"]
+
+Takes two @pyret-id["EqualityResult" "equality"]s and combines them.  Any value
+paired with @pyret-id["NotEqual" "equality"] produces @pyret-id["NotEqual"
+"equality"], any combination of @pyret-id["Equal" "equality"] and
+@pyret-id["Unknown" "equality"] produces @pyret-id["Unknown" "equality"], and
+two @pyret-id["Equal" "equality"] values produce @pyret-id["Equal" "equality"].
+
+@subsection{FFI Helpers}
+
+@doc-internal["Runtime" "ffi" #f "FFIHelpers"]
+
+The Pyret runtime instantiates an @seclink["ffi" (list @tt{FFIHelpers} " object")] and
+stores in in the @tt{ffi} field.
