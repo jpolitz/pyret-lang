@@ -234,8 +234,108 @@ Some things to note:
   }
 ]
 
+@doc-internal["Runtime" "schedulePause" (list "(Restarter → Undefined)") "Undefined"]
+
+Similar to @internal-id["Runtime" "pauseStack"], but used from outside the
+runtime (e.g. in the REPL), to schedule a pause.  Since the point of
+interruption (and resumption) is not predictable from outside the Pyret thread,
+the @tt{resume} method of the @tt{Restarter} for @tt{schedulePause} ignores any
+value passed to it; it always resumes the computation exactly as it would have
+continued had it not been paused.
+
+If @internal-id["Runtime" "schedulePause"] is called during a synchronous
+@internal-id["Runtime" "run"], the runtime will still wait until the next stack
+exception to call the given @tt{Restarter}.  If called during an asynchronous
+run, the next time a setTimeout is triggered, the @tt{Restarter} will be called.
+
+If @internal-id["Runtime" "schedulePause"] is called multiple times before
+Pyret checks for scheduled pauses, the last call's @tt{Restarter} is used, and
+any earlier calls are ignored.
 
 
+@section{Starting a New Pyret Stack}
 
+The description of @internal-id["Runtime" "safeCall"] and @internal-id["Runtime"
+"pauseStack"] assume that the calls are being made in a running Pyret execution
+context.  This is the case for most library code that would get run via
+@pyret{import}, and be using external APIs.
+
+However, some applications may need to start new Pyret instances from scratch.
+In order for the special @tt{PauseExceptions} and @tt{StackExceptions} to be
+caught at the top level and correctly restarted, the handlers need to be
+correctly installed.  This is done by @internal-id["Runtime" "run"]:
+
+@doc-internal["Runtime" "run"
+  (list "(Runtime, Namespace → a)"
+        "Namespace"
+        "RunOptions"
+        "(RunResult<a> → Undef)")
+  "Undef"]
+
+The first argument is the program to run, which takes a @tt{Runtime} (which is
+always the same as the runtime @tt{run} is called on), and a @tt{Namespace} as
+arguments.  Pyret programs are compiled to look for any global identifiers in
+@tt{Namespace}.  The second argument is the @tt{Namespace} passed to the
+function to run (adding to the namespace is useful for e.g. putting
+REPL-defined identifiers into scope).  @tt{RunOptions} has only one field:
+@tt{sync}, which is a boolean indicating if the program should be run
+@emph{synchronously} or not.  This is described more in
+@secref["s:synchronous"].  Finally, the last argument is a callback that gets
+either a @tt{Success} or @tt{Failure} result, described in
+@secref["s:result-structures"].
+
+Only one @tt{run} call can be active for a given @tt{runtime} at once.  If it
+is called more than once, an error that says @tt{"run called while already
+running"} will be raised.  New calls to @internal-id["Runtime" "run"] should
+only be used at the logical start of a Pyret program's execution (e.g. running
+the definitions window, running a REPL entry, running a standalone test case
+start-to-finish), not for loading libraries, interacting with native JS APIs,
+or managing asynchronous APIs.
+
+@subsection[#:tag "s:synchronous"]{Synchronous vs. Asynchronous Execution}
+
+The @tt{sync} flag passed to @internal-id["Runtime" "run"] changes how stack
+pauses are managed.  In synchronous mode (@tt{sync: true}), when a stack or
+pause exception reaches the top level, it is immediately restarted.  This is
+the fastest option, and is the default for Pyret running from the command-line.
+
+However, when executing synchronously, Pyret never yields to the event loop.
+If @tt{sync: true} were used in a context with user interaction, like a browser
+page, the UI thread would never get a chance to run.  If @tt{sync} is set to
+@tt{false}, when the stack limit is reached, or a pause execption is thrown, it
+is restarted after first yielding to the event loop (using @tt{setTimeout}).
+This provides a window for the browser to process click and key events,
+avoiding page lockup.  This also gives the ability for UI elements to trigger
+calls to @internal-id["Runtime" "schedulePause"], which will call back to the
+pauser the next time the Pyret thread restarts.
+
+
+@subsection[#:tag "s:result-structures"]{Result Data Structures}
+
+@doc-internal["Runtime" "makeSuccessResult" (list "a") "SuccessResult<a>"]
+
+Represents a successful completion of a Pyret execution with
+@internal-id["Runtime" "run"].
+
+@doc-internal["Runtime" "isSuccessResult" (list "Any") "Bool"]
+
+Checks if a value is a @tt{SuccessResult}.
+
+@doc-internal["Runtime.SuccessResult" "result" #f "Any"]
+
+The field that stores the answer of a @tt{SuccessResult}.
+
+@doc-internal["Runtime" "makeFailureResult" (list "a") "FailureResult<a>"]
+
+Represents a Pyret execution with @internal-id["Runtime" "run"] that ended in
+some kind of exception (either from Pyret or an internal JavaScript error).
+
+@doc-internal["Runtime" "isFailureResult" (list "Any") "Bool"]
+
+Checks if a value is a @tt{FailureResult}.
+
+@doc-internal["Runtime.FailureResult" "exn" #f "Any"]
+
+The field that stores the exception value of a @tt{FailureResult}.
 
 

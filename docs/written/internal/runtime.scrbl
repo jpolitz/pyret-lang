@@ -63,7 +63,7 @@ Example:
 
 @verbatim{
 define(["js/runtime-anf", "trove/lists"], function(runtimeLib, listLib) {
-  var myRuntime = runtimeLib.create({});
+  var myRuntime = runtimeLib.makeRuntime({});
   myRuntime.loadModules(myRuntime.namespace, [listLib], function(list) {
     // list has fields like "link", "map", etc. from the lists module
   });
@@ -81,32 +81,71 @@ overflows and can represent very large and very small rationals exactly.
 
 @doc-internal["Runtime" "makeString" (list "JSString") "PyretString"]
 
+The representation of Pyret strings is JS strings, though this may change to
+accommodate better Unicode support in the future.
+
 @doc-internal["Runtime" "pyretTrue" #f "PyretBoolean"]
 @doc-internal["Runtime" "pyretFalse" #f "PyretBoolean"]
 
-@doc-internal["Runtime" "makeArray" (list "JSString") "PyretRawArray"]
+The runtime values for @pyret{true} and @pyret{false} in Pyret.  Representation
+is JavaScript @tt{true} and @tt{false}.
+
+@doc-internal["Runtime" "makeArray" (list "JSArray") "PyretRawArray"]
+
+Creates a Pyret @pyret-id["RawArray" "raw-arrays"] with the given elements.
+Currently the identity function: Pyret raw arrays are JavaScript arrays.
 
 @doc-internal["Runtime" "makeObject" (list "JSObj") "PyretObject"]
 
+Creates a Pyret object with the fields in the input object.  The representation
+of an object is @emph{not} one-to-one with JS objects.
+
+The fields of a Pyret object go in the @tt{dict} field of the JS object, and
+the JS object has an additional field called @tt{brands}, which hold
+information about an object's type information (if it has any).
+@pyret-id["StringDict" "string-dict"]s, for example, are branded objects.
+
 @doc-internal["Runtime" "makeFunction" (list "JSFunction") "PyretFunction"]
+
+Returns a Pyret function backed by the provided JS function.  The Pyret
+function will @emph{not} do any arity checks on behalf of the JS function, so
+any arity checks need to be done explicitly (see @internal-id["Runtime"
+"checkArity"]).  The function can be accessed directly via the @pyret{app}
+field of the Pyret function, but read the section on @internal-id["Runtime"
+"safeCall"] in order to suitably protect calls to Pyret functions.
 
 @doc-internal["Runtime" "makeMethodN" (list "JSFunction") "PyretMethod"]
 
-@doc-internal["Runtime" "makeOpaque" (list "Any") "PyretOpaque"]
 
 @subsection{Interacting with Objects}
 
 @doc-internal["Runtime" "getField" (list "PyretObject" "JSString") "PyretValue"]
 
+Gets the field with the given name from the object.  If the field is a method,
+it is automatically curried over the object, as with dot.
+
 @doc-internal["Runtime" "getColonField" (list "PyretObject" "JSString") "PyretValue"]
+
+Gets the field with the given name from the object.  If the field is a method,
+no additional work is performed.
 
 @doc-internal["Runtime" "getFields" (list "PyretObject") "JSArray<String>"]
 
+Returns all the field names of the given object.
+
 @doc-internal["Runtime" "hasField" (list "PyretObject" "JSString") "JSBoolean"]
+
+Checks if the given object has the named field.
 
 @subsection{Assertions}
 
 @doc-internal["Runtime" "checkArity" (list "JSNumber" "Arguments" "JSString") "Undefined"]
+
+Checks that the given argument list has the given arity.  Throws an exception
+if they don't match.
+
+There are a number of checking functions that check that a given argument is of
+a particular type, and throw an exception if not:
 
 @doc-internal["Runtime" "checkNumber" (list "Any") "Undefined"]
 @doc-internal["Runtime" "checkString" (list "Any") "Undefined"]
@@ -115,7 +154,9 @@ overflows and can represent very large and very small rationals exactly.
 @doc-internal["Runtime" "checkFunction" (list "Any") "Undefined"]
 @doc-internal["Runtime" "checkMethod" (list "Any") "Undefined"]
 @doc-internal["Runtime" "checkArray" (list "Any") "Undefined"]
-@doc-internal["Runtime" "checkOpaque" (list "Any") "Undefined"]
+
+
+
 @doc-internal["Runtime" "checkPyretVal" (list "Any") "Undefined"]
 
 @subsection{Equality}
@@ -134,3 +175,4 @@ two @pyret-id["Equal" "equality"] values produce @pyret-id["Equal" "equality"].
 
 The Pyret runtime instantiates an @seclink["ffi" (list @tt{FFIHelpers} " object")] and
 stores in in the @tt{ffi} field.
+
