@@ -56,7 +56,7 @@ fun compile-js-ast(phases, ast, name, env, libs, options) -> CompilationPhase:
       desugared = D.desugar(named-ast)
       when options.collect-all: ret := phase("Fully desugared", desugared, ret) end
       type-checked =
-        if options.type-check: T.type-check(desugared, env)
+        if options.type-check: T.type-check(desugared, env).ast
         else: C.ok(desugared);
       when options.collect-all: ret := phase("Type Checked", type-checked, ret) end
       cases(C.CompileResult) type-checked:
