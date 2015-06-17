@@ -265,7 +265,7 @@ sharing:
       | t-name(module-name, id) =>
         cases(Option<String>) module-name:
           | none    => VS.vs-value(id.toname())
-          | some(m) => VS.vs-value(m + "." + id.toname())
+          | some(m) => VS.vs-value(id.toname())
         end
       | t-var(id) => VS.vs-value(id.toname())
       | t-arrow(args, ret) =>
