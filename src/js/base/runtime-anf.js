@@ -1236,6 +1236,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
             else {
               console.log("UNKNOWN VALUE!");
               console.log(next);
+              throw "Found unknown value in loop";
             }
           }
           else {
