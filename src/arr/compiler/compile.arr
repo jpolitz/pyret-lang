@@ -5,6 +5,7 @@ provide-types *
 import file as F
 import ast as A
 import parse-pyret as PP
+import string-dict as SD
 import "compiler/js-of-pyret.arr" as P
 import "compiler/compile-structs.arr" as C
 import "compiler/well-formed.arr" as W
@@ -28,6 +29,8 @@ sharing:
     help(self, empty)
   end
 end
+
+dummy-provides = lam(uri): C.provides(uri, SD.make-string-dict(), SD.make-string-dict(), SD.make-string-dict()) end
 
 fun compile-js-ast(phases, ast, name, env, libs, options) -> CompilationPhase:
   var ret = phases
@@ -71,11 +74,11 @@ fun compile-js-ast(phases, ast, name, env, libs, options) -> CompilationPhase:
           when options.collect-all: ret := phase("Inlined lambdas", inlined, ret) end
           any-errors = named-errors + U.check-unbound(env, inlined) + U.bad-assignments(env, inlined)
           if is-empty(any-errors):
-            if options.collect-all: P.trace-make-compiled-pyret(ret, phase, inlined, env, options)
-            else: phase("Result", C.ok(P.make-compiled-pyret(inlined, env, options)), ret)
+            if options.collect-all: P.trace-make-compiled-pyret(ret, phase, inlined, env, dummy-provides(name), options)
+            else: phase("Result", C.ok(P.make-compiled-pyret(inlined, env, dummy-provides(name), options)), ret)
             end
           else:
-            if options.collect-all and options.ignore-unbound: P.trace-make-compiled-pyret(ret, phase, inlined, env, options)
+            if options.collect-all and options.ignore-unbound: P.trace-make-compiled-pyret(ret, phase, inlined, env, dummy-provides, options)
             else: phase("Result", C.err(any-errors), ret)
             end
           end

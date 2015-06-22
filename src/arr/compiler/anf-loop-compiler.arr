@@ -8,6 +8,7 @@ import "compiler/gensym.arr" as G
 import "compiler/compile-structs.arr" as CS
 import "compiler/concat-lists.arr" as CL
 import "compiler/ast-util.arr" as AU
+import "compiler/type-structs.arr" as T
 import string-dict as D
 import srcloc as SL
 
@@ -1228,7 +1229,95 @@ end
 
 fun import-key(i): AU.import-to-dep-anf(i).key() end
 
-fun compile-program(self, l, imports-in, prog, freevars, env):
+fun make-dependencies(imports):
+  j-list(true,
+    for map(i from imports):
+      cases(N.AImportType) i.import-type:
+        | a-import-builtin(_, name) =>
+          j-method(j-id("util"), "modBuiltin", [list: j-str(name)])
+        | a-import-file(_, name) =>
+          j-obj([list:
+              j-field("protocol", j-str("legacy-path")),
+              j-field("args", j-list(true, [list: j-str(name)]))
+            ])
+        | a-import-special(_, protocol, args) =>
+          j-obj([list:
+              j-field("protocol", j-str(protocol)),
+              j-field("args", j-list(true, map(j-str, args)))
+            ])
+      end
+    end
+  )
+end
+
+# TODO(joe): tosourcestrings may change a bit when moving to dataflow branch
+fun typ-to-js(typ :: T.Type):
+  fun t(meth, args): j-method(j-id("t"), meth, args) end
+  cases(T.Type) typ:
+    | t-var(id) => t("tyvar", [list: j-str(id.tosourcestring())])
+    | t-arrow(args, ret) =>
+      t("arrow", [list: j-list(false, map(typ-to-js, args)), typ-to-js(ret)])
+    | t-top => j-dot(j-id("t"), "any")
+    | t-bot => j-dot(j-id("t"), "bot") # TODO(joe): add bot helper
+
+    | t-forall(introduces, onto) =>
+      names = for map(i from introduces): j-str(i.id.tosourcestring()) end
+      t("forall", [list: j-list(false, names), typ-to-js(onto)])
+    | t-app(onto, args) =>
+      t("tyapp", [list: typ-to-js(onto), j-list(false, map(typ-to-js, args))])
+
+    | t-record(fields) =>
+      t("record", [list:
+        j-obj(for map(f from fields): j-field(f.field-name, typ-to-js(f.typ)) end)])
+
+    | t-name(mod-name, id) =>
+      cases(Option<String>) mod-name:
+        | none => raise("Got name with no corresponding module: " + torepr(typ))
+        | some(m) =>
+          t("otherName", m, [list: j-str(id.tosourcestring())])
+      end
+
+    | t-ref(tr) => raise("No exporting refs yet " + torepr(tr))
+
+  end
+end
+
+fun tvariant-to-js(tv :: T.TypeVariant):
+  cases(T.TypeVariant) tv:
+    | t-singleton-variant(l, name, _) =>
+      j-method(j-id("t"), "singletonVariant", [list: j-str(name)])
+    | t-variant(l, name, members, _) =>
+      jmembers = j-list(for map(f from members): j-field(f.field-name, typ-to-js(f.typ)) end)
+      j-method(j-id("t"), "variant", [list: j-str(name), jmembers])
+  end
+end
+
+fun tdatatype-to-js(td :: T.DataType):
+  j-method(j-id("t"), "dataType", [list:
+      td.name,
+      j-list(false, for map(p from td.params): j-str(p.id.tosourcestring()) end),
+      j-list(map(tvariant-to-js, td.variants)),
+      j-list(for map(f from td.fields): j-field(f.field-name, typ-to-js(f.typ)) end)
+    ])
+end
+
+fun make-provides(provides):
+  values = for map(k from provides.values.keys-list()):
+    j-field(k, typ-to-js(provides.values.get-value(k)))
+  end
+  aliases = for map(k from provides.aliases.keys-list()):
+    j-field(k, typ-to-js(provides.aliases.get-value(k)))
+  end
+  datatypes = for map(k from provides.data-definitions.keys-list()):
+    j-field(k, tdatatype-to-js(provides.data-definitions.get-value(k)))
+  end
+  j-obj([list:
+    j-field("values", j-obj(values)),
+    j-field("aliases", j-obj(aliases)),
+    j-field("datatypes", j-obj(datatypes))])
+end
+
+fun compile-program(self, l, imports-in, prog, freevars, env, provides):
   fun inst(id): j-app(j-id(id), [list: j-id("R"), j-id("NAMESPACE")]);
   imports = imports-in.sort-by(
       lam(i1, i2): import-key(i1.import-type) < import-key(i2.import-type)  end,
@@ -1294,9 +1383,9 @@ fun compile-program(self, l, imports-in, prog, freevars, env):
     mod-input-names = modules.map(_.input-id)
     mod-input-ids = mod-input-names.map(j-id)
     mod-val-ids = modules.map(get-id)
-    j-return(rt-method("loadModulesNew",
-        [list: j-id("NAMESPACE"), j-list(false, mod-input-ids),
-          j-fun(mod-input-names,
+#    j-return(rt-method("loadModulesNew",
+#        [list: j-id("NAMESPACE"), j-list(false, mod-input-ids),
+#          j-fun(mod-input-names,
             j-block(
               for map2(m from mod-val-ids, in from mod-input-ids):
                 j-var(m, rt-method("getField", [list: in, j-str("values")]))
@@ -1324,7 +1413,8 @@ fun compile-program(self, l, imports-in, prog, freevars, env):
                             j-return(j-id("moduleVal"))
                           ])),
                       j-str("Evaluating " + body-name)
-                ]))]))]))
+                ]))])
+#)]))
   end
   module-specs = for map3(i from imports, id from ids, in-id from input-ids):
     { id: id, input-id: in-id, imp: i}
@@ -1353,25 +1443,44 @@ fun compile-program(self, l, imports-in, prog, freevars, env):
   visited-body = compile-fun-body(l, step, toplevel-name, self.{get-loc: get-loc, cur-apploc: apploc}, [list: resumer], none, prog, true)
   toplevel-fun = j-fun([list: js-id-of(resumer.id.tosourcestring())], visited-body)
   define-locations = j-var(locs, j-list(true, locations.to-list()))
-  j-app(j-id("define"), [list: j-list(true, filenames.map(j-str)), j-fun(input-ids, j-block([list: 
-            j-return(j-fun([list: "R", "NAMESPACE"],
-                j-block([list: 
-                    #j-expr(j-str("use strict")),
-                    j-if(module-ref(module-id),
-                      j-block([list: j-return(module-ref(module-id))]),
-                      j-block(mk-abbrevs(l) +
-                        [list: define-locations] + 
-                        global-binds +
-                        [list: wrap-modules(module-specs, toplevel-name, toplevel-fun)]))])))]))])
+
+  j-app(j-id("define"), [list:
+      j-list(false, [list: j-str("js/runtime-util"), j-str("js/type-util")]),
+      j-fun([list: "util", "t"],
+        j-block([list:
+            j-method(j-id("util"), "definePyretModule", [list:
+                j-str(provides.from-uri),
+                make-dependencies(imports-in),
+                make-provides(provides),
+                j-fun([list: "R", "NAMESPACE"] + input-ids,
+                  j-block(
+                    mk-abbrevs(l) +
+                    [list: define-locations] +
+                    global-binds +
+                    [list: wrap-modules(module-specs, toplevel-name, toplevel-fun)]))
+              ])
+          ]))
+    ])
+
+#  j-app(j-id("define"), [list: j-list(true, filenames.map(j-str)), j-fun(input-ids, j-block([list: 
+#            j-return(j-fun([list: "R", "NAMESPACE"],
+#                j-block([list: 
+#                    #j-expr(j-str("use strict")),
+#                    j-if(module-ref(module-id),
+#                      j-block([list: j-return(module-ref(module-id))]),
+#                      j-block(mk-abbrevs(l) +
+#                        [list: define-locations] + 
+#                        global-binds +
+#                        [list: wrap-modules(module-specs, toplevel-name, toplevel-fun)]))])))]))])
 end
 
-fun non-splitting-compiler(env, options):
+fun non-splitting-compiler(env, provides, options):
   compiler-visitor.{
     options: options,
     a-program(self, l, _, imports, body):
       simplified = body.visit(remove-useless-if-visitor)
       freevars = N.freevars-e(simplified)
-      compile-program(self, l, imports, simplified, freevars, env)
+      compile-program(self, l, imports, simplified, freevars, env, provides)
     end
   }
 end

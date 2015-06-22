@@ -59,6 +59,14 @@ define([], function() {
     };
   }
 
+  function otherName(mod, name) {
+    return {
+      tag: "name",
+      module: mod,
+      name: name
+    };
+  }
+
   function localType(name) {
     return {
       tag: "name",
@@ -118,11 +126,14 @@ define([], function() {
         var methods = Object.keys(typ.methods).map(function(k) {
           return O({ name: k, value: tp(typ.methods[k]) });
         });
+        var variants = Object.keys(typ.variants).map(function(k) {
+          return O({ name: k, value: tp(typ.variants[k]) });
+        });
         return O({
           tag: "data",
           name: typ.name,
           params: L(typ.params),
-          variants: L(typ.variants.map(tp)),
+          variants: L(variants),
           methods: L(methods)
         });
       case "variant":
@@ -195,6 +206,7 @@ define([], function() {
     tyvar: tyvar,
     builtinName: builtinName,
     libName: libName,
+    otherName: otherName,
     localType: localType,
     record: record,
     dataType: dataType,
