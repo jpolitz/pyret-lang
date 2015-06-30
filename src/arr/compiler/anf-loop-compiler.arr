@@ -1448,9 +1448,9 @@ fun compile-program(self, l, imports-in, prog, freevars, env, provides):
       j-list(false, [list: j-str("js/runtime-util"), j-str("js/type-util")]),
       j-fun([list: "util", "t"],
         j-block([list:
-            j-method(j-id("util"), "definePyretModule", [list:
+            j-return(j-method(j-id("util"), "definePyretModule", [list:
                 j-str(provides.from-uri),
-                make-dependencies(imports-in),
+                make-dependencies(imports),
                 make-provides(provides),
                 j-fun([list: "R", "NAMESPACE"] + input-ids,
                   j-block(
@@ -1459,7 +1459,7 @@ fun compile-program(self, l, imports-in, prog, freevars, env, provides):
                     global-binds +
                     [list: wrap-modules(module-specs, toplevel-name, toplevel-fun)]))
               ])
-          ]))
+          )]))
     ])
 
 #  j-app(j-id("define"), [list: j-list(true, filenames.map(j-str)), j-fun(input-ids, j-block([list: 

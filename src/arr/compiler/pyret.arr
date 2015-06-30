@@ -2,6 +2,7 @@
 
 import cmdline as C
 import file as F
+import load-lib as L
 import exec as X
 import string-dict as D
 import "compiler/compile.arr" as CM
@@ -16,7 +17,6 @@ format = Format.format
 Either = E.Either
 left = E.left
 right = E.right
-
 
 fun main(args):
   options = [D.string-dict:
@@ -122,6 +122,7 @@ fun main(args):
             end
           end
         else if r.has-key("run"):
+          L.set-command-line-args(C.args)
           CLI.run(r.get-value("run"),
             {
               check-mode : check-mode,

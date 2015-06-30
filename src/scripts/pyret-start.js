@@ -5,7 +5,7 @@ define(["requirejs", "js/runtime-anf", "compiler/pyret.arr", "trove/render-error
     stderr: function(str) { process.stderr.write(str); }
   });
   rt.setParam("command-line-arguments", process.argv.slice(1));
-  rt.run(pyret, rt.namespace, {sync: true}, function(result) {
+  var after = function(result) {
     if(rt.isSuccessResult(result)) {
       process.exit(0);
     } else if (rt.isFailureResult(result)) {
@@ -52,5 +52,15 @@ define(["requirejs", "js/runtime-anf", "compiler/pyret.arr", "trove/render-error
         process.exit(1);
       }
     }
-  });
+  }
+  if(typeof pyret == "function") {
+    rt.run(pyret, rt.namespace, {sync: true}, after);
+  }
+  else {
+    rt.run(
+      function() { rt.loadModulesNew(rt.namespace, [pyret], function() {}); },
+      rt.namespace,
+      {sync: true},
+      after);
+  }
 });

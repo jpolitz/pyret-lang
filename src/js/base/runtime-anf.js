@@ -3879,8 +3879,17 @@ function isMethod(obj) { return obj instanceof PMethod; }
           }
           var curDeps = curMod.dependencies;
           var depMods = curDeps.map(function(d) {
-            return { dname: d.name, modinfo: require("trove/" + d.name) };
+            if (d.name) {
+              return { dname: d.name, modinfo: require("trove/" + d.name) };
+            }
+            else if (d.protocol === "legacy-path") {
+              return { dname: d.args[0], modinfo: require(d.args[0]) };
+            }
+            else {
+              console.error("Unknown dependency: ", d);
+            }
           });
+          curMod.name = curName;
           var tocomp = {mod: curMod, path: curPath};
           return depMods.reduce(function(acc, elt) {
             return addMod(elt.modinfo, curPath.concat([tocomp]), elt.dname).concat(acc);
@@ -3890,21 +3899,25 @@ function isMethod(obj) { return obj instanceof PMethod; }
       }
       var wl = loadWorklist({name: startName, dependencies: modules });
       var finalModMap = {};
+      function getName(d) {
+        if(d.name) { return d.name; }
+        else { return d.args[0]; }
+      }
       var rawModules = wl.forEach(function(m) {
-        if(m.mod.name === startName) { return; }
+        if(m.mod.name === startName || m.mod.name === undefined) { return; }
         if(m.mod.theModule.length == 2) { // Already a runtime/namespace function
           var thisRawMod = m.mod.theModule;
         }
         else {
           var rawDeps = m.mod.dependencies.map(function(d) {
-            return finalModMap[d.name];
+            return finalModMap[getName(d)];
           });
           var thisRawMod = m.mod.theModule.apply(null, rawDeps);
         }
         finalModMap[m.mod.name] = thisRawMod;
       });
       var originalOrderRawModules = modules.map(function(m) {
-        return finalModMap[m.name];
+        return finalModMap[getName(m)];
       });
       return loadModulesNew(thisRuntime.namespace, originalOrderRawModules, withModules);
     }

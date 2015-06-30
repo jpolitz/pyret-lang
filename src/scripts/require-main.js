@@ -25,6 +25,7 @@ R([process.argv[2], "js/runtime-anf", "trove/checker"], function(mainModule, RT,
         //        console.log(rt.getField(result.result, "answer"));
         process.exit(0);
       } else if (rt.isFailureResult(result)) {
+        console.error(result.exn.stack);
         console.error('Pyret terminated with an error');
         if (result && result.exn && result.exn.exn && result.exn.exn.s && result.exn.stack && result.exn.pyretStack) {
           console.error(result.exn.exn.s)

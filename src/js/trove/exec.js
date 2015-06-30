@@ -155,6 +155,9 @@ define(["js/secure-loader", "js/ffi-helpers", "js/runtime-anf", "trove/checker",
                  (if it ever does), the continuation is called with r as either
                  a Success or Failure Result from newRuntime. */
 
+              if(typeof moduleVal === "object") {
+                moduleVal = moduleVal.theModule;
+              }
               newRuntime.run(moduleVal, newNamespace, {sync: true}, function(r) {
 
                   /* makeResult handles turning values from the new runtime into values that

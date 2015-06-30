@@ -216,6 +216,7 @@ define(["js/secure-loader", "js/runtime-util"], function(loader, util) {
                     var loaded = loader.loadSingle(loadRuntime, toExec, dependencies);
                   }
                   else {
+                    console.log("toExec: ", toExec.val);
                     var loaded = loader.loadClosure(loadRuntime, toExec.val, dependencies);
                   }
                   loaded.fail(function(err) {
@@ -262,7 +263,8 @@ define(["js/secure-loader", "js/runtime-util"], function(loader, util) {
             "get-result-answer": runtime.makeFunction(getAnswerForPyret),
             "get-result-compile-result": runtime.makeFunction(getResultCompileResult),
             "render-check-results": runtime.makeFunction(renderCheckResults),
-            "render-error-message": runtime.makeFunction(renderErrorMessage)
+            "render-error-message": runtime.makeFunction(renderErrorMessage),
+            "set-command-line-args": runtime.makeFunction(setCommandLineArgs)
           }),
           types: {
             Module: annModule,
