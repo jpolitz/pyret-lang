@@ -108,7 +108,7 @@ $(PHASE1_ALL_DEPS): | $(PHASE1)
 
 $(PHASE2_ALL_DEPS): | $(PHASE2) phase1
 
-$(PHASE3_ALL_DEPS): | $(PHASE3) phase2
+$(PHASE3_ALL_DEPS): | $(PHASE3)
 
 .PHONY : standalone1
 standalone1: phase1 $(PHASE1)/pyret.js
@@ -216,7 +216,7 @@ $(PHASE1)/$(COMPILER)/%.arr.js : src/$(COMPILER)/%.arr $(PYRET_COMP)
 $(PHASE2)/$(COMPILER)/%.arr.js : src/$(COMPILER)/%.arr $(PHASE1_ALL_DEPS)
 	$(NODE) $(PHASE1)/main-wrapper.js --compile-module-js $< > $@
 
-$(PHASE3)/$(COMPILER)/%.arr.js : src/$(COMPILER)/%.arr $(PHASE2_ALL_DEPS)
+$(PHASE3)/$(COMPILER)/%.arr.js : src/$(COMPILER)/%.arr
 	$(NODE) $(PHASE2)/main-wrapper.js --compile-module-js $< > $@
 
 $(PHASE1)/trove/%.js: src/$(BASE)/%.arr $(PYRET_COMP)
@@ -225,7 +225,7 @@ $(PHASE1)/trove/%.js: src/$(BASE)/%.arr $(PYRET_COMP)
 $(PHASE2)/trove/%.js: src/$(BASE)/%.arr $(PHASE1_ALL_DEPS)
 	$(NODE) $(PHASE1)/main-wrapper.js --compile-module-js $< -library > $@
 
-$(PHASE3)/trove/%.js: src/$(BASE)/%.arr $(PHASE2_ALL_DEPS)
+$(PHASE3)/trove/%.js: src/$(BASE)/%.arr
 	$(NODE) $(PHASE2)/main-wrapper.js --compile-module-js $< -library > $@
 
 $(PHASE1)/trove/%.js: src/$(TROVE)/%.arr $(PYRET_COMP)
@@ -234,7 +234,7 @@ $(PHASE1)/trove/%.js: src/$(TROVE)/%.arr $(PYRET_COMP)
 $(PHASE2)/trove/%.js: src/$(TROVE)/%.arr $(PHASE1_ALL_DEPS)
 	$(NODE) $(PHASE1)/main-wrapper.js --compile-module-js $< > $@
 
-$(PHASE3)/trove/%.js: src/$(TROVE)/%.arr $(PHASE2_ALL_DEPS)
+$(PHASE3)/trove/%.js: src/$(TROVE)/%.arr
 	$(NODE) $(PHASE2)/main-wrapper.js --compile-module-js $< > $@
 
 .PHONY : install

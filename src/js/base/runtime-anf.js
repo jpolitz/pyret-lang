@@ -415,7 +415,7 @@ function getColonField(val, field) {
   return getColonFieldLoc(val, field, ["runtime"]);
 }
 function getColonFieldLoc(val, field, loc) {
-  if(val === undefined) { ffi.throwInternalError("Field lookup on undefined ", [field]); }
+  if(val === undefined) { ffi.throwInternalError("Field lookup on undefined ", ffi.makeList([field])); }
   if(!isObject(val)) { ffi.throwLookupNonObject(makeSrcloc(loc), val, field); }
   var fieldVal = val.dict[field];
   if(fieldVal === undefined) {
@@ -1070,7 +1070,6 @@ function isMethod(obj) { return obj instanceof PMethod; }
     ************************/
     function checkType(val, test, typeName) {
       if(!test(val)) {
-        debugger;
         ffi.throwTypeMismatch(val, typeName);
       }
       return true;
@@ -2337,7 +2336,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
 
     function returnOrRaise(result, val, after) {
       if(ffi.isOk(result)) { return after(val); }
-      if(ffi.isFail(result)) { raiseJSJS(result); }
+      if(ffi.isFail(result)) { debugger; raiseJSJS(result); }
       throw "Internal error: got invalid result from annotation check";
     }
 
@@ -2751,6 +2750,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
     }
     function makeCont() { return new Cont([]); }
     function isCont(v) { return v instanceof Cont; }
+    function isContinuation(v) { return typeof v === "object" && v instanceof Cont; }
     Cont.prototype._toString = function() {
       var stack = this.stack;
       var stackStr = stack && stack.length > 0 ?
@@ -2794,20 +2794,39 @@ function isMethod(obj) { return obj instanceof PMethod; }
       try {
         if (--thisRuntime.GAS <= 0) {
           thisRuntime.EXN_STACKHEIGHT = 0;
-          throw thisRuntime.makeCont();
+          debugger;
+          return thisRuntime.makeCont();
         }
         while(true) {
           switch($step) {
           case 0:
             $step = 1;
             $ans = fun();
+            if (isContinuation($ans)) {
+              $step = 2;
+            }
             break;
           case 1:
             var $fun_ans = $ans;
             $step = 2;
             $ans = after($fun_ans);
+            if (isContinuation($ans)) {
+              $step = 2;
+            }
             break;
-          case 2: return $ans;
+          case 2:
+            if(isContinuation($ans)) {
+              $ans.stack[thisRuntime.EXN_STACKHEIGHT++] =
+                thisRuntime.makeActivationRecord(
+                  "safeCall for " + stackFrame,
+                  safeCall,
+                  $step,
+                  [ fun, after, stackFrame ],
+                  [ $fun_ans ]
+                );
+              return $ans;
+            }
+            return $ans;
           }
         }
       } catch($e) {
@@ -2993,6 +3012,41 @@ function isMethod(obj) { return obj instanceof PMethod; }
               console.log(theOneTrueStack);
               throw false;
             }
+
+              debugger;
+            if(next.fun instanceof Function && thisRuntime.isContinuation(val)) {
+              // console.log("BOUNCING");
+              BOUNCES++;
+              thisRuntime.GAS = initialGas;
+              for(var i = val.stack.length - 1; i >= 0; i--) {
+  //              console.error(e.stack[i].vars.length + " width;" + e.stack[i].vars + "; from " + e.stack[i].from + "; frame " + theOneTrueStackHeight);
+                theOneTrueStack[theOneTrueStackHeight++] = val.stack[i];
+              }
+              // console.log("The new stack height is ", theOneTrueStackHeight);
+              // console.log("theOneTrueStack = ", theOneTrueStack.slice(0, theOneTrueStackHeight).map(function(f) {
+              //   if (f && f.from) { return f.from.toString(); }
+              //   else { return f; }
+              // }));
+
+              if(isPause(val)) {
+                thisThread.pause();
+                val.pause.setHandlers(thisThread.handlers);
+                if(val.resumer) { val.resumer(val.pause); }
+                return;
+              }
+              else if(thisRuntime.isCont(val)) {
+                if(sync) {
+                  loop = true;
+                  // DON'T return; we synchronously loop back to the outer while loop
+                  continue;
+                }
+                else {
+                  TOS++;
+                  util.suspend(iter);
+                  return;
+                }
+              }
+            }
             // console.log("Frame returned, val = " + JSON.stringify(val, null, "  "));
           }
         } catch(e) {
@@ -3133,7 +3187,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
       RUN_ACTIVE = false;
       thisRuntime.EXN_STACKHEIGHT = 0;
       var pause = new PausePackage();
-      throw makePause(pause, resumer);
+      return makePause(pause, resumer);
     }
 
     function PausePackage() {
@@ -4378,6 +4432,7 @@ function isMethod(obj) { return obj instanceof PMethod; }
 
         'makeCont'    : makeCont,
         'isCont'      : isCont,
+        'isContinuation'      : isContinuation,
         'makePause'   : makePause,
         'isPause'     : isPause,
 

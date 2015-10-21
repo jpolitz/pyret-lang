@@ -338,7 +338,7 @@ fun compile-fun-body(l :: Loc, step :: A.Name, fun-name :: A.Name, compiler, arg
   ret-label = make-label()
   ans = fresh-id(compiler-name("ans"))
   apploc = fresh-id(compiler-name("al"))
-  local-compiler = compiler.{make-label: make-label, cur-target: ret-label, cur-step: step, cur-ans: ans, cur-apploc: apploc}
+  local-compiler = compiler.{make-label: make-label, cur-ret: ret-label, cur-target: ret-label, cur-step: step, cur-ans: ans, cur-apploc: apploc}
   visited-body = body.visit(local-compiler)
   # To avoid penalty for assigning to formal parameters and also using the arguments object,
   # we create a shadow set of formal arguments, and immediately assign them to the "real" ones
@@ -372,6 +372,31 @@ fun compile-fun-body(l :: Loc, step :: A.Name, fun-name :: A.Name, compiler, arg
     acc.remove(d)
   end
   vars = all-needed-vars.keys-list().map(all-needed-vars.get-value(_))
+  act-record = rt-method("makeActivationRecord", [clist:
+      j-id(apploc),
+      j-id(fun-name),
+      j-id(step),
+      j-list(false, if no-real-args: cl-empty else: CL.map_list(lam(a): j-id(js-id-of(a.id)) end, args) end),
+      j-list(false, CL.map_list(lam(v): j-id(v) end, vars))
+    ])  
+  e = fresh-id(compiler-name("e"))
+  first-arg = formal-args.first.id
+  entryExit = [clist:
+    j-str(tostring(l)),
+    j-num(vars.length())
+  ]
+
+  fun stack-attach-guard(v):
+    if false:
+    #if compiler.options.proper-tail-calls:
+      j-binop(rt-method("isCont", [clist: j-id(v)]),
+        j-and,
+        j-parens(j-binop(j-id(step), j-neq, ret-label)))
+    else:
+      rt-method("isCont", [clist: j-id(v)])
+    end
+
+
   switch-cases =
     main-body-cases
   ^ cl-snoc(_, j-case(local-compiler.cur-target, j-block(
@@ -380,8 +405,40 @@ fun compile-fun-body(l :: Loc, step :: A.Name, fun-name :: A.Name, compiler, arg
         else:
           cl-empty
         end + [clist:
-          j-expr(j-unop(rt-field("GAS"), j-incr)),
-          j-return(j-id(local-compiler.cur-ans))])))
+          j-if(rt-method("isContinuation", [clist: j-id(local-compiler.cur-ans)]),
+            j-block(
+                [clist:
+                  j-if1(stack-attach-guard(local-compiler.cur-ans),
+                    j-block([clist: 
+                        j-expr(j-bracket-assign(j-dot(j-id(local-compiler.cur-ans), "stack"),
+                            j-unop(rt-field("EXN_STACKHEIGHT"), J.j-postincr), act-record))
+                    ]))] +
+                #|
+                if should-report-error-frame:
+                  [clist:
+                    j-if1(rt-method("isPyretException", [clist: j-id(e)]),
+                      j-block(
+                        [clist: j-expr(add-stack-frame(e, j-id(apploc)))] +
+                        if show-stack-trace:
+                          [clist: j-expr(rt-method("traceErrExit", entryExit))]
+                        else:
+                          cl-empty
+                        end
+                        ))]
+                else if show-stack-trace:
+                  [clist:
+                    j-if1(rt-method("isPyretException", [clist: j-id(e)]),
+                      j-block([clist: 
+                          j-expr(add-stack-frame(e, j-id(apploc)))
+                      ]))]
+                else:
+                  cl-empty
+                end +
+                |#
+                [clist: j-return(j-id(local-compiler.cur-ans))]),
+            j-block([clist:
+              j-expr(j-unop(rt-field("GAS"), j-incr)),
+              j-return(j-id(local-compiler.cur-ans))]))])))
   ^ cl-snoc(_, j-default(j-block([clist:
           j-throw(j-binop(j-binop(j-str("No case numbered "), J.j-plus, j-id(step)), J.j-plus,
               j-str(" in " + fun-name.tosourcestring())))])))
@@ -397,19 +454,6 @@ fun compile-fun-body(l :: Loc, step :: A.Name, fun-name :: A.Name, compiler, arg
   #   end
   # end        
   # check-no-dups(sets.empty-tree-set, switch-cases.to-list())
-  act-record = rt-method("makeActivationRecord", [clist:
-      j-id(apploc),
-      j-id(fun-name),
-      j-id(step),
-      j-list(false, if no-real-args: cl-empty else: CL.map_list(lam(a): j-id(js-id-of(a.id)) end, args) end),
-      j-list(false, CL.map_list(lam(v): j-id(v) end, vars))
-    ])  
-  e = fresh-id(compiler-name("e"))
-  first-arg = formal-args.first.id
-  entryExit = [clist:
-    j-str(tostring(l)),
-    j-num(vars.length())
-  ]
   preamble = block:
     restorer =
       j-block(
@@ -449,15 +493,6 @@ fun compile-fun-body(l :: Loc, step :: A.Name, fun-name :: A.Name, compiler, arg
         end
     end
   end
-  stack-attach-guard =
-    if compiler.options.proper-tail-calls:
-      j-binop(rt-method("isCont", [clist: j-id(e)]),
-        j-and,
-        j-parens(j-binop(j-id(step), j-neq, ret-label)))
-    else:
-      rt-method("isCont", [clist: j-id(e)])
-    end
-
     
   j-block([clist:
       j-var(step, j-num(0)),
@@ -470,7 +505,7 @@ fun compile-fun-body(l :: Loc, step :: A.Name, fun-name :: A.Name, compiler, arg
               j-block([clist: j-expr(j-dot-assign(RUNTIME, "EXN_STACKHEIGHT", j-num(0))),
                   # j-expr(j-app(j-id("console.log"), [list: j-str("Out of gas in " + fun-name)])),
                   # j-expr(j-app(j-id("console.log"), [list: j-str("GAS is "), rt-field("GAS")])),
-                  j-throw(rt-method("makeCont", cl-empty))])),
+                  j-return(rt-method("makeCont", cl-empty))])),
             j-while(j-true,
               j-block([clist:
                   # j-expr(j-app(j-id("console.log"), [list: j-str("In " + fun-name + ", step "), j-id(step), j-str(", GAS = "), rt-field("GAS"), j-str(", ans = "), j-id(local-compiler.cur-ans)])),
@@ -478,7 +513,7 @@ fun compile-fun-body(l :: Loc, step :: A.Name, fun-name :: A.Name, compiler, arg
         e,
         j-block(
           [clist:
-            j-if1(stack-attach-guard,
+            j-if1(stack-attach-guard(e),
               j-block([clist: 
                   j-expr(j-bracket-assign(j-dot(j-id(e), "stack"),
                       j-unop(rt-field("EXN_STACKHEIGHT"), J.j-postincr), act-record))
@@ -614,9 +649,12 @@ fun compile-split-method-app(l, compiler, opt-dest, obj, methname, args, opt-bod
               j-block([clist:
                   check-fun(compiler.get-loc(l), colon-field-id),
                   j-expr(j-assign(ans, app(compiler.get-loc(l), colon-field-id, compiled-args)))
-                ]))
+                ])),
+            # If the answer is a cont, jump to the end of the current function
+            # rather than continuing normally
+            j-if1(rt-method("isContinuation", [clist: j-id(ans)]),
+              j-block([clist: j-expr(j-assign(step, compiler.cur-ret))])),
           # end
-          ,
           j-break]),
       new-cases)
   else:
@@ -644,9 +682,12 @@ fun compile-split-method-app(l, compiler, opt-dest, obj, methname, args, opt-bod
               j-block([clist:
                   check-fun(compiler.get-loc(l), colon-field-id),
                   j-expr(j-assign(ans, app(compiler.get-loc(l), colon-field-id, compiled-args)))
-                ]))
-          # end
-          ,
+                ])),
+            # If the answer is a cont, jump to the end of the current function
+            # rather than continuing normally
+            j-if1(rt-method("isContinuation", [clist: j-id(ans)]),
+              j-block([clist: j-expr(j-assign(step, compiler.cur-ret))])),
+              # end
           j-break]),
       new-cases)
   end
@@ -666,6 +707,10 @@ fun compile-split-app(l, compiler, opt-dest, f, args, opt-body):
         j-expr(j-assign(compiler.cur-apploc, compiler.get-loc(l))),
         check-fun(j-id(compiler.cur-apploc), compiled-f),
         j-expr(j-assign(ans, app(compiler.get-loc(l), compiled-f, compiled-args))),
+        # If the answer is a cont, jump to the end of the current function
+        # rather than continuing normally
+        j-if1(rt-method("isContinuation", [clist: j-id(ans)]),
+          j-block([clist: j-expr(j-assign(step, compiler.cur-ret))])),
         j-break]),
     new-cases)
 end
@@ -1389,9 +1434,7 @@ fun compile-program(self, l, imports-in, prog, freevars, env):
     end
     j-var(js-id-of(n), j-method(NAMESPACE, "get", [clist: j-str(bind-name)]))
   end
-  module-binds = for CL.map_list(n from module-and-global-binds.is-true):
-    bind-name = cases(A.Name) n:
-      | s-atom(_, _) =>
+  module-binds = for CL.map_list(n from module-and-global-binds.is-true): bind-name = cases(A.Name) n: | s-atom(_, _) =>
         if import-keys.vs.has-key(n.key()):
           n.toname()
         else if import-keys.ts.has-key(n.key()):

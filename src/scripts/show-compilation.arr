@@ -52,7 +52,7 @@ cases (C.ParsedArguments) parsed-options:
           {
             check-mode: check-mode,
             collect-all: true,
-            ignore-unbound: true,
+            ignore-unbound: false,
             type-check: type-check,
             proper-tail-calls: true
           }).tolist()

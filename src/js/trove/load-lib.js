@@ -121,10 +121,10 @@ define(["js/secure-loader", "js/runtime-util"], function(loader, util) {
       function renderCheckResults(mr) {
         var res = getModuleResultResult(mr);
         var execRt = mr.val.runtime;
-        execRt.loadBuiltinModules([util.modBuiltin("checker")], "load-lib-render", function(checker) {
+        return execRt.loadBuiltinModules([util.modBuiltin("checker")], "load-lib-render", function(checker) {
           var toCall = execRt.getField(execRt.getField(checker, "values"), "render-check-results");
           var checks = getModuleResultChecks(mr);
-          runtime.pauseStack(function(restarter) {
+          return runtime.pauseStack(function(restarter) {
               execRt.runThunk(function() { return toCall.app(checks); },
                 function(printedCheckResult) {
                   if(execRt.isSuccessResult(printedCheckResult)) {
@@ -142,7 +142,7 @@ define(["js/secure-loader", "js/runtime-util"], function(loader, util) {
       function renderErrorMessage(mr) {
         var res = getModuleResultResult(mr);
         var execRt = mr.val.runtime;
-        runtime.pauseStack(function(restarter) {
+        return runtime.pauseStack(function(restarter) {
           return execRt.loadBuiltinModules([
             mb("render-error-display")],
             "load-lib",
@@ -211,7 +211,7 @@ define(["js/secure-loader", "js/runtime-util"], function(loader, util) {
                   return runtime.getField(compileResult, "internal-mod");
                 }
               }, function(toExec) {
-                runtime.pauseStack(function(restart) {
+                return runtime.pauseStack(function(restart) {
                   if (typeof toExec === "string") {
                     var loaded = loader.loadSingle(loadRuntime, toExec, dependencies);
                   }
@@ -240,7 +240,7 @@ define(["js/secure-loader", "js/runtime-util"], function(loader, util) {
               var checker = loadRuntime.getField(checkerLib, "values");
               var currentChecker = loadRuntime.getField(checker, "make-check-context").app(loadRuntime.makeString(modname), loadRuntime.makeBoolean(checkAll));
               loadRuntime.setParam("current-checker", currentChecker);
-              runtime.pauseStack(function(restarter) {
+              return runtime.pauseStack(function(restarter) {
                 loadRuntime.run(modval.val.moduleFun, modval.val.namespace, {}, function(result) {
                   var modResult = makeModuleResult(loadRuntime, result, compileEnv);
                   restarter.resume(modResult);
