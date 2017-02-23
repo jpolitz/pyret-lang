@@ -138,14 +138,14 @@ EXTRA_FLAGS=$(EF)
 else
 EXTRA_FLAGS = -no-check-mode
 endif
-%.jarr: $(PHASEA)/pyret.jarr %.arr
-	$(NODE) $(PHASEA)/pyret.jarr --outfile $*.jarr \
+%.jarr: $(PHASEB)/pyret.jarr %.arr
+	$(NODE) $(PHASEB)/pyret.jarr --outfile $*.jarr \
                       --build-runnable $*.arr \
                       --builtin-js-dir src/js/trove/ \
                       --builtin-arr-dir src/arr/trove/ \
                       --compiled-dir compiled/ \
                       $(EXTRA_FLAGS) \
-                      --require-config src/scripts/standalone-configA.json
+                      --require-config src/scripts/standalone-configB.json
 
 $(PHASEA_ALL_DEPS): | $(PHASEA)
 

@@ -154,6 +154,8 @@ define(["jglr/jglr"], function(E) {
   const backslash = new RegExp("^\\\\", STICKY_REGEXP);
 
   const oppcaret = new RegExp(op("\\^"), STICKY_REGEXP);
+  const opconcat = new RegExp(op("\\$"), STICKY_REGEXP);
+  const opplusplus = new RegExp(op("\\+\\+"), STICKY_REGEXP);
   const opplus = new RegExp(op("\\+"), STICKY_REGEXP);
   const opminus = new RegExp(op("-"), STICKY_REGEXP);
   const optimes = new RegExp(op("\\*"), STICKY_REGEXP);
@@ -168,7 +170,7 @@ define(["jglr/jglr"], function(E) {
   const opgt = new RegExp(op(">"), STICKY_REGEXP);
   
 
-  const opsNoSpace = new RegExp("^(?:\\^|\\+|-|\\*|/|<=|>=|<=>|>=|==|=~|<>|<|>|<-)", STICKY_REGEXP);
+  const opsNoSpace = new RegExp("^(?:\\^|\\$|\\+|\\+\\+|-|\\*|/|<=|>=|<=>|>=|==|=~|<>|<|>|<-)", STICKY_REGEXP);
 
   // English ops don't require whitespace. That way it is possible to catch them in ID position
   const opand = new RegExp(kw("and"), STICKY_REGEXP);
@@ -302,6 +304,8 @@ define(["jglr/jglr"], function(E) {
     {name: "STRING", val: squot_str},
 
     {name: "CARET", val: oppcaret, parenIsForExp: true},
+    {name: "CASH", val: opconcat, parenIsForExp: true},
+    {name: "PLUSPLUS", val: opplusplus, parenIsForExp: true},
     {name: "PLUS", val: opplus, parenIsForExp: true},
     {name: "DASH", val: opminus, parenIsForExp: true},
     {name: "STAR", val: optimes, parenIsForExp: true},

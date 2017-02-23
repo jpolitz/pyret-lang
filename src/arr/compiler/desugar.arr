@@ -146,14 +146,15 @@ fun mk-id(loc, base): mk-id-ann(loc, base, A.a-blank) end
 fun mk-id-var(loc, base): mk-id-var-ann(loc, base, A.a-blank) end
 
 fun get-arith-op(str):
-  if str == "op+": some("_plus")
-  else if str == "op-": some("_minus")
-  else if str == "op*": some("_times")
-  else if str == "op/": some("_divide")
-  else if str == "op<": some("_lessthan")
-  else if str == "op>": some("_greaterthan")
-  else if str == "op>=": some("_greaterequal")
-  else if str == "op<=": some("_lessequal")
+  if str == "op+": some("plus")
+  else if str == "op$": some("concat")
+  else if str == "op-": some("minus")
+  else if str == "op*": some("times")
+  else if str == "op/": some("divide")
+  else if str == "op<": some("lessthan")
+  else if str == "op>": some("greaterthan")
+  else if str == "op>=": some("greaterequal")
+  else if str == "op<=": some("lessequal")
   else: none
   end
 end
@@ -465,7 +466,7 @@ fun desugar-expr(expr :: A.Expr):
         | some(field) =>
           ds-curry-binop(l, desugar-expr(left), desugar-expr(right),
             lam(e1, e2):
-              A.s-app(l, gid(l, field), [list: e1, e2])
+              A.s-prim-app(l, field, [list: e1, e2])
             end)
         | none =>
           fun thunk(e):
@@ -487,15 +488,16 @@ fun desugar-expr(expr :: A.Expr):
           collect-ors = collect-op("opor", _)
           collect-ands = collect-op("opand", _)
           collect-carets = collect-op("op^", _)
-          fun eq-op(fun-name):
+          fun fun-op(fun-name):
             ds-curry-binop(l, desugar-expr(left), desugar-expr(right),
               lam(e1, e2):
                 A.s-app(l, gid(l, fun-name), [list: e1, e2])
               end)
           end
-          if op == "op==": eq-op("equal-always")
-          else if op == "op=~": eq-op("equal-now")
-          else if op == "op<=>": eq-op("identical")
+          if op == "op++": fun-op("_append")
+          else if op == "op==": fun-op("equal-always")
+          else if op == "op=~": fun-op("equal-now")
+          else if op == "op<=>": fun-op("identical")
           else if op == "op<>":
             ds-curry-binop(l, desugar-expr(left), desugar-expr(right),
               lam(e1, e2):

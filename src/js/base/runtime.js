@@ -3539,7 +3539,7 @@ function (Namespace, jsnums, codePoint, seedrandom, util) {
 
 
     var plus = function(l, r) {
-      if (arguments.length !== 2) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["_plus"], 2, $a); }
+//      if (arguments.length !== 2) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["_plus"], 2, $a); }
       if (thisRuntime.isNumber(l) && thisRuntime.isNumber(r)) {
         return thisRuntime.makeNumberBig(jsnums.add(l, r, NumberErrbacks));
       } else if (thisRuntime.isString(l) && thisRuntime.isString(r)) {
@@ -3554,7 +3554,7 @@ function (Namespace, jsnums, codePoint, seedrandom, util) {
     };
 
     var minus = function(l, r) {
-      if (arguments.length !== 2) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["_minus"], 2, $a); }
+//      if (arguments.length !== 2) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["_minus"], 2, $a); }
       if (thisRuntime.isNumber(l) && thisRuntime.isNumber(r)) {
         return thisRuntime.makeNumberBig(jsnums.subtract(l, r, NumberErrbacks));
       } else if (thisRuntime.isObject(l) && hasProperty(l.dict, "_minus")) {
@@ -3567,7 +3567,7 @@ function (Namespace, jsnums, codePoint, seedrandom, util) {
     };
 
     var times = function(l, r) {
-      if (arguments.length !== 2) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["_times"], 2, $a); }
+//      if (arguments.length !== 2) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["_times"], 2, $a); }
       if (thisRuntime.isNumber(l) && thisRuntime.isNumber(r)) {
         return thisRuntime.makeNumberBig(jsnums.multiply(l, r, NumberErrbacks));
       } else if (thisRuntime.isObject(l) && hasProperty(l.dict, "_times")) {
@@ -3580,7 +3580,7 @@ function (Namespace, jsnums, codePoint, seedrandom, util) {
     };
 
     var divide = function(l, r) {
-      if (arguments.length !== 2) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["_divide"], 2, $a); }
+//      if (arguments.length !== 2) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["_divide"], 2, $a); }
       if (thisRuntime.isNumber(l) && thisRuntime.isNumber(r)) {
         return thisRuntime.makeNumberBig(jsnums.divide(l, r, NumberErrbacks));
       } else if (thisRuntime.isObject(l) && hasProperty(l.dict, "_divide")) {
@@ -5108,6 +5108,8 @@ function (Namespace, jsnums, codePoint, seedrandom, util) {
       'gensym': gensym,
       'random': makeFunction(random, "random"),
 
+      '_append': makeFunction(plus, "_append"),
+      '_concat': makeFunction(plus, "_concat"),
       '_plus': makeFunction(plus, "_plus"),
       '_minus': makeFunction(minus, "_minus"),
       '_times': makeFunction(times, "_times"),
@@ -5379,6 +5381,7 @@ function (Namespace, jsnums, codePoint, seedrandom, util) {
       'addRefAnns' : addRefAnns,
       'freezeRef' : freezeRef,
 
+      'concat': plus,
       'plus': plus,
       'minus': minus,
       'times': times,
