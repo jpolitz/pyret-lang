@@ -422,7 +422,7 @@ fun compile-module(locator :: Locator, provide-map :: SD.StringDict<CS.Provides>
                           .visit(AU.set-tail-visitor)
               add-phase("Cleaned AST", cleaned)
               {final-provides; cr} = if is-empty(any-errors):
-                JSP.trace-make-compiled-pyret(add-phase, cleaned, env, named-result.bindings, provides, options)
+                JSP.trace-make-compiled-pyret(add-phase, cleaned, env, named-result, provides, options)
               else:
                 if options.collect-all and options.ignore-unbound:
                   JSP.trace-make-compiled-pyret(add-phase, cleaned, env, options)

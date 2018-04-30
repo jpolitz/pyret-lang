@@ -2,7 +2,7 @@
   requires: [
   ],
   nativeRequires: [
-    'stopify'
+//    'stopify'
   ],
   provides: {},
   theModule: function (RUNTIME, NAMESPACE, uri, Stopify) {

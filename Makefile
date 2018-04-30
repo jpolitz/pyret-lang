@@ -90,8 +90,8 @@ endif
 phaseA: $(PHASEA)/pyret.jarr
 
 # Build stopified vhull runtime
-$(STOPIFIED_RUNTIME): ./src/js/base/stopified-vhull-runtime.original.js ./build-vhull-runtime.js
-	node ./build-vhull-runtime.js
+#$(STOPIFIED_RUNTIME): ./src/js/base/stopified-vhull-runtime.original.js ./build-vhull-runtime.js
+#	node ./build-vhull-runtime.js
 
 # Force rebuild stopify (use when stopify compiler is update).
 # Run as `make stopify-build -B`
@@ -99,9 +99,9 @@ $(STOPIFIED_RUNTIME): ./src/js/base/stopified-vhull-runtime.original.js ./build-
 stopify-build: $(STOPIFIED_RUNTIME) $(BUNDLED_DEPS)
 
 .PHONY : phaseA-deps
-phaseA-deps: $(PYRET_COMPA) $(PHASEA_ALL_DEPS) $(COMPILER_FILES) $(patsubst src/%,$(PHASEA)/%,$(PARSERS)) ./src/js/base/stopified-vhull-runtime.js
+phaseA-deps: $(PYRET_COMPA) $(PHASEA_ALL_DEPS) $(COMPILER_FILES) $(patsubst src/%,$(PHASEA)/%,$(PARSERS)) 
 
-$(PHASEA)/pyret.jarr: $(PYRET_COMPA) $(PHASEA_ALL_DEPS) $(COMPILER_FILES) $(patsubst src/%,$(PHASEA)/%,$(PARSERS)) $(BUNDLED_DEPS) ./src/js/base/stopified-vhull-runtime.js
+$(PHASEA)/pyret.jarr: $(PYRET_COMPA) $(PHASEA_ALL_DEPS) $(COMPILER_FILES) $(patsubst src/%,$(PHASEA)/%,$(PARSERS)) $(BUNDLED_DEPS)
 	$(NODE) $(PYRET_COMP0) --outfile build/phaseA/pyret.jarr \
                       --build-runnable src/arr/compiler/pyret.arr \
                       --builtin-js-dir src/js/trove/ \
@@ -120,9 +120,9 @@ $(PHASEB)/pyret.jarr: $(PHASEA)/pyret.jarr $(PHASEB_ALL_DEPS) $(patsubst src/%,$
                       --builtin-js-dir src/js/trove/ \
                       --builtin-arr-dir src/arr/trove/ \
                       --compiled-dir build/phaseB/compiled/ \
-                      --standalone-file "src/js/base/handalone.stop.js" \
+                      --standalone-file "src/js/base/handalone.js" \
                       -straight-line \
-                    --require-config src/scripts/standalone-configVB.json
+                    --require-config src/scripts/standalone-configV.json
 
 .PHONY : phaseC
 phaseC: $(PHASEC)/pyret.jarr

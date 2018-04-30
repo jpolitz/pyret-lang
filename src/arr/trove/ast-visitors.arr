@@ -890,6 +890,9 @@ default-iter-visitor = {
   method s-app(self, l :: Loc, _fun :: Expr, args :: List<Expr>):
     _fun.visit(self) and lists.all(_.visit(self), args)
   end,
+  method s-app-enriched(self, l :: Loc, _fun :: Expr, args :: List<Expr>, info):
+    _fun.visit(self) and lists.all(_.visit(self), args)
+  end,
   method s-prim-app(self, l :: Loc, _fun :: String, args :: List<Expr>):
     lists.all(_.visit(self), args)
   end,

@@ -1192,7 +1192,7 @@ data Expr:
     end
 sharing:
   method visit(self, visitor):
-    self._match(visitor, lam(): raise("No visitor field for " + self.label()) end)
+    self._match(visitor, lam(val): raise("No visitor field for " + self.label()) end)
   end
 end
 

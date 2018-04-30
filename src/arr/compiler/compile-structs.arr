@@ -2477,6 +2477,7 @@ default-compile-options = {
   inline-case-body-limit: 5,
   compiled-cache: "compiled",
   display-progress: true,
+  main-imports: CS.standard-imports,
   log: lam(s, to-clear):
     cases(Option) to-clear block:
       | none => print(s)

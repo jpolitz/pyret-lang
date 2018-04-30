@@ -134,6 +134,7 @@ fun main(args :: List<String>) -> Number block:
               r.get-value("require-config"),
               outfile,
               CS.default-compile-options.{
+                main-imports: libs,
                 this-pyret-dir: this-pyret-dir,
                 standalone-file: standalone-file,
                 check-mode : check-mode,

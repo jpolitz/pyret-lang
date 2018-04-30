@@ -813,7 +813,7 @@ fun resolve-names(p :: A.Program, initial-env :: C.CompileEnvironment):
   fun handle-id(env, l, id):
     cases(A.Name) id:
       | s-name(l2, s) =>
-        if env.has-key(s):
+        if env.has-key(s) block:
           env.get-value(s).atom
         else:
           names.s-global(s)
@@ -826,7 +826,7 @@ fun resolve-names(p :: A.Program, initial-env :: C.CompileEnvironment):
   fun handle-ann(l, type-env, id):
     cases(A.Name) id:
       | s-name(_, s) =>
-        if type-env.has-key(s):
+        if type-env.has-key(s) block:
           vb = type-env.get-value(s)
           name = vb.atom
           cases(C.TypeBinder) vb.binder block:
@@ -1227,7 +1227,7 @@ fun resolve-names(p :: A.Program, initial-env :: C.CompileEnvironment):
     # NOTE(joe): Since there's no syntactic difference between _uses_ of letrec-,
     # let-, and var-bound names, this case disambiguates based on known binding
     # information
-    method s-id(self, l, id):
+    method s-id(self, l, id) block:
       cases(A.Name) id:
         | s-name(l2, s) =>
           cases(Option) self.env.get(s) block:

@@ -3412,6 +3412,11 @@ define("pyret-base/js/runtime",
     }
 
     function pauseStack(resumer) {
+      return resumer({
+        error: function(errVal) { throw errVal; },
+        resume: function(val) { return val; }
+      });
+      /*
       return $__R.captureCC(function(k) {
         util.suspend(function() {
           var pp = new PausePackage();
@@ -3435,6 +3440,7 @@ define("pyret-base/js/runtime",
           return resumer(pp);
         })
       });
+      */
     }
 
     function PausePackage() {
@@ -4505,10 +4511,10 @@ define("pyret-base/js/runtime",
 
 			var funToReturn = makeFunction(function() {
         // TODO(rachit): This may not be correct
-        var o_depth = $__R.delimitDepth
-        $__R.delimitDepth = 2
+        //var o_depth = $__R.delimitDepth
+        //$__R.delimitDepth = 2
         var theFun = makeConstructor();
-        $__R.delimitDepth = o_depth
+        //$__R.delimitDepth = o_depth
 
         funToReturn.app = theFun;
         //CONSOLE.log("Calling constructor ", quote(reflName), arguments);
@@ -4767,7 +4773,13 @@ define("pyret-base/js/runtime",
 
       'run': run,
       'runThunk': function(thunk, cont) {
-        $__R.delimit(() => runThunk(thunk, cont));
+        try {
+          return cont(boundRuntime.makeSuccessResult(thunk()));
+        }
+        catch(e) {
+          return cont(boundRuntime.makeFailureResult(e));
+        }
+        //$__R.delimit(() => runThunk(thunk, cont));
       },
       'execThunk': execThunk,
       'safeCall': safeCall,

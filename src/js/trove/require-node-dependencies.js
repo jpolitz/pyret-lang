@@ -35,6 +35,7 @@ define("websocket", [], function () { return websocket });
 process = nodeRequire("process");
 define("process", [], function () { return process });
 
+/*
 stopify = require("stopify/dist/src/stopify/compileFunction")
 define("stopify", [], function () { return stopify })
 
@@ -54,3 +55,4 @@ $__T = require("stopify-continuations/dist/src/runtime/runtime")
 $__R = $__T.newRTS("lazyDeep")
 $S = require("stopify/dist/src/runtime/node").init($__R, defaultOpts);
 
+*/

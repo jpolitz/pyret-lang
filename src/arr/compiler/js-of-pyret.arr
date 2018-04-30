@@ -11,6 +11,7 @@ import stopify as STOP
 
 import file("anf.arr") as N
 import file("anf-loop-compiler.arr") as AL
+import file("direct-compiler.arr") as Direct
 import file("vhull-compiler.arr") as VH
 import file("ast-anf.arr") as AA
 import file("ast-util.arr") as AU
@@ -475,25 +476,22 @@ fun println(s) block:
   print(s + "\n")
 end
 
-fun trace-make-compiled-pyret(add-phase, program-ast, env, bindings, provides, options) -> { C.Provides; C.CompileResult<CompiledCodePrinter> } block:
-  var anfed = add-phase("ANFed", N.anf-program(program-ast))
-  flatness-env = add-phase("Build flatness env", make-prog-flatness-env(anfed, bindings, env))
-  flat-provides = add-phase("Get flat-provides", get-flat-provides(provides, flatness-env, anfed))
+fun trace-make-compiled-pyret(add-phase, program-ast, env, name-resolution, provides, options) -> { C.Provides; C.CompileResult<CompiledCodePrinter> } block:
   if options.straight-line block:
-    compiled = anfed.visit(VH.vhull-compiler(
-      env, add-phase, flatness-env, flat-provides, options))
-
-    # NOTE(joe): manual cleaning of root set
-    anfed := nothing
+    compiled = Direct.compile-program(program-ast, env, provides, options)
 
     final-code = if options.stopify:
       STOP.stopify(compiled.get-value("theModule"))
     else:
       compiled.get-value("theModule")
     end
+
     final-module = compiled.set("theModule", J.j-raw-code(final-code))
-    {flat-provides; add-phase("Generated JS", C.ok(ccp-dict(final-module)))}
+    {provides; add-phase("Generated JS", C.ok(ccp-dict(final-module)))}
   else:
+    var anfed = add-phase("ANFed", N.anf-program(program-ast))
+    flatness-env = add-phase("Build flatness env", make-prog-flatness-env(anfed, name-resolution.bindings, env))
+    flat-provides = add-phase("Get flat-provides", get-flat-provides(provides, flatness-env, anfed))
     compiled = anfed.visit(AL.splitting-compiler(
       env, add-phase, flatness-env, flat-provides, options))
     {flat-provides; add-phase("Generated JS", C.ok(ccp-dict(compiled)))}
