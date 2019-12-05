@@ -2,6 +2,8 @@ import React from 'react';
 import { DragDropContext, Droppable, Draggable, DropResult } from "react-beautiful-dnd";
 import { UnControlled as CodeMirror } from 'react-codemirror2';
 import * as control from './control';
+import { Editor } from 'codemirror';
+
 
 type DefChunkProps = {
   name: string,
@@ -11,32 +13,37 @@ type DefChunkProps = {
   startLine: number,
   chunk: string,
   onEdit: (key: number, chunk: string) => void,
-  isLast: boolean
+  appendNewChunk: () => void,
+  isLast: boolean,
+  focused: boolean,
+  takeFocus: () => void,
 };
 type DefChunkState = {
   editor: CodeMirror.Editor | null,
-  focused: boolean,
   updateTimer: NodeJS.Timeout
 };
 
 export class DefChunk extends React.Component<DefChunkProps, DefChunkState> {
+  lineFormatter: (l : number) => string;
+  thys: () => DefChunk;
+
   constructor(props : DefChunkProps) {
     super(props);
-    const onFirstUpdate = () => {
-      this.lint(this.props.chunk);
-    }
-    this.state = { editor: null, updateTimer: setTimeout(onFirstUpdate, 0), focused: false,  };
+    const onFirstUpdate = () => { this.lint(this.props.chunk); }
+    this.state = { editor: null, updateTimer: setTimeout(onFirstUpdate, 0) };
+    this.lineFormatter = (l : number) => { return String(l + this.props.startLine); };
+    this.thys = () => { return this; };
   }
 
-  componentWillReceiveProps() {
+  componentDidUpdate(prevProps : DefChunkProps) {
     if(this.state.editor !== null) {
-      const marks = this.state.editor.getDoc().getAllMarks();
-      marks.forEach(m => m.clear());
-    }
-  }
-
-  componentDidUpdate() {
-    if(this.state.editor !== null) {
+      if(prevProps.startLine !== this.props.startLine) {
+        console.log(this.props, prevProps, this.lineFormatter(1));
+        this.state.editor.refresh();
+      }
+      if(this.props.focused) {
+        this.state.editor.focus();
+      }
       const marks = this.state.editor.getDoc().getAllMarks();
       marks.forEach(m => m.clear());
       if (this.props.highlights.length > 0) {
@@ -63,40 +70,44 @@ export class DefChunk extends React.Component<DefChunkProps, DefChunkState> {
   lint(value : string) {
     control.lint(value, this.props.name);
   }
+  onBeforeChange() {}
+  onFocus(_ : any, __ : any) {
+    this.props.takeFocus();
+  }
+  editorDidMount = (editor : Editor, value : string) => {
+    this.setState({editor: editor});
+    const marks = editor.getDoc().getAllMarks();
+    marks.forEach(m => m.clear());
+    editor.setSize(null, "auto");
+  }
+  onChange(editor : Editor, __ : any, value : string) {
+    this.scheduleUpdate(value);
+  }
+
   render() {
-    let borderWidth = "1px";
+    let borderWidth = "2px";
     let borderColor = "#eee";
     let shadow = "";
-    if(this.state.focused) { shadow = "3px 3px 2px #aaa"; borderWidth = "2px"; borderColor = "black"; }
+    if(this.props.focused) { shadow = "3px 3px 2px #aaa"; borderWidth = "2px"; borderColor = "black"; }
     if(this.props.highlights.length > 0) { borderColor = "red"; }
     const border = borderWidth + " solid " + borderColor;
     return (<div style={{ boxShadow: shadow, border: border, "paddingTop": "0.5em", "paddingBottom": "0.5em" }}>
       <CodeMirror
-        onFocus={(_, __) => {
-          if(this.props.isLast) {
-            this.props.onEdit(this.props.index, "");
-          }
-          this.setState({ focused: true })}
-        }
-        onBlur={(_, __) => this.setState({ focused: false })}
-        editorDidMount={(editor, value) => {
-          this.setState({editor: editor});
-          const marks = editor.getDoc().getAllMarks();
-          marks.forEach(m => m.clear());
-          editor.setSize(null, "auto");
-        }}
+        onChange={this.onChange.bind(this)}
+        onFocus={this.onFocus.bind(this)}
+        onMouseDown={this.props.isLast ? () => this.props.appendNewChunk() : () => {}}
+        editorDidMount={this.editorDidMount}
         value={this.props.chunk}
+
         options={{
           mode: 'pyret',
           theme: 'default',
-          lineNumbers: true,
+          lineNumbers: false,
           lineWrapping: true,
-          lineNumberFormatter: (l) => String(l + this.props.startLine)
+          lineNumberFormatter: this.lineFormatter,
+          readOnly: this.props.isLast ? 'nocursor' : false
         }}
-        onChange={(editor, __, value) => {
-          this.scheduleUpdate(value);
-        }
-        }
+
         autoCursor={false}>
       </CodeMirror>
       <ul>
@@ -126,7 +137,8 @@ type DefChunksProps = {
 };
 type DefChunksState = {
   chunks: Chunk[],
-  chunkIndexCounter: number
+  chunkIndexCounter: number,
+  focusedChunk: number
 };
 
 const CHUNKSEP = "#.CHUNK#\n";
@@ -143,11 +155,12 @@ export class DefChunks extends React.Component<DefChunksProps, DefChunksState> {
     }
     this.state = {
       chunkIndexCounter: chunkstrs.length,
-      chunks
+      chunks: chunks,
+      focusedChunk: 0
     }
   }
   getStartLineForIndex(chunks : Chunk[], index : number) {
-    if(index === 0) { return 0; }
+    if(index === 0) { return 1; }
     else {
       return chunks[index - 1].startLine + chunks[index - 1].text.split("\n").length;
     }
@@ -156,23 +169,24 @@ export class DefChunks extends React.Component<DefChunksProps, DefChunksState> {
     return chunks.map((c) => c.text).join(CHUNKSEP);
   }
   render() {
+    const appendNewChunk = () => {
+      let newChunks : Chunk[] = [];
+      const id = String(this.state.chunkIndexCounter);
+      this.setState({chunkIndexCounter: this.state.chunkIndexCounter + 1});
+      newChunks = this.state.chunks.concat([{text:"", id, startLine: this.getStartLineForIndex(this.state.chunks, this.state.chunks.length)}]);
+      this.setState({chunks: newChunks});
+      this.setState({focusedChunk: Number(id)});
+    }
     const onEdit = (index: number, text: string) => {
-      let newChunks : Chunk[];
-      if (index === this.state.chunks.length) {
-        const id = String(this.state.chunkIndexCounter);
-        this.setState({chunkIndexCounter: this.state.chunkIndexCounter + 1});
-        newChunks = this.state.chunks.concat([{text, id, startLine: this.getStartLineForIndex(this.state.chunks, this.state.chunks.length)}])
-      }
-      else {
-        newChunks = this.state.chunks.map((p, ix) => {
-          if (ix === index) { return {text, id:p.id, startLine: p.startLine}; }
-          else { return p; }
-        });
-        newChunks = newChunks.map((p, ix) => {
-          if (ix <= index) { return p; }
-          else { return {text: p.text, id: p.id, startLine: this.getStartLineForIndex(newChunks, ix)}; }
-        });
-      }
+      let newChunks : Chunk[] = [];
+      newChunks = this.state.chunks.map((p, ix) => {
+        if (ix === index) { return {text, id:p.id, startLine: p.startLine}; }
+        else { return p; }
+      });
+      newChunks = newChunks.map((p, ix) => {
+        if (ix <= index) { return p; }
+        else { return {text: p.text, id: p.id, startLine: this.getStartLineForIndex(newChunks, ix)}; }
+      });
       this.setState({chunks: newChunks});
       this.props.onEdit(this.chunksToString(newChunks));
     }
@@ -198,7 +212,10 @@ export class DefChunks extends React.Component<DefChunksProps, DefChunksState> {
         this.props.onEdit(this.chunksToString(newChunks));
       }
     };
-    const endBlankChunk = {text: "", id: String(this.state.chunkIndexCounter), startLine: this.getStartLineForIndex(this.state.chunks, this.state.chunks.length)};
+    const lastLine = this.getStartLineForIndex(this.state.chunks, this.state.chunks.length);
+
+    const lastChunkId = String(-1) + lastLine;
+    const endBlankChunk = {text: "", id: lastChunkId, startLine: lastLine};
     return (<DragDropContext onDragEnd={onDragEnd}>
       <Droppable droppableId="droppable">
         {(provided, snapshot) => {
@@ -206,6 +223,7 @@ export class DefChunks extends React.Component<DefChunksProps, DefChunksState> {
             {...provided.droppableProps}
             ref={provided.innerRef} 
           >{this.state.chunks.concat([endBlankChunk]).map((chunk, index) => {
+            if(chunk === undefined || index === undefined) { return; }
             const linesInChunk = chunk.text.split("\n").length;
             let highlights : number[][];
             const name = this.props.name + "_chunk_" + chunk.id;
@@ -219,12 +237,28 @@ export class DefChunks extends React.Component<DefChunksProps, DefChunksState> {
             else {
               highlights = [];
             }
-            const isLast = index === this.state.chunks.length;
+            const isLast = (chunk.id.startsWith("-1"));
+            const takeFocus = () => {
+              if(isLast) { return; }
+              this.setState({focusedChunk: index});
+            }
             return <Draggable key={chunk.id} draggableId={chunk.id} index={index}>
               {(provided, snapshot) => {
                 return (<div ref={provided.innerRef}
                   {...provided.draggableProps}
-                  {...provided.dragHandleProps}><DefChunk name={name} isLast={isLast} failures={failures} highlights={highlights} startLine={chunk.startLine} key={chunk.id} index={index} chunk={chunk.text} onEdit={onEdit}></DefChunk></div>)
+                  {...provided.dragHandleProps}><DefChunk
+                      takeFocus={takeFocus}
+                      focused={this.state.focusedChunk === index}
+                      name={name}
+                      isLast={isLast}
+                      failures={failures}
+                      highlights={highlights}
+                      startLine={chunk.startLine}
+                      key={chunk.id}
+                      index={index}
+                      chunk={chunk.text}
+                      onEdit={onEdit}
+                      appendNewChunk={appendNewChunk}></DefChunk></div>)
               }
               }</Draggable>;
           })}</div>;
