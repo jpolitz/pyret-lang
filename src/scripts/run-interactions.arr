@@ -59,16 +59,13 @@ fun do-reads() block:
   fun loop() block:
     line = S.readline()
     if line == "#go" block:
-      start = time-now()
       result = next-interaction(code-so-far)
-      print("Time to run interaction: " + to-repr(time-now() - start))
-      before-render = time-now()
       cases(Either) result block:
         | right(ans) =>
           print(L.get-result-answer(ans))
           print("\n")
-#          print(L.render-check-results(ans))
-#          print("\n")
+          print(L.render-check-results(ans))
+          print("\n")
         | left(ans) =>
           errstr = for map(r from ans):
             cases(CS.CompileResult) r:
@@ -81,7 +78,6 @@ fun do-reads() block:
           end.join-str("\n")
           print(errstr)
       end
-      print("Time to render interaction: " + to-repr(time-now() - before-render))
       code-so-far := ""
       loop()
     else if line <> "#done":
