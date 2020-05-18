@@ -558,6 +558,14 @@ fun make-standalone(wl, compiled, options):
           end
       end
     end)
+  runtime-options = J.j-obj(
+    [C.clist:
+      J.j-field("checkerTimeLimit",
+        cases(Option) options.checker-time-limit:
+          | some(n) => j-num(n)
+          | none => j-false
+        end)
+    ])
   cases(List) all-compile-problems:
     | link(_, _) => left(all-compile-problems)
     | empty =>
@@ -583,7 +591,8 @@ fun make-standalone(wl, compiled, options):
           j-field("staticModules", static-modules),
           j-field("depMap", depmap),
           j-field("toLoad", to-load),
-          j-field("uris", uris)
+          j-field("uris", uris),
+          j-field("runtimeOptions", runtime-options)
         ])
 
       right({

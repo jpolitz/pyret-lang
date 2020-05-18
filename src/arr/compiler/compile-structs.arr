@@ -2966,7 +2966,8 @@ default-compile-options = {
   method before-compile(_, _): nothing end,
   html-file: none,
   deps-file: "build/bundled-node-deps.js",
-  standalone-file: "src/js/base/handalone.js"
+  standalone-file: "src/js/base/handalone.js",
+  checker-time-limit: none
 }
 
 t-pred = t-arrow([list: t-top], t-boolean)

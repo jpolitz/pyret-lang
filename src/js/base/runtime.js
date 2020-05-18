@@ -2557,6 +2557,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
     });
 
     setParam("current-checker", nullChecker);
+    setParam("checker-time-limit", false);
 
     function unwrap(v) {
       if(isNumber(v)) { return v; }
@@ -3478,6 +3479,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
       // silently.
       if(Object.keys(activeThreads).length === 0) {
         var breakFun = function() {
+          console.log("Breaking in 0 case");
           threadIsCurrentlyPaused = true;
           threadIsDead = true;
           finishFailure(new PyretFailException(thisRuntime.ffi.userBreak));
@@ -3485,6 +3487,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
       }
       else {
         var breakFun = function() {
+          console.log("Breaking in nonzero case");
           threadIsCurrentlyPaused = true;
           threadIsDead = true;
         };
@@ -3499,7 +3502,9 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
             val = restartVal;
             TOS++;
             RUN_ACTIVE = true;
-            util.suspend(iter);
+            currentThreadId = thisThread.id;
+            console.log("Performing resumption with ", thisThread);
+            util.suspend(function() { console.log("iter from resume: "); iter(); });
           },
           break: breakFun,
           error: function(errVal) {
@@ -3527,6 +3532,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
       function iter() {
         // CONSOLE.log("In run2::iter, GAS is ", thisRuntime.GAS);
         // If the thread is dead, return has already been processed
+        console.log("Starting iter ", thisThread.id, threadIsDead, threadIsCurrentlyPaused);
         if (threadIsDead) {
           return;
         }
@@ -3538,6 +3544,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
           loop = false;
           try {
             if (manualPause !== null) {
+              console.log("Found a manual pause: ", manualPause);
               var thePause = manualPause;
               manualPause = null;
               return pauseStack(function(restarter) {
@@ -3553,7 +3560,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
                 thisRuntime.RUNGAS = initialRunGas;
                 TOS++;
                 // CONSOLE.log("Setting timeout to resume iter");
-                util.suspend(iter);
+                util.suspend(function() { console.log("Iter from RUNGAS"); iter() });
                 return;
               }
               var next = theOneTrueStack[--theOneTrueStackHeight];
@@ -3564,7 +3571,6 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
               if(!isContinuation(val)) {
                 next.ans = val;
               }
-              // CONSOLE.log("GAS = ", thisRuntime.GAS);
 
 
 
@@ -3606,7 +3612,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
                   }
                   else {
                     TOS++;
-                    util.suspend(iter);
+                    util.suspend(function() { console.log("iter from Cont"); iter(); });
                     return;
                   }
                 }
@@ -3643,7 +3649,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
                 }
                 else {
                   TOS++;
-                  util.suspend(iter);
+                  util.suspend(function() { console.log("iter from cont"); iter(); });
                   return;
                 }
               }
@@ -3750,6 +3756,26 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
       return "  " + stackStr.join("\n  ");
     }
 
+    function breakAllBelow(threadId) {
+      RUN_ACTIVE = false;
+      var threadsToBreak = activeThreads;
+      var keys = Object.keys(threadsToBreak);
+      for(var i = 0; i < keys.length; i++) {
+        if(keys[i] > threadId) {
+          console.log("Breaking thread ", keys[i]);
+          // threadsToBreak[keys[i]].handlers.break();
+          delete activeThreads[keys[i]];
+        }
+        else {
+          console.log("NOT breaking thread ", keys[i]);
+        }
+      }
+    }
+
+    function threadActive(threadId) {
+      return threadId in activeThreads;
+    }
+
     function breakAll() {
       RUN_ACTIVE = false;
       var threadsToBreak = activeThreads;
@@ -3828,6 +3854,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
     function schedulePause(resumer) {
       var pause = new PausePackage();
       manualPause = pause;
+      manualPause.threadId = currentThreadId;
       resumer(pause);
     }
 
@@ -3843,7 +3870,38 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
     }
 
     function execThunk(thunk) {
-      if (arguments.length !== 1) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["run-task"], 1, $a, false); }
+      return execThunkTimeout(thunk, false);
+    }
+
+    function execCheckThunk(thunk) {
+      console.log("Exec-ing a thunk for checker");
+      console.log(thisRuntime.getParam("checker-time-limit"));
+      console.log(parameters);
+      return execThunkTimeout(thunk, thisRuntime.getParam("checker-time-limit"));
+    }
+
+    function execThunkTimeout(thunk, maybeTimeout) {
+      var finishedNormally = false;
+      var runTimer = function() {
+        var threadIdWhenSchedulingPause = currentThreadId;
+        if(maybeTimeout === false) { return; }
+        else {
+          var jsTime = jsnums.toFixnum(maybeTimeout);
+          setTimeout(function() {
+            if(!finishedNormally && thisRuntime.threadActive(threadIdWhenSchedulingPause)) {
+              //thisRuntime.schedulePause(function(restarter) {
+                console.log("After pausing");
+                if(thisRuntime.threadActive(threadIdWhenSchedulingPause)) {
+                  console.log("Breaking all below and triggering failure", threadIdWhenSchedulingPause);
+                  thisRuntime.breakAllBelow(threadIdWhenSchedulingPause);
+                  activeThreads[threadIdWhenSchedulingPause].handlers.error(thisRuntime.ffi.makeMessageException("Time limit of " + jsTime + " elapsed"));
+                }
+              //});
+            }
+          }, jsTime);
+        }
+      };
+      if (arguments.length !== 2) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["run-task"], 2, $a, false); }
       function wrapResult(res) {
         if(isSuccessResult(res)) {
           return thisRuntime.ffi.makeLeft(res.result);
@@ -3861,14 +3919,22 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
       }
       return thisRuntime.pauseStack(function(restarter) {
         thisRuntime.run(function(_, __) {
+          runTimer();
           return thunk.app();
         }, thisRuntime.namespace, {
           sync: false
         }, function(result) {
+          finishedNormally = true;
+          console.log("A run of a check or task finished", result);
           if(isFailureResult(result) &&
              isPyretException(result.exn) &&
-             thisRuntime.ffi.isUserBreak(result.exn.exn)) { restarter.break(); }
+             thisRuntime.ffi.isUserBreak(result.exn.exn)) {
+             console.log("Propagating break");
+             restarter.break();
+           }
           else {
+            console.log("Resuming with a failure result");
+            console.log(activeThreads, restarter.handlers === activeThreads[1].handlers);
             restarter.resume(wrapResult(result));
           }
         });
@@ -5519,6 +5585,8 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
       // but provided here because they show up in desugaring
       'open-table': makeFunction(function(spec) { return thisRuntime.openTable(spec); }),
       'as-loader-option': makeFunction(function(type, arg1, arg2) { return thisRuntime.asLoaderOption(type, arg1, arg2); }),
+      'run-check-task': makeFunction(execCheckThunk, "run-check-task"),
+
       'raw-make-row': makeFunction(function(arr) { // arr is a raw array of 2-tuples
         thisRuntime.checkArray(arr);
         return thisRuntime.makeRowFromArray(arr);
@@ -5649,6 +5717,7 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
       }, "is-row"),
 
       'run-task': makeFunction(execThunk, "run-task"),
+      'run-check-task': makeFunction(execCheckThunk, "run-task"),
 
       'gensym': gensym,
       'random': makeFunction(random, "random"),
@@ -5853,6 +5922,8 @@ function (Namespace, jsnums, codePoint, util, exnStackParser, loader, seedrandom
       'pauseStack'  : pauseStack,
       'schedulePause'  : schedulePause,
       'breakAll' : breakAll,
+      'breakAllBelow': breakAllBelow,
+      'threadActive': threadActive,
 
       'getField'         : getField,
       'getFieldLoc'      : getFieldLoc,

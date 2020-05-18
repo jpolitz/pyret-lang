@@ -76,7 +76,9 @@ fun main(args :: List<String>) -> Number block:
     "html-file",
       C.next-val(C.Str, C.once, "Name of the html file to generate that includes the standalone (only makes sense if deps-file is the result of browserify)"),
     "no-module-eval",
-      C.flag(C.once, "Produce modules as literal functions, not as strings to be eval'd (may break error source locations)")
+      C.flag(C.once, "Produce modules as literal functions, not as strings to be eval'd (may break error source locations)"),
+    "checker-time-limit",
+      C.next-val(C.Num, C.once, "Generated code times out on checks and tests after the provided ms.")
   ]
 
   params-parsed = C.parse-args(options, args)
@@ -108,6 +110,9 @@ fun main(args :: List<String>) -> Number block:
             none
           end
       module-eval = not(r.has-key("no-module-eval"))
+      spy: r end
+      checker-time-limit = r.get("checker-time-limit")
+      spy: ctl: r.get("checker-time-limit") end
       when r.has-key("builtin-js-dir"):
         B.set-builtin-js-dirs(r.get-value("builtin-js-dir"))
       end
@@ -148,7 +153,8 @@ fun main(args :: List<String>) -> Number block:
                 inline-case-body-limit: inline-case-body-limit,
                 deps-file: r.get("deps-file").or-else(CS.default-compile-options.deps-file),
                 html-file: html-file,
-                module-eval: module-eval
+                module-eval: module-eval,
+                checker-time-limit: checker-time-limit
               })
           success-code
         else if r.has-key("serve"):

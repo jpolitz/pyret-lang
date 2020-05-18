@@ -33,9 +33,13 @@ requirejs(["pyret-base/js/runtime", "pyret-base/js/post-load-hooks", "pyret-base
   var EXIT_ERROR_UNKNOWN = 6;
 
   runtime.setParam("command-line-arguments", process.argv.slice(1));
+  if(program.runtimeOptions) {
+    runtime.setParam("checker-time-limit", program.runtimeOptions.checkerTimeLimit);
+  }
 
   var postLoadHooks = loadHooksLib.makeDefaultPostLoadHooks(runtime, {main: main, checkAll: true});
   postLoadHooks[main] = function(answer) {
+    console.log("AFter main", answer);
     var profile = runtime.getProfile();
     if (profile.length > 0) {
       profile.forEach(function(entry) { process.stderr.write(JSON.stringify(entry) + "\n"); });
