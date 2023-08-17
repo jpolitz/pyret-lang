@@ -91,6 +91,7 @@ export interface Exports {
   dummyLoc : A.Srcloc,
   compileSrcloc: (context: any, l : A.Srcloc) => J.Expression,
   beforeSrcloc: (s1 : A.Srcloc, s2 : A.Srcloc) => boolean,
+  equalSrcloc: (s1 : A.Srcloc, s2 : A.Srcloc) => boolean,
   formatSrcloc: (loc: A.Srcloc, showFile: boolean) => string,
   visit: (<T extends PyretDataValue, E = any>(v : Visitor<T, any, E>, d : PyretDataValue, extra: E) => void)
        & (<T extends PyretDataValue>(v : Visitor<T, any, undefined>, d : PyretDataValue) => void),
@@ -522,6 +523,19 @@ export interface Exports {
           }
       }
     }
+
+    function equalSrcloc(loc1: A.Srcloc, loc2: A.Srcloc) : boolean {
+      switch(loc1.$name) {
+        case 'builtin': return loc2.$name === 'builtin' && loc1.dict['module-name'] === loc2.dict['module-name'];
+        case 'srcloc': return loc2.$name === 'srcloc' && loc1.dict.source === loc2.dict.source &&
+          loc1.dict['start-line'] === loc2.dict['start-line'] &&
+          loc1.dict['start-column'] === loc2.dict['start-column'] &&
+          loc1.dict['start-char'] === loc2.dict['start-char'] &&
+          loc1.dict['end-line'] === loc2.dict['end-line'] &&
+          loc1.dict['end-column'] === loc2.dict['end-column'] &&
+          loc1.dict['end-char'] === loc2.dict['end-char'];
+      }
+    }
     
     /**
      * `visit<T>` will traverse an entire Pyret data value, looking for
@@ -659,6 +673,7 @@ export interface Exports {
       compileSrcloc,
       beforeSrcloc,
       formatSrcloc,
+      equalSrcloc,
       visit,
       map,
       callMethod,

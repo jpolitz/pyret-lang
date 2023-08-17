@@ -3,7 +3,9 @@ import type * as A from './ts-ast';
 import type * as CS from './ts-compile-structs';
 import type * as AU from './ts-ast-util';
 import type * as TJ from './ts-codegen-helpers';
+import type * as TSH from './ts-compile-structs-helpers';
 import type { List, Option, MutableStringDict, PFunction, StringDict, PMethod, Runtime } from './ts-impl-types';
+import { Map as ImMap } from 'immutable';
 
 export type Exports = {
   dict: {
@@ -19,6 +21,7 @@ export type Exports = {
 ({
   requires: [
     { 'import-type': 'dependency', protocol: 'js-file', args: ['ts-codegen-helpers']},
+    { 'import-type': 'dependency', protocol: 'js-file', args: ['ts-compile-structs-helpers']},
     { 'import-type': 'dependency', protocol: 'file', args: ['type-structs.arr']},
     { 'import-type': 'dependency', protocol: 'file', args: ['ast.arr']},
     { 'import-type': 'dependency', protocol: 'file', args: ['compile-structs.arr']},
@@ -31,7 +34,7 @@ export type Exports = {
       "resolve-names": "tany"
     }
   },
-  theModule: function(runtime: Runtime, _, __, tj : TJ.Exports, TS : (TS.Exports), Ain : (A.Exports), CSin : (CS.Exports), AUin : (AU.Exports)) {
+  theModule: function(runtime: Runtime, _, __, tj : TJ.Exports, TS : (TS.Exports), TSH : (TSH.Exports), Ain : (A.Exports), CSin : (CS.Exports), AUin : (AU.Exports)) {
     const A = Ain.dict.values.dict;
     const AU = AUin.dict.values.dict;
     const CS = CSin.dict.values.dict;
@@ -681,9 +684,163 @@ export type Exports = {
         }
       }
     }
-    function resolveNames(program: A.Program, thismoduleURI: string, initialEnv: CS.CompileEnvironment): CS.NameResolution {
-      return undefined as any;
+
+
+
+    /*************
+     * The second of the two major entrypoints, resolve-names is responsible for
+     * replacing each bare name as written by a user with a uniquely-identified
+     * binding.
+     * Turn all s-names into s-atom or s-global
+     * Requires:
+     *  1. desugar-scope
+     * Preconditions on p:
+     *  -  Contains no s-block, s-let, s-var, s-data, s-rec
+     * Postconditions on p (in addition to preconditions):
+     *  -  Contains no s-name in names
+     * 
+     */
+    function resolveNames(p: A.Program, thismoduleURI: string, initialEnv: CS.CompileEnvironment): CS.NameResolution {
+      const nameErrors : CS.CompileError[] = [];
+
+      // Pyret has 3 namespaces: modules, values, and types. For each, we track
+      // bindings and environments
+
+      // Bindings – a global "database" of all binding positions in the program,
+      // keyed by unique IDs after resolving them
+
+      // Environments (Envs) - immutable environments used to track bindings
+      // from raw names from the program to their unique IDs; these track with
+      // scopes
+
+
+      type BindWithOrigin = CS.ModuleBind | CS.ValueBind | CS.TypeBind;
+      type Env<B> = ImMap<string, B>;
+      type Bindings<B> = Map<string, B>;
+
+      const moduleBindings : Bindings<CS.ModuleBind> = new Map();
+      const bindings : Bindings<CS.ValueBind> = new Map();
+      const typeBindings : Bindings<CS.TypeBind> = new Map();
+
+      type DataExpr = TJ.Variant<A.Expr, 's-data-expr'>
+      const datatypes : Map<string, DataExpr> = new Map();
+
+      function getOriginLoc(o : CS.BindOrigin) : A.Srcloc {
+        return o.dict['definition-bind-site'];
+      }
+      function getLocalLoc(o : CS.BindOrigin) : A.Srcloc {
+        return o.dict['local-bind-site'];
+      }
+
+      function makeAnonImportFor<B>(l : A.Srcloc, s : string, env : Env<B>, bindings: Bindings<B>, b : (n : A.Name) => B) : [ A.Name, Env<B> ] {
+        const atom = scopeNames.makeAtom(s);
+        bindings.set(tj.nameToKey(atom), b(atom));
+        return [ atom, env ];
+      }
+
+      function makeAtomFor<B extends BindWithOrigin>(name : A.Name, isShadowing : boolean, env : Env<B>, bindings : Bindings<B>,  makeBinding : (a : A.Name) => B) : [ A.Name, Env<B> ] {
+        switch(name.$name) {
+          case 's-name': {
+            const { l, s } = name.dict;
+            if(env.has(s) && !isShadowing) {
+              const oldLoc = getOriginLoc(env.get(s).dict.origin);
+              const localLoc = getLocalLoc(env.get(s).dict.origin);
+              const importLocOpt = tj.equalSrcloc(localLoc, p.dict.l) || tj.equalSrcloc(localLoc, tj.dummyLoc)
+                ? runtime.ffi.makeNone<A.Srcloc>()
+                : runtime.ffi.makeSome(localLoc);
+              nameErrors.unshift(CS['shadow-id'].app(s, l, oldLoc, importLocOpt))
+            }
+            const atom = scopeNames.makeAtom(s)
+            const binding = makeBinding(atom);
+            bindings.set(tj.nameToKey(atom), binding);
+            return [ atom, env.set(s, binding) ];
+          }
+          case 's-underscore': {
+            const atom = scopeNames.makeAtom("$underscore");
+            bindings.set(tj.nameToKey(atom), makeBinding(atom));
+            return [ atom, env ];
+          }
+          case 's-atom': {
+            const binding = makeBinding(name)
+            bindings.set(tj.nameToKey(name), binding);
+            return [ name, env ];
+          }
+          default: {
+            throw new InternalCompilerError("Unexpected atom type: " + tj.nameToKey(name));
+          }
+        }
+      }
+
+      function makeImportAtomFor<B extends BindWithOrigin>(name : A.Name, fromUri : string, env : Env<B>, bindings : Bindings<B>, makeBinding : (a : A.Name) => B) : [ A.Name, Env<B> ] {
+        switch(name.$name) {
+          case 's-name': {
+            if(!env.has(tj.nameToName(name))) {
+              return makeAtomFor(name, false, env, bindings, makeBinding);
+            }
+            else {
+              const b = env.get(tj.nameToName(name));
+              // If they are from the same URI, can import the same name multiple
+              // times. If not, then they count as shadowing one another (e.g. two
+              // values named list coming from two different libs)
+              const shadowing = b.dict.origin.dict['uri-of-definition'] == fromUri;
+              return makeAtomFor(name, shadowing, env, bindings, makeBinding);
+            }
+          }
+          default: {
+            return makeAtomFor(name, false, env, bindings, makeBinding);
+          }
+        }
+      }
+
+      function scopeEnvFromEnv(initial : CS.CompileEnvironment) : Env<CS.ValueBind> {
+        const acc = new Map<string, CS.ValueBind>();
+        tj.mapFromStringDict(initial.dict.globals.dict.values).forEach((origin : CS.BindOrigin, name : string) => {
+          const uriOfDefinition = origin.dict['uri-of-definition'];
+          const valInfo = TSH.valueByOrigin(initial, origin);
+          switch(valInfo.$name) {
+            case 'none': { throw new InternalCompilerError(`The value is a global that doesn't exist in any module: ${name} which was expected to be in ${uriOfDefinition}`); }
+            case 'some': {
+              const { value } = valInfo.dict;
+              const bindOrigin = TSH.boGlobal(runtime.ffi.makeSome(origin), uriOfDefinition, origin.dict['original-name'])
+              const gName = scopeNames.sGlobal(name);
+              const binder = value.$name === 'v-var' ? CS['vb-var'] : CS['vb-let'];
+              // TODO(joe): Good place to add _location_ to valueexport to report errs better
+              const b = CS['value-bind'].app(bindOrigin, binder, gName, A['a-blank']);
+              bindings.set(tj.nameToKey(gName), b);
+              acc.set(name, b);
+            }
+          }
+        });
+        return ImMap(acc);
+      }
+      function typeEnvFromEnv(initial : CS.CompileEnvironment) : Env<CS.TypeBind> {
+        const acc = new Map<string, CS.TypeBind>();
+        tj.mapFromStringDict(initial.dict.globals.dict.types).forEach((origin : CS.BindOrigin, name : string) => {
+          const typeInfo = TSH.typeByOriginValue(initial, origin);
+          const bindOrigin = TSH.boGlobal(runtime.ffi.makeSome(origin), origin.dict['uri-of-definition'], origin.dict['original-name'])
+          const gName = scopeNames.sGlobal(name);
+          const b = CS['type-bind'].app(bindOrigin, CS['tb-type-let'], gName, CS['tb-typ'].app(typeInfo));
+          typeBindings.set(tj.nameToKey(gName), b);
+          acc.set(name, b);
+        });
+        return ImMap(acc);
+      }
+      function moduleEnvFromEnv(initial : CS.CompileEnvironment) : Env<CS.ModuleBind> {
+        const acc = new Map<string, CS.ModuleBind>();
+        tj.mapFromStringDict(initial.dict.globals.dict.modules).forEach((origin : CS.BindOrigin, name : string) => {
+          const modInfo = TSH.providesByOriginValue(initial, origin);
+          const bindOrigin = TSH.boGlobal(runtime.ffi.makeSome(origin), origin.dict['uri-of-definition'], origin.dict['original-name'])
+          const modules = tj.mapFromStringDict(modInfo.dict.modules);
+          const gName = scopeNames.sModuleGlobal(name);
+          const b = CS['module-bind'].app(bindOrigin, gName, modules.get(name)!);
+          moduleBindings.set(tj.nameToKey(gName), b);
+          acc.set(name, b);
+        });
+        return ImMap(acc);
+      }
     }
+
+
     const exports: Exports['dict']['values']['dict'] = {
       'desugar-scope': runtime.makeFunction(desugarScope),
       'resolve-names': runtime.makeFunction(resolveNames)

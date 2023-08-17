@@ -689,7 +689,19 @@ fun path-uri(pre-path, path, compile-env, mod-env):
   maybe-uri-for-path(pre-path + path.take(path.length() - 1), compile-env, mod-env)
 end
 
-fun resolve-names(p :: A.Program, thismodule-uri :: String, initial-env :: C.CompileEnvironment):
+fun resolve-names(p :: A.Program, thismodule-uri :: String, initial-env :: C.CompileEnvironment, options :: C.CompileOptions):
+  cases(C.Pipeline) options.pipeline:
+    | pipeline-ts-anchor(args) => 
+      if args.member("resolve-scope"): # Only use TS version if we enable it in pipeline
+        TRS.resolve-names(p, thismodule-uri, initial-env)
+      else:
+        internal-resolve-names(p, thismodule-uri, intial-env)
+      end
+    | pipeline-anchor => internal-resolve-names(p, thismodule-uri, initial-env)
+  end
+end
+
+fun internal-resolve-names(p :: A.Program, thismodule-uri :: String, initial-env :: C.CompileEnvironment):
   doc: ```
        Turn all s-names into s-atom or s-global
        Requires:

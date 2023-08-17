@@ -2,6 +2,7 @@ import type * as TS from './ts-type-structs';
 import type * as CS from './ts-compile-structs';
 import type * as TJ from './ts-codegen-helpers';
 import type * as TCS from './ts-type-check-structs';
+import type * as SL from './ts-srcloc';
 import type * as A from './ts-ast';
 import type { Option, PMethod } from './ts-impl-types';
 
@@ -44,6 +45,9 @@ export interface Exports {
   originByModuleName: (ce: CS.CompileEnvironment, name: string) => Option<CS.BindOrigin>,
   callMethod: <Name extends string, O extends {dict: {[n in Name]?: PMethod<any, (...args: any[]) => any>}}>(obj : O, name: Name, ...args: DropFirst<Parameters<O["dict"][Name]["full_meth"]>>) => ReturnType<O["dict"][Name]["full_meth"]>,
   unwrap: <T>(opt: Option<T>, orElseMsg: string) => T,
+  boLocal: (loc : SL.Srcloc, originalName : A.Name) => CS.BindOrigin,
+  boModule: (localLoc : SL.Srcloc, defLoc : SL.Srcloc, defUri : string, originalName : A.Name) => CS.BindOrigin,
+  boGlobal: (bo : Option<CS.BindOrigin>, uri : string, originalName: A.Name) => CS.BindOrigin,
 }
 
 export type NonAliasValueExport = TJ.Variant<CS.ValueExport, Exclude<CS.ValueExport["$name"], "v-alias">>
@@ -60,10 +64,15 @@ type DropFirst<T extends unknown[]> = ((...p: T) => void) extends ((p1: infer P1
     { 'import-type': 'dependency', protocol: 'file', args: ['ast.arr']},
     { 'import-type': 'dependency', protocol: 'file', args: ['compile-structs.arr']},
     { 'import-type': 'dependency', protocol: 'file', args: ['type-check-structs.arr']},
+    { 'import-type': 'builtin', name: 'srcloc'},
   ],
   provides: {},
   nativeRequires: [],
-  theModule: function(runtime, _, __, tj : TJ.Exports, TS : (TS.Exports), A : (A.Exports), CS : (CS.Exports), TCS : (TCS.Exports)) {
+  theModule: function(runtime, _, __, tj : TJ.Exports, TS : (TS.Exports), Ain : (A.Exports), CSin : (CS.Exports), TCSin : (TCS.Exports), SLin : (SL.Exports)) {
+    const A = Ain.dict.values.dict;
+    const CS = CSin.dict.values.dict;
+    const TCS = TCSin.dict.values.dict;
+    const SL = SLin.dict.values.dict;
 
     const { InternalCompilerError, ExhaustiveSwitchError, nameToName, mapFromMutableStringDict } = tj;
 
@@ -364,6 +373,28 @@ type DropFirst<T extends unknown[]> = ((...p: T) => void) extends ((p1: infer P1
       return callMethod(ce.dict.globals.dict.modules, 'get', name);
     }
 
+    function boLocal(loc : SL.Srcloc, originalName : A.Name) : CS.BindOrigin {
+      switch(loc.$name) {
+        case 'builtin': { return CS['bind-origin'].app(loc, loc, true, loc.dict['module-name'], originalName); }
+        case 'srcloc': { return CS['bind-origin'].app(loc, loc, true, loc.dict.source, originalName); }
+      }
+    }
+
+    function boModule(localLoc : SL.Srcloc, defLoc : SL.Srcloc, defUri : string, originalName : A.Name) : CS.BindOrigin {
+      return CS['bind-origin'].app(localLoc, defLoc, false, defUri, originalName);
+    }
+
+    function boGlobal(bo : Option<CS.BindOrigin>, uri : string, originalName: A.Name): CS.BindOrigin {
+      switch(bo.$name) {
+        case 'none': {
+          return CS['bind-origin'].app(A['dummy-loc'], SL.builtin.app(uri), false, uri, originalName);
+        }
+        case 'some': {
+          const origin = bo.dict.value;
+          return CS['bind-origin'].app(origin.dict['local-bind-site'], origin.dict['definition-bind-site'], false, uri, originalName);
+        }
+      }
+    }
 
 
     const exports : Exports = {
@@ -405,6 +436,9 @@ type DropFirst<T extends unknown[]> = ((...p: T) => void) extends ((p1: infer P1
       originByModuleName,
       callMethod,
       unwrap,
+      boLocal,
+      boModule,
+      boGlobal,
     };
     return runtime.makeJSModuleReturn(exports);
   }
