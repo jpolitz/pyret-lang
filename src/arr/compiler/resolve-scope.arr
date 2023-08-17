@@ -1392,22 +1392,7 @@ fun internal-resolve-names(p :: A.Program, thismodule-uri :: String, initial-env
                 providing-module = initial-env.provides-by-uri-value(uri)
                 maybe-datatype = initial-env.resolve-datatype-by-uri(uri, datatype-name)
                 { datatype-uri; datatype } = cases(Option) maybe-datatype:
-                  | none =>
-                    cases(Option) providing-module.aliases.get(datatype-name):
-                      | none => raise("Name " + datatype-name + " not defined as a type or datatype on " + uri)
-                      | some(t) =>
-                        cases(T.Type) t block:
-                          | t-name(module-name, id, _, _) =>
-                            when(not(T.is-module-uri(module-name))): raise("Expected a remote reference: " + to-repr(module-name)) end
-
-                            remote-datatype = initial-env.provides-by-uri-value(module-name.uri).data-definitions.get(datatype-name)
-                            cases(Option) remote-datatype:
-                              | some(rd) => { module-name.uri; rd }
-                              | none =>
-                                raise("Cannot re-provide datatype " + datatype-name + " because it isn't a datatype in " + uri)
-                            end
-                        end
-                    end
+                  | none => raise("Name " + datatype-name + " not defined as a type or datatype on " + uri)
                   | some(datatype) => { uri; datatype }
                 end
                 fun add-value-if-defined(name):

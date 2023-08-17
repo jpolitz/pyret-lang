@@ -846,11 +846,17 @@ export type Exports = {
         throw new InternalCompilerError("resolveImportNames not implemented");
       }
 
-      let innermostEnvs : ResolveNamesEnv;
+      let innermostEnvs : ResolveNamesEnv = "Warning! Somehow innermostEnvs was not initialized!" as unknown as ResolveNamesEnv;
 
       type ResolveNamesEnv = { env: Env<CS.ValueBind>, typeEnv: Env<CS.TypeBind>, moduleEnv: Env<CS.ModuleBind> };
       type ResolveNamesVisitor =
           TJ.Visitor<A.Expr, A.Expr, ResolveNamesEnv>
+        & TJ.Visitor<A.CasesBranch, A.CasesBranch, ResolveNamesEnv>
+        & TJ.Visitor<A.Member, A.Member, ResolveNamesEnv>
+        & TJ.Visitor<A.AField, A.AField, ResolveNamesEnv>
+        & TJ.Visitor<A.VariantMember, A.VariantMember, ResolveNamesEnv>
+        & TJ.Visitor<A.Bind, A.Bind, ResolveNamesEnv>
+        & TJ.Visitor<A.Ann, A.Ann, ResolveNamesEnv>
         & TJ.Visitor<A.Program, A.Program, ResolveNamesEnv>;
 
       const namesVisitor : ResolveNamesVisitor = {
@@ -893,7 +899,7 @@ export type Exports = {
           const impEnv = resolveImportNames(self, imports, envs!);
           const visitBody = tj.map(self, body, impEnv);
 
-          let provideValsSpecs;
+          let provideValsSpecs : A.ProvideBlock;
           switch(_provide.$name) {
             case 's-provide': {
               let { l, block } = _provide.dict;
@@ -921,7 +927,7 @@ export type Exports = {
             }
           }
 
-          let provideTypesSpecs;
+          let provideTypesSpecs : A.ProvideBlock;
           switch(provideTypesRaw.$name) {
             case 's-provide-types': {
               const { l, ann } = provideTypesRaw.dict;
@@ -949,14 +955,378 @@ export type Exports = {
 
           const allProvides = [provideValsSpecs, provideTypesSpecs, ...listToArray(provides)];
 
-          throw new InternalCompilerError("s-program case in progress!");
 
-// Pick up after definition of all-provides
+          // Each of these dictionaries maps from plain names to atoms, for example
+          //   link => atom("link", 42)
+          // the goal is to create a single s-provide-block with all the necessary
+          // names and atoms that will be exposed. The atoms will be used by code
+          // generation and by the type-checker/cross-module scope resolution to
+          // pick out information about the binding (e.g. flatness, etc)
+          // The actual values in the dictionaries are triples of
+          //
+          //  {Srcloc; Option<URI>; Atom}
+          //
+          // The location is the location of the provide clause, the URI is none if
+          // the name is provided from this module, and some if it is re-provided
+          // from another module
+          type ProvideEntry = [ A.Srcloc, Option<string>, A.Name ]
+          type ProvideMap = Map<string, ProvideEntry>;
+          const providedModules : ProvideMap = new Map();
+          const providedValues : ProvideMap = new Map();
+          const providedTypes : ProvideMap = new Map();
+          const providedDatatypes : ProvideMap = new Map();
 
-        }
+          function isHidden(hidden : List<A.Name>, maybeHiddenName : string) {
+            return listToArray(hidden).some((h : A.Name) => tj.nameToName(h) === maybeHiddenName);
+          }
+
+          function maybeAdd(hidden : List<A.Name>, whichDict : ProvideMap, maybeAddName : string, toAdd : ProvideEntry) {
+            if(!isHidden(hidden, maybeAddName)) {
+              whichDict.set(maybeAddName, toAdd);
+            }
+          }
+
+          function maybeAddRemoveIfHidden(hidden : List<A.Name>, hiddenTodo : Map<string, Option<A.Srcloc>>, whichDict : ProvideMap, maybeAddName : string, toAdd : ProvideEntry) {
+            if(isHidden(hidden, maybeAddName)) {
+              whichDict.set(maybeAddName, toAdd);
+            }
+            if(hiddenTodo.has(maybeAddName)) {
+              hiddenTodo.set(maybeAddName, runtime.ffi.makeNone());
+            }
+          }
+
+          function maybeURIForPath(fullPath : A.Name[], compileEnv : CS.CompileEnvironment, modEnv : Env<CS.ModuleBind>) : Option<string> {
+            throw new InternalCompilerError("maybeURIForPath not implemented");
+          }
+
+          function pathUri(prePath : A.Name[], path : A.Name[], compileEnv : CS.CompileEnvironment, modEnv : Env<CS.ModuleBind>) : Option<string> {
+            return maybeURIForPath([...prePath, ...path.slice(0, path.length - 1)], compileEnv, modEnv);
+          }
+
+          function expandNameSpec<E extends BindWithOrigin>(whichDict : ProvideMap, whichBindings : Bindings<E>, whichEnv : Env<E>, getProvidedBindings : (p : CS.Provides) => Map<string, unknown>, spec : A.NameSpec, prePath : List<A.Name>) {
+            switch(spec.$name) {
+              case 's-star': {
+                const { l, hidden } = spec.dict;
+                const remoteReferenceURI = maybeURIForPath(listToArray(prePath), initialEnv, innermostEnvs.moduleEnv);
+                switch(remoteReferenceURI.$name) {
+                  case 'none': {
+                    listToArray(hidden).forEach((h : A.Name) => {
+                      if(whichEnv.has(tj.nameToName(h))) {
+                        nameErrors.unshift(CS['wf-err-split'].app("The name " + tj.nameToName(h) + " is listed as hidden but was not provided", runtime.ffi.makeList([l])));
+                      }
+                    });
+                    whichEnv.forEach((bind, k) => {
+                      if(bind!.dict.origin.dict['new-definition']) {
+                        maybeAdd(hidden, whichDict, tj.nameToName(bind!.dict.atom), [ l, runtime.ffi.makeNone(), bind!.dict.atom ]);
+                      }
+                    });
+                    break;
+                  }
+                  case 'some': {
+                    const uri = remoteReferenceURI.dict.value;
+                    const bindingsFromModule = getProvidedBindings(TSH.providesByUriValue(initialEnv, uri));
+                    listToArray(hidden).forEach((h : A.Name) => {
+                      if(bindingsFromModule.has(tj.nameToName(h))) {
+                        nameErrors.unshift(CS['wf-err-split'].app("The name " + tj.nameToName(h) + " is listed as hidden but was not provided", runtime.ffi.makeList([l])));
+                      }
+                    });
+                    bindingsFromModule.forEach((bind, k) => {
+                      // NOTE(joe): This is where we would do something like
+                      // "prefix-out" by doing `prefix + k` below. The k that's the
+                      // key in set-now is the name it's provided as, and the k in
+                      // the s-name is the name to look for in the original module
+                      maybeAdd(hidden, whichDict, k, [ l, remoteReferenceURI, A['s-name'].app(l, k) ]);
+                    });
+                  }
+                }
+                break;
+              }
+              case 's-module-ref': {
+                const { l, path, 'as-name': asName } = spec.dict;
+                const pathArray = listToArray(path);
+                const remoteReferenceURI = pathUri(listToArray(prePath), listToArray(path), initialEnv, innermostEnvs.moduleEnv);
+                let maybeURI : Option<string>;
+                let atom : A.Name;
+                switch(remoteReferenceURI.$name) {
+                  case 'none': {
+                    if(whichEnv.has(tj.nameToName(pathArray[0]))) {
+                      const b = whichEnv.get(tj.nameToName(pathArray[0]));
+                      if(b.dict.origin.dict['new-definition']) {
+                        maybeURI = runtime.ffi.makeNone();
+                        atom = b.dict.atom;
+                      }
+                      else {
+                        maybeURI = runtime.ffi.makeSome(b.dict.origin.dict['uri-of-definition']);
+                        atom = b.dict.origin.dict['original-name'];
+                      }
+                    }
+                    else {
+                      nameErrors.unshift(CS['unbound-id'].app(A['s-id'].app(l, pathArray[pathArray.length - 1])));
+                      maybeURI = runtime.ffi.makeNone();
+                      atom = A['s-name'].app(l, tj.nameToName(pathArray[pathArray.length - 1]));
+                    }
+                    break
+                  }
+                  case 'some': {
+                    const uri = remoteReferenceURI.dict.value;
+                    const bindingsFromModule = getProvidedBindings(TSH.providesByUriValue(initialEnv, uri));
+                    const remoteName = tj.nameToName(pathArray[pathArray.length - 1]);
+                    if(!bindingsFromModule.has(remoteName)) {
+                      nameErrors.unshift(CS['unbound-id'].app(A['s-id'].app(l, A['s-name'].app(l, remoteName))));
+                    }
+                    maybeURI = runtime.ffi.makeSome(uri);
+                    atom = A['s-name'].app(l, remoteName);
+                    break;
+                  }
+                }
+                switch(asName.$name) {
+                  case 'none': {
+                    whichDict.set(tj.nameToName(atom), [ l, maybeURI, atom ]);
+                    break;
+                  }
+                  case 'some': {
+                    whichDict.set(tj.nameToName(asName.dict.value), [ l, maybeURI, atom ]);
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          function expandDataSpec<B extends BindWithOrigin, C extends BindWithOrigin>(valEnv : Env<B>, typeEnv : Env<C>, spec : A.NameSpec, prePath : List<A.Name>, hidden : List<A.Name>, hiddenTodo : Map<string, Option<A.Srcloc>>) {
+            function maybeAdd(whichDict : ProvideMap, maybeAddName : string, toAdd : ProvideEntry) {
+              return maybeAddRemoveIfHidden(hidden, hiddenTodo, whichDict, maybeAddName, toAdd);
+            }
+            switch(spec.$name) {
+              case 's-star': {
+                // NOTE(joe): Assumption is that this s-star's hiding is always empty for s-provide-data
+                const { l } = spec.dict;
+                const remoteReferenceURI = maybeURIForPath(listToArray(prePath), initialEnv, innermostEnvs.moduleEnv);
+                switch(remoteReferenceURI.$name) {
+                  case 'none': {
+                    datatypes.forEach((dataExpr : DataExpr, k : string) => {
+                      expandDataSpec(valEnv, typeEnv, A['s-module-ref'].app(l, runtime.ffi.makeList([A['s-name'].app(l, dataExpr.dict.name)]), runtime.ffi.makeNone()), prePath, hidden, hiddenTodo);
+                    });
+                    break;
+                  }
+                  case 'some': {
+                    const datatypsFromModule = TSH.providesByUriValue(initialEnv, remoteReferenceURI.dict.value).dict['data-definitions']
+                    tj.mapFromStringDict(datatypsFromModule).forEach((dataExport : CS.DataExport, k : string) => {
+                      const dataName = dataExport.$name === 'd-alias' ? dataExport.dict.name : dataExport.dict.typ.dict.name;
+                      expandDataSpec(valEnv, typeEnv, A['s-module-ref'].app(l, runtime.ffi.makeList([A['s-name'].app(l, dataName)]), runtime.ffi.makeNone()), prePath, hidden, hiddenTodo);
+                    });
+                    break;
+                  }
+                }
+                break;
+              }
+              case 's-module-ref': {
+                const { l, path, 'as-name': asName } = spec.dict;
+                const pathArray = listToArray(path);
+                const maybeURI = pathUri(listToArray(prePath), listToArray(path), initialEnv, innermostEnvs.moduleEnv);
+                switch(maybeURI.$name) {
+                  case 'none': {
+                    // path must be a single element if there's no URI of a remote module
+                    // e.g. provide: D end   NOT    provide: M.D end
+                    const dataExpr = datatypes.get(tj.nameToName(pathArray[0]))!;
+                    maybeAdd(providedDatatypes, dataExpr.dict.name, [ l, runtime.ffi.makeNone(), dataExpr.dict.namet ]);
+                    const dataCheckerName = makeCheckerName(dataExpr.dict.name);
+                    const dataCheckerVB = valEnv.get(dataCheckerName);
+                    maybeAdd(providedValues, dataCheckerName, [ l, runtime.ffi.makeNone(), dataCheckerVB!.dict.atom ]);
+                    const dataAliasTB = typeEnv.get(dataExpr.dict.name);
+                    maybeAdd(providedTypes, dataExpr.dict.name, [ l, runtime.ffi.makeNone(), dataAliasTB!.dict.atom ]);
+                    listToArray(dataExpr.dict.variants).forEach((v : A.Variant) => {
+                      const variantVB = valEnv.get(v.dict.name);
+                      const checkerName = makeCheckerName(v.dict.name);
+                      const variantCheckerVB = valEnv.get(checkerName);
+                      maybeAdd(providedValues, v.dict.name, [ l, runtime.ffi.makeNone(), variantVB!.dict.atom ]);
+                      maybeAdd(providedValues, checkerName, [ l, runtime.ffi.makeNone(), variantCheckerVB!.dict.atom ]);
+                    });
+                    break;
+                  }
+                  case 'some': {
+                    const datatypeName = tj.nameToName(pathArray[pathArray.length - 1]);
+                    const { value: uri } = maybeURI.dict;
+                    const providingModule = TSH.providesByUriValue(initialEnv, uri);
+                    const maybeDatatype = TSH.resolveDatatypeByUri(initialEnv, uri, datatypeName);
+                    let datatypeURI : string;
+                    let datatype : TS.DataType;
+                    switch(maybeDatatype.$name) {
+                      case 'none': {
+                        throw new InternalCompilerError(`Name ${datatypeName} not defined as a type or datatype on ${uri}`);
+                      }
+                      case 'some': {
+                        datatypeURI = uri;
+                        datatype = maybeDatatype.dict.value;
+                      }
+                    }
+                    // NOTE(joe): There's a potential performance worry (which
+                    // we can eventually remove). If we're really copying value
+                    // dictionaries around, and modules export a lot of stuff,
+                    // and this case triggers often, that's a lot of copying.
+                    // Consider using a faster wrapper around string-dicts if
+                    // this is an issue.
+                    const providingValues = tj.mapFromStringDict(providingModule.dict.values);
+                    function addValueIfDefined(name : string) {
+                      if(providingValues.has(name)) {
+                        maybeAdd(providedValues, name, [ l, runtime.ffi.makeSome(datatypeURI), A['s-name'].app(l, name) ]);
+                      }
+                    }
+                    maybeAdd(providedDatatypes, datatypeName, [ l, runtime.ffi.makeSome(datatypeURI), A['s-name'].app(l, datatypeName) ]);
+                    addValueIfDefined(makeCheckerName(datatypeName));
+                    const providingAliases = tj.mapFromStringDict(providingModule.dict.aliases);
+                    if(providingAliases.has(datatypeName)) {
+                      maybeAdd(providedTypes, datatypeName, [ l, runtime.ffi.makeSome(datatypeURI), A['s-name'].app(l, datatypeName) ]);
+                    }
+                    listToArray(datatype.dict.variants).forEach((v : TS.TypeVariant) => {
+                      addValueIfDefined(v.dict.name);
+                      addValueIfDefined(makeCheckerName(v.dict.name));
+                    });
+                  }
+                  break;
+                }
+                break;
+              }
+            }
+          }
+
+          function expand(provideSpec : A.ProvideSpec, path : List<A.Name>) {
+            switch(provideSpec.$name) {
+              case 's-provide-name': {
+                const { 'name-spec' : nameSpec } = provideSpec.dict;
+                expandNameSpec(providedValues, bindings, innermostEnvs.env, (o) => tj.mapFromStringDict(o.dict.values), nameSpec, path);
+                break;
+              }
+              case 's-provide-type': {
+                const { 'name-spec' : nameSpec } = provideSpec.dict;
+                expandNameSpec(providedTypes, typeBindings, innermostEnvs.typeEnv, (o) => tj.mapFromStringDict(o.dict.aliases), nameSpec, path);
+                break;
+              }
+              case 's-provide-module': {
+                const { 'name-spec' : nameSpec } = provideSpec.dict;
+                expandNameSpec(providedModules, moduleBindings, innermostEnvs.moduleEnv, (o) => tj.mapFromStringDict(o.dict.modules), nameSpec, path);
+                break;
+              }
+              case 's-provide-data': {
+                const { 'name-spec' : nameSpec, hidden } = provideSpec.dict;
+                const hiddenTodo = new Map<string, Option<A.Srcloc>>();
+                listToArray(hidden).forEach((h : A.Name) => {
+                  // Based on the syntax of hidden, we are guaranteed to have a field called `l`
+                  const withLoc = h as (A.Name & { dict: { l : A.Srcloc } });
+                  hiddenTodo.set(tj.nameToName(h), runtime.ffi.makeSome(withLoc.dict.l));
+                });
+                expandDataSpec(innermostEnvs.env, innermostEnvs.typeEnv, nameSpec, path, hidden, hiddenTodo);
+                hiddenTodo.forEach((locOpt, name) => {
+                  if(locOpt.$name === 'some') {
+                    nameErrors.unshift(CS['wf-err-split'].app("The name " + name + " is listed as hidden but was not provided", runtime.ffi.makeList([locOpt.dict.value])));
+                  }
+                });
+                break;
+              }
+              default: {
+                // NOTE(joe): Deliberate no-op here. Other provide styles are handled elsewhere.
+                // We should check if they can be fully *desugared* and this case can become an error.
+                break;
+              }
+            }
+          }
+
+          allProvides.forEach((p : A.ProvideBlock) => {
+            tj.listToArray(p.dict.specs).forEach((spec : A.ProvideSpec) => {
+              expand(spec, p.dict.path);
+            });
+          });
+
+          function makeProvideSpec(p : ProvideEntry, k : string, maker : (r : A.NameSpec) => A.ProvideSpec) : A.ProvideSpec {
+            const [ l, maybeURI, atom ] = p;
+            switch(maybeURI.$name) {
+              case 'none': {
+                return maker(A['s-local-ref'].app(l, atom, A['s-name'].app(l, k)));
+              }
+              case 'some': {
+                return maker(A['s-remote-ref'].app(l, maybeURI.dict.value, atom, A['s-name'].app(l, k)));
+              }
+            }
+          }
+
+          datatypes.forEach((dt : DataExpr, k : string) => {
+            providedDatatypes.set(k, [ dt.dict.l, runtime.ffi.makeNone(), dt.dict.namet ]); 
+          });
+
+          const finalValProvides = [...providedValues.entries()].map(e => {
+            const [ k, p ] = e;
+            return makeProvideSpec(p, k, (r) => A['s-provide-name'].app(l, r));
+          });
+          const finalTypeProvides = [...providedTypes.entries()].map(e => {
+            const [ k, p ] = e;
+            return makeProvideSpec(p, k, (r) => A['s-provide-type'].app(l, r));
+          });
+          const finalModuleProvides = [...providedModules.entries()].map(e => {
+            const [ k, p ] = e;
+            return makeProvideSpec(p, k, (r) => A['s-provide-module'].app(l, r));
+          });
+          const finalDataProvides = [...providedDatatypes.entries()].map(e => {
+            const [ k, p ] = e;
+            return makeProvideSpec(p, k, (r) => A['s-provide-data'].app(l, r, empty));
+          });
+
+          const oneTrueProvidesList = [...finalValProvides, ...finalTypeProvides, ...finalModuleProvides, ...finalDataProvides];
+          const oneTrueProvide = runtime.ffi.makeList([A['s-provide-block'].app(l, empty, runtime.ffi.makeList(oneTrueProvidesList))]);
+
+          return A['s-program'].app(l, _useRaw, A['s-provide-none'].app(l), A['s-provide-types-none'].app(l), oneTrueProvide, imports, visitBody);
+        },
+        's-type-let-expr': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-type-let-expr not implemented"); },
+        's-let-expr': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-let-expr not implemented"); },
+        's-letrec': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-letrec-expr not implemented"); },
+        's-for': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-for not implemented"); },
+        's-cases-branch': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-cases-branch not implemented"); },
+        's-data-expr': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-data-expr not implemented"); },
+        's-lam': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-lam not implemented"); },
+        's-method-field': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-method-field not implemented"); },
+        's-assign': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-assign not implemented"); },
+        's-dot': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-dot not implemented"); },
+        's-id': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-id not implemented"); },
+        's-id-letrec': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-id-letrec not implemented"); },
+        's-id-var': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-id-var not implemented"); },
+        's-variant-member': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-variant-member not implemented"); },
+        's-bind': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-bind not implemented"); },
+        'a-blank': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-blank not implemented"); },
+        'a-any':  function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-any not implemented"); },
+        'a-name': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-name not implemented"); },
+        'a-arrow': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-arrow not implemented"); },
+        'a-arrow-argnames': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-arrow-argnames not implemented"); },
+        'a-method': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-method not implemented"); },
+        'a-record': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-record not implemented"); },
+        'a-app': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-app not implemented"); },
+        'a-pred': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-pred not implemented"); },
+        'a-dot': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-dot not implemented"); },
+        'a-field': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("a-field not implemented"); },
+        's-table-select': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-table-select not implemented"); },
+        's-table-extend': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-table-extend not implemented"); },
+        's-table-update': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-table-update not implemented"); },
+        's-table-filter': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-table-filter not implemented"); },
+        's-table-order': function(self : ResolveNamesVisitor, e, envs) { throw new InternalCompilerError("s-table-order not implemented"); },
       };
 
-      throw new InternalCompilerError("resolveNames in progress!");
+      function immutableJSMaptoMap<K,V>(map : ImMap<K,V>) : Map<K, V> {
+        const m = new Map<K,V>();
+        map.forEach((v, k) => m.set(k!, v!));
+        return m;
+      }
+      const initialEnvs : ResolveNamesEnv = { env: ImMap(), typeEnv: ImMap(), moduleEnv: ImMap() };
+      // NOTE(joe/ben): the map/visit line has ~*effects*~ on innermostEnvs, needed later, so the order of
+      // the next two lines is crucial
+      const visitedProgram = tj.map(namesVisitor, p, initialEnvs);
+      const computedEnv = CS['computed-env'].app(
+        tj.mutableStringDictFromMap(moduleBindings),
+        tj.mutableStringDictFromMap(bindings),
+        tj.mutableStringDictFromMap(typeBindings),
+        tj.mutableStringDictFromMap<A.Expr>(datatypes),
+        tj.stringDictFromMap<CS.ModuleBind>(immutableJSMaptoMap(innermostEnvs.moduleEnv)),
+        tj.stringDictFromMap<CS.ValueBind>(immutableJSMaptoMap(innermostEnvs.env)),
+        tj.stringDictFromMap<CS.TypeBind>(immutableJSMaptoMap(innermostEnvs.typeEnv)),
+      );
+      return CS['resolved-names'].app(visitedProgram, runtime.ffi.makeList(nameErrors), computedEnv);
     }
 
 

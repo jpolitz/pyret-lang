@@ -435,7 +435,7 @@ data Provides:
   | provides(
       from-uri :: URI,
       modules :: StringDict<URI>,
-      values :: StringDict<ValueExport>,
+      values :: StringDict,
       aliases :: StringDict<T.Type>,
       data-definitions :: StringDict<DataExport>
     )
