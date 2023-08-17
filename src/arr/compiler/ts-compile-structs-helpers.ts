@@ -187,7 +187,7 @@ type DropFirst<T extends unknown[]> = ((...p: T) => void) extends ((p1: infer P1
           return runtime.ffi.makeSome(
             TS.dict.values.dict['t-name'].app(
               TS.dict.values.dict['module-uri'].app(de.dict.origin.dict['uri-of-definition']),
-              A.dict.values.dict['s-type-global'].app(de.dict.typ.dict.name),
+              A['s-type-global'].app(de.dict.typ.dict.name),
               de.dict.origin.dict['local-bind-site'],
               false,
             )

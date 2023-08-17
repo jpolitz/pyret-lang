@@ -695,7 +695,7 @@ fun resolve-names(p :: A.Program, thismodule-uri :: String, initial-env :: C.Com
       if args.member("resolve-scope"): # Only use TS version if we enable it in pipeline
         TRS.resolve-names(p, thismodule-uri, initial-env)
       else:
-        internal-resolve-names(p, thismodule-uri, intial-env)
+        internal-resolve-names(p, thismodule-uri, initial-env)
       end
     | pipeline-anchor => internal-resolve-names(p, thismodule-uri, initial-env)
   end

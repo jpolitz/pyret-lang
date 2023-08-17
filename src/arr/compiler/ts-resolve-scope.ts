@@ -5,7 +5,8 @@ import type * as AU from './ts-ast-util';
 import type * as TJ from './ts-codegen-helpers';
 import type * as TSH from './ts-compile-structs-helpers';
 import type { List, Option, MutableStringDict, PFunction, StringDict, PMethod, Runtime } from './ts-impl-types';
-import { Map as ImMap } from 'immutable';
+import type * as Immutable from 'immutable';
+import type { Map as ImMap } from 'immutable';
 
 export type Exports = {
   dict: {
@@ -27,14 +28,15 @@ export type Exports = {
     { 'import-type': 'dependency', protocol: 'file', args: ['compile-structs.arr']},
     { 'import-type': 'dependency', protocol: 'js-file', args: ['ts-ast-util']},
  ],
-  nativeRequires: [],
+  nativeRequires: ["immutable"],
   provides: {
     values: {
       "desugar-scope": "tany",
       "resolve-names": "tany"
     }
   },
-  theModule: function(runtime: Runtime, _, __, tj : TJ.Exports, TS : (TS.Exports), TSH : (TSH.Exports), Ain : (A.Exports), CSin : (CS.Exports), AUin : (AU.Exports)) {
+  theModule: function(runtime: Runtime, _, __, tj : TJ.Exports, TS : (TS.Exports), TSH : (TSH.Exports), Ain : (A.Exports), CSin : (CS.Exports), AUin : (AU.Exports), immutable : typeof Immutable) {
+    const { Map: ImMap } = immutable;
     const A = Ain.dict.values.dict;
     const AU = AUin.dict.values.dict;
     const CS = CSin.dict.values.dict;
@@ -45,6 +47,8 @@ export type Exports = {
     } = tj;
 
     const scopeNames = MakeName(0);
+
+    const empty = runtime.ffi.makeList([]);
 
     // NOTE(joe/ben Aug 2023): This is a global that is referred to and reset on each call to
     // resolve scope.
@@ -630,7 +634,6 @@ export type Exports = {
               withImports = A['s-block'].app(l, asArray);
             }
           }
-          const empty = runtime.ffi.makeList([]);
 
           function transformToplevelLast(l2 : A.Srcloc, last : A.Expr) : A.Expr {
             const checkers = A['s-dot'].app(l2, AU.checkers.app(l2), "results");
@@ -838,6 +841,122 @@ export type Exports = {
         });
         return ImMap(acc);
       }
+
+      function resolveImportNames(visitor : ResolveNamesVisitor, imports : List<A.Import>, envs : ResolveNamesEnv) : ResolveNamesEnv {
+        throw new InternalCompilerError("resolveImportNames not implemented");
+      }
+
+      let innermostEnvs : ResolveNamesEnv;
+
+      type ResolveNamesEnv = { env: Env<CS.ValueBind>, typeEnv: Env<CS.TypeBind>, moduleEnv: Env<CS.ModuleBind> };
+      type ResolveNamesVisitor =
+          TJ.Visitor<A.Expr, A.Expr, ResolveNamesEnv>
+        & TJ.Visitor<A.Program, A.Program, ResolveNamesEnv>;
+
+      const namesVisitor : ResolveNamesVisitor = {
+        's-module': function(self : ResolveNamesVisitor, e, envs) {
+          const { l, answer, checks } = e.dict;
+          const nonGlobals = envs!.env.filter((b, k) => {
+            return b!.dict.origin.dict['new-definition'];
+          });
+          const definedVals = nonGlobals.map((vb, key) => {
+            const loc = vb!.dict.origin.dict['local-bind-site'];
+            const atom = vb!.dict.atom;
+            switch(vb!.dict.binder.$name) {
+              case 'vb-var': { return A['s-defined-var'].app(key!, atom, loc); }
+              case 'vb-let': { return A['s-defined-value'].app(key!, A['s-id'].app(loc, atom)); }
+              case 'vb-letrec': { return A['s-defined-value'].app(key!, A['s-id-letrec'].app(loc, atom, true)); }
+            }
+          }).valueSeq().toArray();
+
+          const nonGlobalTypes = envs!.typeEnv.filter((b, k) => {
+            return b!.dict.origin.dict['new-definition'];
+          });
+          const definedTypes = nonGlobalTypes.map((b, key) => {
+            const atom = b!.dict.atom;
+            return A['s-defined-type'].app(key!, A['a-name'].app(l, atom));
+          }).valueSeq().toArray();
+
+          const nonGlobalModules = envs!.moduleEnv.filter((b, k) => {
+            return b!.dict.origin.dict['new-definition'];
+          });
+          const definedModules = nonGlobalModules.map((b, key) => {
+            return A['s-defined-module'].app(key!, b!.dict.atom, b!.dict.uri);
+          }).valueSeq().toArray();
+
+          innermostEnvs = envs!;
+          return A['s-module'].app(l, tj.map(self, answer, envs), runtime.ffi.makeList(definedModules), runtime.ffi.makeList(definedVals), runtime.ffi.makeList(definedTypes), tj.map(self, checks, envs));
+        },
+
+        's-program': function(self : ResolveNamesVisitor, e, envs) {
+          const { l, '_use' : _useRaw, _provide, 'provided-types' : provideTypesRaw, provides, imports, block : body} = e.dict;
+          const impEnv = resolveImportNames(self, imports, envs!);
+          const visitBody = tj.map(self, body, impEnv);
+
+          let provideValsSpecs;
+          switch(_provide.$name) {
+            case 's-provide': {
+              let { l, block } = _provide.dict;
+              const object = block as TJ.Variant<A.Expr, 's-obj'>;
+              const { fields } = object.dict;
+              const specs = listToArray(fields).map((f : A.Member) => {
+                if(!('value' in f.dict && f.dict.value.$name === 's-id')) { throw new InternalCompilerError(`The rhs of an object provide was not an id: ${f.dict.name}`); }
+                const modref = A['s-module-ref'].app(f.dict.l, runtime.ffi.makeList([f.dict.value.dict.id]), runtime.ffi.makeSome(A['s-name'].app(f.dict.l, f.dict.name)));
+                return A['s-provide-name'].app(f.dict.l, modref);
+              });
+              const withData = [...specs, A['s-provide-data'].app(l, A['s-star'].app(l, empty), empty)];
+              provideValsSpecs = A['s-provide-block'].app(l, empty, runtime.ffi.makeList(withData));
+              break;
+            }
+            case 's-provide-all': {
+              const { l } = _provide.dict;
+              const nameStar = A['s-provide-name'].app(l, A['s-star'].app(l, empty));
+              const dataStar = A['s-provide-data'].app(l, A['s-star'].app(l, empty), empty);
+              provideValsSpecs = A['s-provide-block'].app(l, empty, runtime.ffi.makeList([nameStar, dataStar]));
+              break;
+            }
+            case 's-provide-none': {
+              provideValsSpecs = A['s-provide-block'].app(_provide.dict.l, empty, empty);
+              break;
+            }
+          }
+
+          let provideTypesSpecs;
+          switch(provideTypesRaw.$name) {
+            case 's-provide-types': {
+              const { l, ann } = provideTypesRaw.dict;
+              const providedTypes = listToArray(ann).map((a : A.AField) => {
+                if(a.dict.ann.$name !== 'a-name') { throw new InternalCompilerError(`Cannot use a non-name as a provided type`); }
+                const modref = A['s-module-ref'].app(a.dict.ann.dict.l, runtime.ffi.makeList([a.dict.ann.dict.id]), runtime.ffi.makeSome(A['s-name'].app(a.dict.l, a.dict.name)));
+                return A['s-provide-type'].app(l, modref);
+              });
+              const withData = [...providedTypes, A['s-provide-data'].app(l, A['s-star'].app(l, empty), empty)];
+              provideTypesSpecs = A['s-provide-block'].app(l, empty, runtime.ffi.makeList(withData));
+              break;
+            }
+            case 's-provide-types-none': {
+              provideTypesSpecs = A['s-provide-block'].app(provideTypesRaw.dict.l, empty, empty);
+              break;
+            }
+            case 's-provide-types-all': {
+              const { l } = provideTypesRaw.dict;
+              const dataStar = A['s-provide-data'].app(l, A['s-star'].app(l, empty), empty);
+              const typeStar = A['s-provide-type'].app(l, A['s-star'].app(l, empty));
+              provideTypesSpecs = A['s-provide-block'].app(l, empty, runtime.ffi.makeList([dataStar, typeStar]));
+              break;
+            }
+          }
+
+          const allProvides = [provideValsSpecs, provideTypesSpecs, ...listToArray(provides)];
+
+          throw new InternalCompilerError("s-program case in progress!");
+
+// Pick up after definition of all-provides
+
+        }
+      };
+
+      throw new InternalCompilerError("resolveNames in progress!");
     }
 
 
