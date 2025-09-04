@@ -14,6 +14,7 @@ if(typeof require === "function") {
     var nodeRequire = (typeof require != "undefined") ? require : null;
 
     function isAvailableNodeModule(name) {
+      var isNodeModuleAvailable;
       try {
         require.resolve(name);
         isNodeModuleAvailable = true;
@@ -62,6 +63,7 @@ if(typeof require === "function") {
         moduleObj.resolved = true; }
 
     define = function(name, deps, callback) {
+        console.log("Defining: ", name);
         //This module might have no dependencies
         if (!isArray(deps)) {
             callback = deps;
@@ -105,6 +107,7 @@ if(typeof require === "function") {
             }
 
             if (!(node in moduleTable)) {
+                console.trace(moduleTable);
                 throw new Error("Unknown module : " + node);
             }
             if (node in currentlyVisitedNodes) {

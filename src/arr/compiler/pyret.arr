@@ -19,7 +19,9 @@ success-code = 0
 failure-code = 1
 
 fun main(args :: List<String>) -> Number block:
+  print("Starting main\n")
 
+  spy: this-file-name: C.file-name end
   this-pyret-dir = P.dirname(P.resolve(C.file-name))
 
   options = [D.string-dict:
@@ -41,6 +43,8 @@ fun main(args :: List<String>) -> Number block:
     C.next-val(C.Str, C.once, "Pyret (.arr) file to compile and run"),
     "standalone-file",
     C.next-val-default(C.Str, "src/js/base/handalone.js", none, C.once, "Path to override standalone JavaScript file for main"),
+    "this-pyret-dir",
+    C.next-val-default(C.Str, this-pyret-dir, none, C.once, "Directory containing the js/ directory with needed Pyret resources (compiler-internal)"),
     "builtin-js-dir",
     C.next-val(C.Str, C.many, "Directory to find the source of builtin js modules"),
     "builtin-arr-dir",
@@ -161,13 +165,13 @@ fun main(args :: List<String>) -> Number block:
               else:
                 r.get-value("build-runnable") + ".jarr"
               end
-              compile-opts = CS.make-default-compile-options(this-pyret-dir)
+              compile-opts = CS.make-default-compile-options(r.get("this-pyret-dir").or-else(this-pyret-dir))
               CLI.build-runnable-standalone(
                 r.get-value("build-runnable"),
                 r.get("require-config").or-else(P.resolve(P.join(this-pyret-dir, "config.json"))),
                 outfile,
                 compile-opts.{
-                  this-pyret-dir: this-pyret-dir,
+                  this-pyret-dir: r.get("this-pyret-dir").or-else(this-pyret-dir),
                   standalone-file: standalone-file,
                   checks : checks,
                   checks-format: checks-format,

@@ -19,7 +19,7 @@
         types: {}
     },
     nativeRequires: ['buffer'],
-    theModule: function(runtime, _, _, fsInternal, buffer) {
+    theModule: function(runtime, _, __, fsInternal, buffer) {
         const Buffer = buffer.Buffer;
         function readFileString(path) {
             runtime.checkArgsInternal1('filesystem', 'read-file-string', path, runtime.String);

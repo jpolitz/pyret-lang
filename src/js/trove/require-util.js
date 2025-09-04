@@ -7,7 +7,7 @@
         types: {}
     },
     nativeRequires: ["resolve"],
-    theModule: function(runtime, _, _, browserifyResolve) {
+    theModule: function(runtime, _, __, browserifyResolve) {
         function resolve(moduleName, baseDir) {
             console.log(moduleName, baseDir);
             runtime.checkArgsInternal2('require-util', 'resolve', moduleName, runtime.String, baseDir, runtime.String);

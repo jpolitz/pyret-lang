@@ -428,6 +428,7 @@ define("pyret-base/js/pyret-tokenizer", ["jglr/jglr"], function(E) {
     { name: "STRING", val: "\"",
       process: function tokenizeDQString(tok_spec) {
         var line = this.curLine, col = this.curCol, pos = this.pos;
+        var match = undefined;
         dquot_str.lastIndex = this.pos;
         unterminated_string.lastIndex = this.pos;
         if ((match = dquot_str.exec(this.str))) {
@@ -447,6 +448,7 @@ define("pyret-base/js/pyret-tokenizer", ["jglr/jglr"], function(E) {
     { name: "STRING", val: "'",
       process: function tokenizeSQString(tok_spec) {
         var line = this.curLine, col = this.curCol, pos = this.pos;
+        var match = undefined;
         squot_str.lastIndex = this.pos;
         unterminated_string.lastIndex = this.pos;
         if ((match = squot_str.exec(this.str))) {
@@ -465,6 +467,7 @@ define("pyret-base/js/pyret-tokenizer", ["jglr/jglr"], function(E) {
     { name: "STRING", val: "```",
       process: function tokenizeTQString(tok_spec) {
         var line = this.curLine, col = this.curCol, pos = this.pos;
+        var match = undefined;
         tquot_str.lastIndex = this.pos;
         unterminated_string.lastIndex = this.pos;
         if ((match = tquot_str.exec(this.str))) {

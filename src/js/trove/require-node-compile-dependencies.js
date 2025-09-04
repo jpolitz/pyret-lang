@@ -2,41 +2,41 @@
 // When building a standalone, browserify will parse this file
 // and produce a version which include each dependency that is required()
 //
-sexpr = require("s-expression");
+global.sexpr = require("s-expression");
 define("s-expression", [], function() {return sexpr;});
 
-q = require("q");
+global.q = require("q");
 define("q", [], function() {return q;});
 
-jsmd5 = require("js-md5");
+global.jsmd5 = require("js-md5");
 define("js-md5", [], function() {return jsmd5;});
 
-crossFetch = require("cross-fetch");
+global.crossFetch = require("cross-fetch");
 define("cross-fetch", [], function() {return crossFetch;});
 
-seedrandom = require("seedrandom");
+global.seedrandom = require("seedrandom");
 define("seedrandom", [], function() {return seedrandom;});
 
-sourcemap = require("source-map");
+global.sourcemap = require("source-map");
 define("source-map", [], function () { return sourcemap; });
 
-buffer = require("buffer");
+global.buffer = require("buffer");
 define("buffer", [], function () { return buffer; });
 
-jssha256 = require("js-sha256");
+global.jssha256 = require("js-sha256");
 define("js-sha256", [], function () { return jssha256; });
 
-fs = nodeRequire("fs");
+global.fs = nodeRequire("fs");
 define("fs", [], function () { return fs; });
 
-path = nodeRequire("path");
+global.path = nodeRequire("path");
 define("path", [], function () { return path; });
 
-http = nodeRequire("http");
+global.http = nodeRequire("http");
 define("http", [], function () {return http;});
 
-ws = nodeRequire("ws");
+global.ws = nodeRequire("ws");
 define("ws", [], function () { return ws });
 
-resolve = nodeRequire("resolve");
+global.resolve = nodeRequire("resolve");
 define("resolve", [], function () { return resolve });

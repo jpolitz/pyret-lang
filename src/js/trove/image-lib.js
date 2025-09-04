@@ -1764,8 +1764,8 @@
       ctx = canvas.getContext("2d"),
       r, g, b, a;
       img.render(ctx);
-      imageData = ctx.getImageData(0, 0, width, height);
-      data = imageData.data,
+      var imageData = ctx.getImageData(0, 0, width, height);
+      var data = imageData.data,
       index = (y * width + x) * 4;
 
       r = data[index]
@@ -1786,7 +1786,7 @@
       i,
       r, g, b, a;
       img.render(ctx);
-      imageData = ctx.getImageData(0, 0, width, height);
+      var imageData = ctx.getImageData(0, 0, width, height);
       data = imageData.data;
       var colors = [];
       for (i = 0 ; i < data.length; i += 4) {
