@@ -2880,14 +2880,14 @@
     function recomputePoints(func, samplePoints, then) {
       return RUNTIME.safeCall(() => {
         return RUNTIME.raw_array_map(RUNTIME.makeFunction((sample) => {
-          return RUNTIME.execThunk(RUNTIME.makeFunction(() => func.app(sample)));
+          return RUNTIME.execThunk(RUNTIME.makeFunction(() => func.app(jsnums.fromFixnum(sample))));
         }), samplePoints);
       }, (funcVals) => {
         const dataValues = [];
         funcVals.forEach((result, idx) => {
           cases(RUNTIME.ffi.isEither, 'Either', result, {
             left: (value) => dataValues.push({
-              x: toFixnum(samplePoints[idx]),
+              x: samplePoints[idx],
               y: toFixnum(value)
             }),
             right: () => {}
@@ -2958,7 +2958,7 @@
 
       addCrosshairs(prefix, ['Dots'], signals, marks, pointColor);
 
-      const samplePoints = [...Array(numSamples).keys().map((i) => jsnums.fromFixnum(xMinValue + (fraction * i)))];
+      const samplePoints = [...Array(numSamples).keys().map((i) => (xMinValue + (fraction * i)))];
 
       return recomputePoints(func, samplePoints, (dataValues) => {
         data[0].values = dataValues;
@@ -2976,7 +2976,7 @@
             const xMinValue = globalOptions.xMinValue;
             const xMaxValue = globalOptions.xMaxValue;
             const fraction = (xMaxValue - xMinValue) / (numSamples - 1);
-            const samplePoints = [...Array(numSamples).keys().map((i) => jsnums.fromFixnum(xMinValue + (fraction * i)))];
+            const samplePoints = [...Array(numSamples).keys().map((i) => (xMinValue + (fraction * i)))];
             RUNTIME.runThunk(() => {
               // NOTE(Ben): We can use view.data(`${prefix}rawTable`, ...newData...)
               // to replace the existing data points in the _current_ view, so that
