@@ -861,7 +861,19 @@ function start(config, onServerReady) {
     if(config.sharedFetchServer) {
       let response = request({url: url});
       response.on("error", (error) => { ret.reject(error); });
-      response.on("response", (resp) => ret.resolve(response));
+      response.on("response", (resp) => {
+        // Only treat 2xx as a real proxy hit. A 4xx from the upstream
+        // (e.g. when the shared id was minted on *this* deploy and the
+        // proxy server has no record of it) must fall through to the
+        // local Drive fetch — otherwise the upstream error body gets
+        // piped straight back to the client.
+        if (resp.statusCode >= 200 && resp.statusCode < 300) {
+          ret.resolve(response);
+        } else {
+          response.abort();
+          ret.reject("Proxy returned status " + resp.statusCode);
+        }
+      });
     }
     else  {
       ret.reject("No fallback server configured");
