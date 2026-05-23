@@ -125,12 +125,12 @@ function start(config, onServerReady) {
 
   app.use(csrf());
 
-  app.get("/close.html", function(_, res) { res.render("close.html"); });
-  app.get("/faq.html", function(_, res) { res.render("faq.html"); });
-  app.get("/privacy.html", function(_, res) { res.render("privacy.html"); });
-  app.get("/privacy/", function(_, res) { res.render("privacy.html"); });
+  app.get("/close.html", function(_, res) { res.render("close.html", defaultOpts); });
+  app.get("/faq.html", function(_, res) { res.render("faq.html", defaultOpts); });
+  app.get("/privacy.html", function(_, res) { res.render("privacy.html", defaultOpts); });
+  app.get("/privacy/", function(_, res) { res.render("privacy.html", defaultOpts); });
 
-  app.get("/faq", function(_, res) { res.render("faq.html"); });
+  app.get("/faq", function(_, res) { res.render("faq.html", defaultOpts); });
 
   app.get("/", function(req, res) {
     var content = loggedIn(req) ? "My Programs" : "Log In";
