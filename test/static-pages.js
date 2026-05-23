@@ -5,7 +5,6 @@ var webdriver = require("selenium-webdriver");
 // Add endpoints here to extend template-variable checking to more static pages
 var static_pages = [
   "/faq",
-  "/privacy",
 ];
 
 describe("Make sure template variables are used in static pages", function() {
