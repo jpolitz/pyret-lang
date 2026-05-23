@@ -30,7 +30,9 @@ function start(config, onServerReady) {
       LOG_USER: config.logUser,
       GIT_REV : config.gitRev,
       GIT_BRANCH: config.gitBranch,
-      POSTMESSAGE_ORIGIN: process.env.POSTMESSAGE_ORIGIN
+      POSTMESSAGE_ORIGIN: process.env.POSTMESSAGE_ORIGIN,
+      APP_NAME: process.env.APP_NAME,
+      APP_DOMAIN: process.env.APP_DOMAIN
     };
   var express = require('express');
   var cookieSession = require('cookie-session');
@@ -98,7 +100,7 @@ function start(config, onServerReady) {
 
   app.use(cookieSession({
     secret: config.sessionSecret,
-    key: "code.pyret.org",
+    key: process.env.APP_NAME,
 
     sameSite: 'lax'
   }));

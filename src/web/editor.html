@@ -2,9 +2,9 @@
 <html>
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
-  <title>code.pyret.org</title>
+  <title>{{APP_NAME}}</title>
   <link crossorigin="anonymous" rel="preload" href="{{&PYRET}}" as="script">
-  <script>window.PYRET = "{{&PYRET}}";</script>
+  <script>window.PYRET = "{{&PYRET}}"; window.APP_NAME = "{{APP_NAME}}"; window.APP_DOMAIN = "{{APP_DOMAIN}}";</script>
   <link rel="stylesheet" href="{{ &BASE_URL }}/css/reset.css" />
   <link rel="stylesheet" href="{{ &BASE_URL }}/css/smoothness-jquery-ui.css" />
   <link rel="stylesheet" href="{{ &BASE_URL }}/css/fira-mono.css" />
@@ -156,7 +156,7 @@
                   aria-label="Contribute detailed usage information"/>
                   <label for="detailed-logging" id="detailed-logging-label">
                     Contribute detailed usage information.</label>
-                  <a href="https://code.pyret.org/faq/" target="_blank" rel="noopener noreferrer" class="focusable info-btn" role="menuitem" tabindex="-1"
+                  <a href="https://{{APP_DOMAIN}}/faq/" target="_blank" rel="noopener noreferrer" class="focusable info-btn" role="menuitem" tabindex="-1"
                     id="detailed-logging-learn-more"
                     title="Learn More" aria-label="Learn More">?</a>
                 </span>
