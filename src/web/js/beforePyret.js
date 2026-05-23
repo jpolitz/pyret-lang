@@ -490,7 +490,7 @@ $(function() {
     $("#connectButton").attr("tabIndex", "-1");
     //$("#topTierUl").attr("tabIndex", "0");
     getTopTierMenuitems();
-    storageAPI = createProgramCollectionAPI("code.pyret.org", false);
+    storageAPI = createProgramCollectionAPI(process.env.APP_NAME, false);
     storageAPI.then(function(api) {
       api.collection.then(function() {
         $(".loginOnly").show();
@@ -580,7 +580,7 @@ $(function() {
   }
 
   function setTitle(progName) {
-    document.title = progName + " - code.pyret.org";
+    document.title = progName + " - " + process.env.APP_NAME;
     $("#showFilename").text("File: " + progName);
   }
   CPO.setTitle = setTitle;
