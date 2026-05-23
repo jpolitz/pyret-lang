@@ -20,6 +20,9 @@ var SHAREURL_PROXY_MAX_BYTES  = 1 * 1024 * 1024;  // 1 MB
 var SHAREURL_PROXY_TIMEOUT_MS = 10 * 1000;        // 10 s
 
 function start(config, onServerReady) {
+  var APP_NAME   = process.env.APP_NAME   || "code.pyret.org";
+  var APP_DOMAIN = process.env.APP_DOMAIN || "code.pyret.org";
+
   var defaultOpts = {
       PYRET: process.env.PYRET,
       BASE_URL: config.baseUrl,
@@ -31,8 +34,8 @@ function start(config, onServerReady) {
       GIT_REV : config.gitRev,
       GIT_BRANCH: config.gitBranch,
       POSTMESSAGE_ORIGIN: process.env.POSTMESSAGE_ORIGIN,
-      APP_NAME: process.env.APP_NAME,
-      APP_DOMAIN: process.env.APP_DOMAIN
+      APP_NAME:   APP_NAME,
+      APP_DOMAIN: APP_DOMAIN,
     };
   var express = require('express');
   var cookieSession = require('cookie-session');
@@ -100,7 +103,7 @@ function start(config, onServerReady) {
 
   app.use(cookieSession({
     secret: config.sessionSecret,
-    key: process.env.APP_NAME,
+    key: APP_NAME,
 
     sameSite: 'lax'
   }));
