@@ -25,6 +25,7 @@ let leave_open = process.env.LEAVE_OPEN === "true" || false;
 let args = process.env.SHOW_BROWSER ? [] : [
   '--headless',
   '--no-sandbox',
+  '--disable-dev-shm-usage',
 ];
 if(!process.env.SHOW_BROWSER) {
   console.log("Running Chrome headless. You can set SHOW_BROWSER=true to see what's going on");
