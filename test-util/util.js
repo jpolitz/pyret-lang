@@ -88,7 +88,18 @@ function pyretLoaded(driver) {
 }
 
 function waitForPyretLoad(driver, timeout) {
-  return driver.wait(function() { return pyretLoaded(driver); }, timeout);
+  return driver.wait(function() {
+    return pyretLoaded(driver).then(function(loaded) {
+      if (!loaded) { return false; }
+      // Also wait for the editor to have its initial contents installed by
+      // programLoaded.then(setValue) in beforePyret.js; otherwise the test's
+      // setDefinitions can race with that setValue and get overwritten.
+      return driver.executeScript(
+        "var cm = $('.CodeMirror')[0] && $('.CodeMirror')[0].CodeMirror;" +
+        "return !!cm && cm.getValue() !== '';"
+      );
+    });
+  }, timeout);
 }
 
 function setCodemirror(driver, getCM, content) {
