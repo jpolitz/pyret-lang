@@ -457,16 +457,13 @@ $(function() {
   };
 
   function setUsername(target) {
-    return gwrap.load({name: 'people',
-      version: 'v1',
-    }).then((api) => {
-      api.people.get({ resourceName: "people/me", personFields: "names,emailAddresses" }).then(function(user) {
-        var name = user.names && user.names[0] ? user.names[0].displayName : undefined;
-        if (user.emailAddresses && user.emailAddresses[0] && user.emailAddresses[0].value) {
-          name = user.emailAddresses[0].value;
-        }
-        target.text(name);
-      });
+    var token = window.gapi.auth.getToken().access_token;
+    return fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: 'Bearer ' + token }
+    }).then(function(resp) {
+      return resp.json();
+    }).then(function(info) {
+      target.text(info.email);
     });
   }
 

@@ -31,7 +31,7 @@ class StudentDashboard extends Component {
         this.setState({signedIn: SIGNED_IN});
         this.updateRecentFiles();
         this.api.getUsername().then((userInfo) => {
-          this.setState({ userName: userInfo.emailAddresses[0].value });
+          this.setState({ userName: userInfo.email });
         });
       }
       else {
