@@ -513,7 +513,7 @@ ts-pyret-test: tests/pyret/main2-ts.jarr
 # ts-type-check-test / ts-regression-test targets remain available for
 # narrowing down a failure by hand, exactly as their .arr counterparts do.
 .PHONY : ts-test
-ts-test: ts-unit-test ts-parity-test ts-type-check-parity ts-wf-parity ts-repl-test ts-serve-test all-ts-pyret-test ts-io-test
+ts-test: ts-unit-test ts-parity-test ts-type-check-parity ts-wf-parity ts-repl-test ts-repartee-test ts-serve-test all-ts-pyret-test ts-io-test
 
 .PHONY : ts-clean
 ts-clean:
@@ -587,6 +587,12 @@ ts-repl-test: ts-compiler $(TS_COMPILED_CACHE_WARM)
 # browser-like --stack-size; `todo` cases are the known-overflow frontier.
 ts-stack-safety-test: ts-compiler
 	$(NODE) --test src/ts-compiler/tests/stack-safety-test.js
+
+.PHONY : ts-repartee-test
+# repartee-test.js is the stub-executor engine suite; repartee-eval-test.js
+# drives the REAL in-process runtime, like repl-test.js above.
+ts-repartee-test: ts-compiler
+	$(NODE) --test src/ts-compiler/tests/repartee-test.js src/ts-compiler/tests/repartee-eval-test.js
 
 # ============================================================
 # Bootstrap convergence: byte-identical, self-fixpointing compilers
