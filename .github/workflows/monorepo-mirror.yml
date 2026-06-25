@@ -1,0 +1,59 @@
+name: Mirror monorepo code.pyret.org subtree
+
+# Generates a flat, deployable mirror of the code.pyret.org/ subfolder of the
+# brownplt/pyret-lang monorepo, with history preserved, on the
+# `monorepo-mirror` branch of THIS repo.
+#
+# Runs in brownplt/code.pyret.org so it can push to a branch here using the
+# built-in GITHUB_TOKEN -- no PAT or deploy key needed. The monorepo is public,
+# so it is checked out read-only with that same token.
+#
+# Manual-only for now: trigger from the Actions tab and pick the source ref.
+# Uncomment the `schedule` block below to run it automatically once this is
+# trusted.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: "Branch/ref of brownplt/pyret-lang to mirror"
+        required: true
+        default: mainmast
+  # schedule:
+  #   - cron: "0 7 * * *"   # daily at 07:00 UTC
+
+permissions:
+  contents: write
+
+concurrency:
+  group: monorepo-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout monorepo (full history)
+        uses: actions/checkout@v4
+        with:
+          repository: brownplt/pyret-lang
+          ref: ${{ github.event.inputs.source_ref || 'mainmast' }}
+          fetch-depth: 0
+          path: monorepo
+
+      - name: Split code.pyret.org subtree (preserves history)
+        working-directory: monorepo
+        run: |
+          git subtree split --prefix=code.pyret.org -b mirror-split
+          echo "Split tip: $(git rev-parse mirror-split)"
+          git log --oneline -5 mirror-split
+
+      - name: Push to monorepo-mirror branch of this repo
+        working-directory: monorepo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push --force \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" \
+            mirror-split:monorepo-mirror
+          echo "Pushed mirror-split -> monorepo-mirror"
