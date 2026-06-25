@@ -44,7 +44,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brownplt/pyret-lang"
+    "url": "git+https://github.com/brownplt/pyret-lang.git",
+    "directory": "lang"
   },
   "keywords": [
     "programming",

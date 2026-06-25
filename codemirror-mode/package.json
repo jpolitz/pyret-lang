@@ -7,7 +7,8 @@
   "main": "mode/pyret.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brownplt/pyret-codemirror-mode"
+    "url": "git+https://github.com/brownplt/pyret-lang.git",
+    "directory": "codemirror-mode"
   },
   "keywords": [
     "programming",
@@ -21,6 +22,6 @@
   ],
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/brownplt/pyret-codemirror-mode/issues"
+    "url": "https://github.com/brownplt/pyret-lang/issues"
   }
 }
