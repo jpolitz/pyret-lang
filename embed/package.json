@@ -24,7 +24,7 @@
     "webpack": "^5.99.9"
   },
   "devDependencies": {
-    "code.pyret.org": "github:brownplt/code.pyret.org#horizon",
+    "code.pyret.org": "file:../code.pyret.org",
     "webpack-cli": "^6.0.1"
   }
 }

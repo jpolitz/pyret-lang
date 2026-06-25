@@ -1,17 +1,17 @@
 {
-  "name": "pyret-docs",
+  "name": "pyret.org",
   "version": "0.0.0",
   "dependencies": {
     "codemirror": "^5.x",
-    "pyret-codemirror-mode": "git://github.com/brownplt/pyret-codemirror-mode",
-    "pyret-embed": "^0.0.7"
+    "pyret-codemirror-mode": "file:../codemirror-mode",
+    "pyret-embed": "file:../embed"
   },
   "scripts": {
     "build": "make"
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/brownplt/pyret.org"
+    "url": "git+https://github.com/brownplt/pyret.org"
   },
   "keywords": [
     "programming",

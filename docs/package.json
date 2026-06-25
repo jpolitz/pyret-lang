@@ -3,15 +3,15 @@
   "version": "0.0.0",
   "dependencies": {
     "codemirror": "^5.65.19",
-    "pyret-codemirror-mode": "github:brownplt/pyret-codemirror-mode#horizon",
-    "pyret-embed": "~0.0.7"
+    "pyret-codemirror-mode": "file:../codemirror-mode",
+    "pyret-embed": "file:../embed"
   },
   "scripts": {
     "build": "make"
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/brownplt/pyret-docs"
+    "url": "git+https://github.com/brownplt/pyret-docs"
   },
   "keywords": [
     "programming",

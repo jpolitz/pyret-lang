@@ -7,7 +7,7 @@
   "main": "mode/pyret.js",
   "repository": {
     "type": "git",
-    "url": "git://github.com/brownplt/pyret-codemirror-mode"
+    "url": "git+https://github.com/brownplt/pyret-codemirror-mode"
   },
   "keywords": [
     "programming",
