@@ -1,17 +1,19 @@
 {
   "name": "pyret-docs",
   "version": "0.0.0",
+  "private": true,
   "dependencies": {
     "codemirror": "^5.65.19",
-    "pyret-codemirror-mode": "github:brownplt/pyret-codemirror-mode#horizon",
-    "pyret-embed": "~0.0.7"
+    "pyret-codemirror-mode": "file:../codemirror-mode",
+    "pyret-embed": "file:../embed"
   },
   "scripts": {
     "build": "make"
   },
   "repository": {
     "type": "git",
-    "url": "git://github.com/brownplt/pyret-docs"
+    "url": "git+https://github.com/brownplt/pyret-lang.git",
+    "directory": "docs"
   },
   "keywords": [
     "programming",
@@ -24,7 +26,7 @@
   "author": "Joe Gibbs Politz",
   "license": "Apache-2.0",
   "bugs": {
-    "url": "https://github.com/brownplt/pyret-docs/issues"
+    "url": "https://github.com/brownplt/pyret-lang/issues"
   },
   "homepage": "https://www.pyret.org"
 }
