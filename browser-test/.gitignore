@@ -1,4 +1,3 @@
 node_modules/
 .vscode-test-web/
-results/*.png
-results/cpo-server.log
+results/
