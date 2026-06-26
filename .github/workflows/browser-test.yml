@@ -5,6 +5,10 @@ name: browser-test (embed + vscode webviews)
 #   cpo    -- the reference (/editor)
 #   embed  -- the embed API's embedded instance
 #   vscode -- the pyret-parley.cpo webview (headless VS Code for the Web)
+#
+# Shape: build code.pyret.org + the extension ONCE, then fan out the three
+# environments as a parallel matrix (each on its own runner, so chart rendering
+# doesn't contend for CPU).
 
 on:
   push:
@@ -14,32 +18,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  browser-test:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: '24'
-
-      # --- build code.pyret.org (provides /editor + the embed host page) ---
-      - name: Link pyret-lang
-        working-directory: ./code.pyret.org
-        run: |
-          ln -s ../lang pyret
-          cd ../lang && npm install && make phaseA-deps
 
       - name: Build code.pyret.org web assets
         working-directory: ./code.pyret.org
         run: |
+          ln -s ../lang pyret
+          cd ../lang && npm install && make phaseA-deps
+          cd ../code.pyret.org
           npm ci --ignore-scripts
           npm run build
 
-      # --- build the vscode extension (provides the webview's editor assets) ---
       - name: Build vscode extension
         working-directory: ./vscode
         run: |
@@ -47,15 +43,60 @@ jobs:
           npm ci
           npm run compile
 
-      # --- browser-test harness + a Chromium for Playwright ---
-      - name: Install browser-test deps
+      # /editor + the embed host page are served from code.pyret.org/build;
+      # the vscode webview's assets are self-contained in vscode/dist.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpo-build
+          path: code.pyret.org/build
+          retention-days: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-dist
+          path: vscode/dist
+          retention-days: 1
+
+  test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [cpo, embed, vscode]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      # cpo + embed load /editor from the CPO server; vscode does not.
+      - name: Restore cpo build
+        if: matrix.env != 'vscode'
+        uses: actions/download-artifact@v4
+        with:
+          name: cpo-build
+          path: code.pyret.org/build
+      - name: Restore vscode extension
+        if: matrix.env == 'vscode'
+        uses: actions/download-artifact@v4
+        with:
+          name: vscode-dist
+          path: vscode/dist
+
+      - name: Install browser-test deps + Chromium
         working-directory: ./browser-test
         run: |
           npm ci
           npx playwright install --with-deps chromium
 
-      # --- start the CPO server (cpo + embed environments load /editor from it) ---
+      - name: Install CPO server runtime deps
+        if: matrix.env != 'vscode'
+        working-directory: ./code.pyret.org
+        run: npm ci --ignore-scripts
+
       - name: Start CPO server
+        if: matrix.env != 'vscode'
         working-directory: ./code.pyret.org
         env:
           BASE_URL: http://localhost:4999
@@ -74,17 +115,7 @@ jobs:
           for _ in $(seq 1 30); do curl -fs -o /dev/null http://localhost:4999/editor && break; sleep 1; done
           curl -f http://localhost:4999/editor
 
-      # --- run the three environments (no GOOGLE_CHROME_BINARY => Playwright's Chromium) ---
-      - name: cpo (reference)
+      - name: Run ${{ matrix.env }}
         working-directory: ./browser-test
         env: { BASE_URL: 'http://localhost:4999' }
-        run: node run.js --env=cpo
-
-      - name: embed instances
-        working-directory: ./browser-test
-        env: { BASE_URL: 'http://localhost:4999' }
-        run: node run.js --env=embed
-
-      - name: vscode webviews
-        working-directory: ./browser-test
-        run: node run.js --env=vscode
+        run: node run.js --env=${{ matrix.env }}
