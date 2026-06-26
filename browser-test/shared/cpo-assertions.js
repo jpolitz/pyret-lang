@@ -55,6 +55,19 @@ async function setDefinitionsRunAndWait(page, code, options) {
   await page.waitFor("window.PA.breakDone()", 30000);
 }
 
+// Warm up the Pyret runtime once, in setup. The FIRST program run in a freshly
+// loaded editor pays a large one-time cost (runtime warmup + first check-results
+// render) -- ~20s under CI's headless Chromium, vs ~120ms once warm. Absorbing
+// it here keeps every actual test fast and within the tight per-test waits,
+// deterministically (rather than padding timeouts or retrying).
+async function warmUp(page) {
+  await setDefinitionsConfirmed(page, "check:\n  1 is 1\nend");
+  await page.eval("window.PA.clearOutput()");
+  await page.eval("window.PA.run()");
+  await page.waitFor("window.PA.breakDone()", 120000);
+  await page.waitFor("window.PA.doneRendering()", 120000);
+}
+
 // mirrors util.checkAllTestsPassed -- CONTENT: "Looks shipshape" must be present.
 async function checkAllTestsPassed(page, name, timeout) {
   await page.inject();
@@ -200,6 +213,7 @@ async function checkTableRendersCorrectly(page, code, name, timeout) {
 
 module.exports = {
   ensureRendered,
+  warmUp,
   checkTableRendersCorrectly,
   setDefinitionsRunAndWait,
   checkAllTestsPassed,

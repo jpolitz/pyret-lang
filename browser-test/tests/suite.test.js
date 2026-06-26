@@ -14,6 +14,7 @@ const { test, describe, before, after } = require("node:test");
 const { loadSpecsFromFile } = require("../shared/load-cpo-specs");
 const { makePlaywrightPage } = require("../shared/playwright-page");
 const { runSpec, specTimeout } = require("../shared/dispatch");
+const { warmUp } = require("../shared/cpo-assertions");
 
 const ENV = process.env.PYRET_ENV;
 const SUITES = {
@@ -42,6 +43,8 @@ before(async () => {
   const page = makePlaywrightPage(s.frame);
   await page.inject();
   await page.waitFor("window.PA.editorReady()", 120000);
+  // Absorb the one-time runtime/render warmup so no actual test pays it.
+  await warmUp(page);
   session = { page, cleanup: s.cleanup };
 }, { timeout: 240000 });
 
