@@ -32,7 +32,7 @@ const WORKSPACE = path.resolve(__dirname, "fixture-workspace");
 const CHROME = process.env.GOOGLE_CHROME_BINARY || "/bin/google-chrome";
 const PORT = parseInt(process.env.VSCODE_TEST_PORT || "3198", 10);
 const LIMIT = process.env.VSCODE_LIMIT ? parseInt(process.env.VSCODE_LIMIT, 10) : Infinity;
-const SUITES = (process.env.VSCODE_SUITES || "check-blocks,errors,charts").split(",").map((s) => s.trim());
+const SUITES = (process.env.VSCODE_SUITES || "check-blocks,errors,charts,type-check,tables").split(",").map((s) => s.trim());
 
 function take(arr, n) { return n === Infinity ? arr : arr.slice(0, n); }
 
@@ -94,6 +94,8 @@ async function openCustomEditorFrame(page, endpoint) {
       "check-blocks": () => take(loadSpecsFromFile("check-blocks.js"), LIMIT),
       "errors": () => take(loadSpecsFromFile("errors.js"), LIMIT),
       "charts": () => take(loadSpecsFromFile("chart.js"), LIMIT),
+      "type-check": () => take(loadSpecsFromFile("type-check.js"), LIMIT),
+      "tables": () => take(loadSpecsFromFile("tables.js"), LIMIT),
     };
 
     for (const suite of SUITES) {

@@ -48,7 +48,13 @@ function PYRET_PAGE_ASSERTIONS() {
       return true;
     },
     run() {
-      document.getElementById("runButton").click();
+      // Use the dropdown's "Run" item rather than #runButton. The run mode is
+      // sticky (cpo-main.js: currentAction): after a type-check run, #runButton
+      // re-runs type-checked. Upstream never sees this (a fresh browser per
+      // suite), but we reuse one frame across suites, so we always select the
+      // normal-run action explicitly. #select-run resets the mode AND runs.
+      const sel = document.getElementById("select-run");
+      if (sel) { sel.click(); } else { document.getElementById("runButton").click(); }
       return true;
     },
     // Empty #output before a run. CPO clears output on run, but when we reuse a
@@ -81,6 +87,79 @@ function PYRET_PAGE_ASSERTIONS() {
     },
     compileErrorPresent() {
       return !!document.querySelector("#output .compile-error");
+    },
+
+    // ---- interactions REPL (mirrors util.evalPyret / evalPyretNoError). The
+    // CPO editor hides interactions until the first run (beforePyret.js:1594
+    // removes the `hideInteractions` body class on run), so these are used only
+    // after a run has happened. ----
+    replPromptVisible() {
+      const pc = document.querySelector(".prompt-container");
+      return !!(pc && pc.offsetParent !== null);
+    },
+    outputChildCount() {
+      const out = document.getElementById("output");
+      return out ? out.children.length : 0;
+    },
+    // Type code into the live REPL prompt and submit it (Enter), exactly like
+    // util.evalPyret's setCodemirror + extraKeys.Enter on ".repl-prompt > .CodeMirror".
+    evalAtRepl(code) {
+      const cm = document.querySelector(".repl-prompt > .CodeMirror").CodeMirror;
+      const first = cm.firstLine();
+      const last = cm.lastLine();
+      cm.replaceRange(code, { line: first, ch: 0 }, { line: last + 1, ch: 0 });
+      cm.options.extraKeys.Enter(cm);
+      return true;
+    },
+    // The last direct child of #output is the result of the most recent REPL
+    // submission (util.evalPyret reads elements[elements.length-1]); report its
+    // class and any .replOutput/.replTextOutput texts (util.evalPyretNoError).
+    lastOutputChild() {
+      const ch = document.getElementById("output").children;
+      const el = ch[ch.length - 1];
+      if (!el) return null;
+      return {
+        class: el.className,
+        outputs: Array.from(el.querySelectorAll(".replOutput, .replTextOutput")).map((e) => e.innerText),
+      };
+    },
+
+    // ---- tables (mirrors util.checkTableRendersCorrectly). The table program
+    // prints a <pre> of JSON test specs {table,row,col,val}; for each we eval
+    // the table expr and the value expr at the REPL and compare the rendered
+    // cell's HTML to the value's rendered HTML. ----
+    tablePre() {
+      // util uses xpath 'pre' = a *direct child* <pre> of #output holding the
+      // JSON spec (not the <pre> code snippets nested inside check results).
+      const out = document.getElementById("output");
+      if (!out) return null;
+      const pre = Array.from(out.children).find((c) => c.tagName === "PRE");
+      return pre ? pre.innerHTML : null;
+    },
+    // outerHTML of the first .replOutput/.replTextOutput in the last #output child
+    lastReplOutputHTML() {
+      const ch = document.getElementById("output").children;
+      const el = ch[ch.length - 1];
+      if (!el) return null;
+      const r = el.querySelector(".replOutput, .replTextOutput");
+      return r ? r.outerHTML : null;
+    },
+    // outerHTML of the row/col cell's span in the last REPL result's table
+    // (mirrors //tbody/tr[row]/td[col]/span; row/col are 1-based)
+    lastReplTableCellHTML(row, col) {
+      const ch = document.getElementById("output").children;
+      const el = ch[ch.length - 1];
+      if (!el) return null;
+      const r = el.querySelector(".replOutput, .replTextOutput");
+      if (!r) return null;
+      const tbody = r.querySelector("tbody");
+      if (!tbody) return null;
+      const tr = tbody.querySelectorAll(":scope > tr")[row - 1];
+      if (!tr) return null;
+      const td = tr.querySelectorAll(":scope > td")[col - 1];
+      if (!td) return null;
+      const span = td.querySelector("span");
+      return span ? span.outerHTML : null;
     },
 
     // ---- output reading (mirrors the "remove output CodeMirrors then read

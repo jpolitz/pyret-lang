@@ -45,9 +45,20 @@ Two mechanisms keep the assertions and inputs identical to upstream:
   - **vscode** can't use Selenium (it can't reach a VS Code webview), so it uses
     `shared/page-assertions.js` + `shared/cpo-assertions.js`, a line-for-line
     **in-page port** of the same `util.js` predicates. That port is proven
-    faithful by `fidelity/run-cpo-fidelity.js`, which runs it (via Playwright)
-    against the very same `/editor` page and the very same specs and shows it
-    passes exactly what `util.js` passes.
+    faithful by `fidelity/run-cpo-fidelity.js` and `fidelity/run-repl-fidelity.js`,
+    which run it (via Playwright) against the very same `/editor` page and the
+    very same specs and show it passes exactly what `util.js` passes.
+
+### Two webview details the port handles
+
+- The `pyret-parley.cpo` custom editor starts with the interactions panel
+  collapsed (`hideInteractions`), but the CPO editor removes that class on the
+  first run (`beforePyret.js:1594`), so the REPL becomes available — which is why
+  the REPL-driven suites (type-check, tables) run in the webview too.
+- The run mode is sticky (`cpo-main.js`: `currentAction`): after a type-check
+  run, the plain Run button keeps running type-checked. Upstream never sees this
+  (a fresh browser per suite); since we reuse one editor frame across suites,
+  `PA.run()` selects the explicit "Run" dropdown item, which resets the mode.
 
 ## Layout
 

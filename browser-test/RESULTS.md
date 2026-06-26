@@ -31,39 +31,52 @@ out of the upstream test files via `shared/load-cpo-specs.js`.
 | charts (`test/chart.js`) | `runAndCheckAllTestsPassed` → `checkAllTestsPassed` ("Looks shipshape") | 10 |
 | **total** | | **240** |
 
-## Fidelity — in-page port vs `/editor`  →  224 passing, 0 failing
+(The embed path reuses `util.js` directly, so type-check and tables already run
+there. The vscode path now runs the same suites — see Target 2.)
 
-`results/cpo-fidelity-full.txt`. The vscode path can't use Selenium, so it uses
-the in-page port (`shared/page-assertions.js` + `shared/cpo-assertions.js`).
-This run drives that port, via Playwright, against the **same** `/editor` page
-and the **same** specs `util.js` checks — proving the port is a faithful stand-in.
+## Fidelity — in-page port vs `/editor`  →  224 + 4 passing, 0 failing
+
+`results/cpo-fidelity-full.txt` (errors/check-blocks/charts) and
+`fidelity/run-repl-fidelity.js` (type-check/tables). The vscode path can't use
+Selenium, so it uses the in-page port (`shared/page-assertions.js` +
+`shared/cpo-assertions.js`). These runs drive that port, via Playwright, against
+the **same** `/editor` page and the **same** specs `util.js` checks — proving the
+port is a faithful stand-in.
 
 | Suite | count |
 |---|---:|
 | check-blocks | 29 |
 | errors | 193 |
 | charts | 2 |
-| **total** | **224** |
+| type-check | 3 |
+| tables | 1 |
+| **total** | **228** |
 
-## Target 2 — vscode extension webviews  →  232 passing, 0 failing
+## Target 2 — vscode extension webviews  →  236 passing, 0 failing
 
 `results/vscode-full.txt`. Real VS Code for the Web (headless, via
 `@vscode/test-web`) loads the `vscode/` extension; Playwright opens `test.arr`,
 which the `pyret-parley.cpo` custom editor renders as a webview of the same
 `editor.html`. The same specs run through the same (ported) assertions inside
-that webview frame.
+that webview frame — the **same suite set as embed**, including the REPL-driven
+type-check and tables suites (the custom editor reveals the REPL on the first
+run; see README).
 
 | Suite (upstream file) | count |
 |---|---:|
 | check-blocks (`test/check-blocks.js`) | 29 |
 | errors (`test/errors.js`) | 193 |
 | charts (`test/chart.js`) | 10 |
-| **total** | **232** |
+| type-check (`test/type-check.js`) | 3 |
+| tables (`test/tables.js`) | 1 |
+| **total** | **236** |
 
 All 10 chart programs that pass upstream also pass in the vscode webview
 (e.g. `bar-chart-test.arr`, `box-plot-test.arr`, `image-pie-chart-test.arr`, …),
-and the full error-rendering table (`field-not-found → "did not have a field"`,
-the entire `is`/`is==`/`raises-satisfies`/… matrix) checks the same substrings.
+the full error-rendering table (`field-not-found → "did not have a field"`, the
+entire `is`/`is==`/`raises-satisfies`/… matrix) checks the same substrings, the
+type-checked REPL evaluations return the same values, and the table cells render
+identically to their value expressions.
 
 ## What this shows
 
@@ -74,5 +87,8 @@ the entire `is`/`is==`/`raises-satisfies`/… matrix) checks the same substrings
   text content (193 cases) in all three environments.
 - The **same check-block content checks** (`testRunsAndHasCheckBlocks`, 29 cases)
   match the same expected substrings everywhere.
+- The **same REPL checks** (`testRunAndUseRepl`, type-check) and **table-render
+  checks** (`checkTableRendersCorrectly`) pass in both the embed instance and the
+  vscode webview — the custom editor reveals its REPL on the first run.
 
 Reproduce with `./run-all.sh` (see `README.md`).

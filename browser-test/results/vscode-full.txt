@@ -3,8 +3,8 @@ Serving dev extensions from /home/exedev/pyret-lang-drydock/vscode
 Serving local content /home/exedev/pyret-lang-drydock/browser-test/vscode/fixture-workspace at /static/mount
 Listening on http://localhost:3198
 Using ESM loader: true
-[0mGET /static/devextensions/package.nls.json [33m404[0m 2.546 ms - 9[0m
-Webview editor ready: http://1amajs0mm0f2n6i7oq6ooff20d9sb7d3612c3brrq2rbkd1e11hg.localhost:
+[0mGET /static/devextensions/package.nls.json [33m404[0m 1.271 ms - 9[0m
+Webview editor ready: http://1jdgeg62qhrf0nriacln5u4kc0mh7qgi52i07p8lu8jbg9mnvm4a.localhost:
 
 == vscode webview: check-blocks (29 specs from test/check-blocks.js) ==
   ✔ simple
@@ -244,5 +244,14 @@ Webview editor ready: http://1amajs0mm0f2n6i7oq6ooff20d9sb7d3612c3brrq2rbkd1e11h
   ✔ labeled-num-dot-chart-test.arr
   ✔ num-dot-chart-test.arr
 
-==== VSCODE WEBVIEW TOTAL: 232 passing, 0 failing ====
+== vscode webview: type-check (3 specs from test/type-check.js) ==
+  ✔ string-dict-import
+  ✔ string-dict-include
+[0mGET /current-version [33m404[0m 1.486 ms - 9[0m
+  ✔ beside-list
+
+== vscode webview: tables (1 specs from test/tables.js) ==
+  ✔ tables-test.arr
+
+==== VSCODE WEBVIEW TOTAL: 236 passing, 0 failing ====
 VSCODE EXIT: 0

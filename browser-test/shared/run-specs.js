@@ -12,9 +12,15 @@ async function runOneSpec(page, s) {
   } else if (s.kind === "errorString") {
     return A.testErrorRendersString(page, s.code, s.expected, s.options);
   } else if (s.kind === "pyretFile") {
+    // tables.js uses doForEachPyretFile with a table-specific assertion.
+    if (s.suite === "tables") {
+      return A.checkTableRendersCorrectly(page, s.code, s.program, s.baseTimeout || 900000);
+    }
     return A.runAndCheckAllTestsPassed(page, s.code, s.program, s.baseTimeout || 900000);
   } else if (s.kind === "allTestsPass") {
     return A.runAndCheckAllTestsPassed(page, s.code, s.name, 20000);
+  } else if (s.kind === "repl") {
+    return A.testRunAndUseRepl(page, s.code, s.repl, s.options);
   }
   throw new Error("run-specs: unsupported spec kind: " + s.kind);
 }

@@ -51,6 +51,7 @@ echo "=== (1) EMBED: upstream assertions on embedded instances ==="
 
 echo "=== (2) FIDELITY: in-page port vs /editor (same specs) ==="
 ( cd "$HERE" && node fidelity/run-cpo-fidelity.js ) | tee "$RESULTS/cpo-fidelity-full.txt"
+( cd "$HERE" && node fidelity/run-repl-fidelity.js ) | tee "$RESULTS/repl-fidelity.txt"
 
 echo "=== (3) VSCODE: same assertions on the extension's webviews ==="
 ( cd "$HERE" && node vscode/run-vscode-tests.js ) | tee "$RESULTS/vscode-full.txt"

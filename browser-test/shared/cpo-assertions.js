@@ -102,11 +102,100 @@ async function testRunsAndHasCheckBlocks(page, code, specs, options) {
   return true;
 }
 
+// mirrors util.evalPyretNoError: submit code at the REPL, wait for a new result
+// child of #output, and return its .replOutput/.replTextOutput texts (throwing
+// if the result is not an echo-container/trace, i.e. an error).
+async function evalAtReplNoError(page, code) {
+  await page.inject();
+  await page.waitFor("window.PA.replPromptVisible()", 15000);
+  const before = await page.eval("window.PA.outputChildCount()");
+  await page.eval("window.PA.evalAtRepl(" + JSON.stringify(code) + ")");
+  await page.waitFor("window.PA.outputChildCount() > " + before, 15000);
+  // Let the value render. Assignments legitimately produce no output, so cap the
+  // wait rather than require non-empty output.
+  let res = null;
+  for (let i = 0; i < 30; i++) {
+    res = await page.eval("window.PA.lastOutputChild()");
+    if (res && res.outputs.length > 0) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (!res || !(res.class === "echo-container" || res.class === "trace")) {
+    throw new Error("Failed to run Pyret code: " + code);
+  }
+  return res.outputs;
+}
+
+// mirrors util.testRunAndUseRepl: run definitions (optionally type-checked),
+// then evaluate a sequence of [code, expectedSubstring] pairs at the REPL.
+async function testRunAndUseRepl(page, code, toRepl, options) {
+  await setDefinitionsRunAndWait(page, code, options);
+  for (const tr of toRepl) {
+    const outputs = await evalAtReplNoError(page, tr[0]);
+    if (outputs.length === 0 && tr[1] === "") {
+      continue;
+    } else if (outputs.length === 0 && tr[1] !== "") {
+      throw new Error("Expected repl text content " + tr[1] + " but got empty output for repl entry " + tr[0]);
+    } else {
+      const t = outputs[0];
+      if (t.indexOf(tr[1]) === -1) {
+        throw new Error("Expected repl text content " + tr[1] + " not contained in output " + t + " for repl entry " + tr[0]);
+      }
+    }
+  }
+  return true;
+}
+
+// Submit code at the REPL, wait for a new result child, then poll a reader
+// expression until it returns a non-null value (the value renders async).
+async function evalAtReplThenRead(page, code, readerExpr) {
+  await page.waitFor("window.PA.replPromptVisible()", 15000);
+  const before = await page.eval("window.PA.outputChildCount()");
+  await page.eval("window.PA.evalAtRepl(" + JSON.stringify(code) + ")");
+  await page.waitFor("window.PA.outputChildCount() > " + before, 15000);
+  let v = null;
+  for (let i = 0; i < 50; i++) {
+    v = await page.eval(readerExpr);
+    if (v !== null && v !== undefined) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  return v;
+}
+
+// mirrors util.checkTableRendersCorrectly
+async function checkTableRendersCorrectly(page, code, name, timeout) {
+  await page.inject();
+  await page.eval("window.PA.setDefinitions(" + JSON.stringify(code) + ")");
+  await page.eval("window.PA.clearOutput()");
+  await page.eval("window.PA.run()");
+  await page.waitFor("window.PA.breakDone()", timeout || 900000);
+  await page.waitFor("window.PA.tablePre() !== null", 20000);
+  const tests = JSON.parse(await page.eval("window.PA.tablePre()"));
+  if (!tests.length) throw new Error("No tables tests found");
+  for (const t of tests) {
+    const cellHTML = await evalAtReplThenRead(
+      page, t.table, "window.PA.lastReplTableCellHTML(" + t.row + "," + t.col + ")"
+    );
+    const valHTML = await evalAtReplThenRead(page, t.val, "window.PA.lastReplOutputHTML()");
+    if (cellHTML !== valHTML) {
+      throw new Error(
+        "Table renders example " + t.val + " incorrectly:\n  cell: " + cellHTML + "\n  val:  " + valHTML
+      );
+    }
+  }
+  // NOTE: util.checkTableRendersCorrectly has a checkAllTestsPassed(...) call
+  // after its `return maybeTest.then(...)`, i.e. it is unreachable dead code and
+  // never runs. We match that: the assertion is the per-cell render comparison.
+  return true;
+}
+
 module.exports = {
   ensureRendered,
+  checkTableRendersCorrectly,
   setDefinitionsRunAndWait,
   checkAllTestsPassed,
   runAndCheckAllTestsPassed,
   testErrorRendersString,
   testRunsAndHasCheckBlocks,
+  evalAtReplNoError,
+  testRunAndUseRepl,
 };
