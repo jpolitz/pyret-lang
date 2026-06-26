@@ -1,11 +1,12 @@
 # Results
 
-One runner (`run.js`), one in-page port of `util.js`, three environments. Each
-environment runs the **same five suites** loaded from the unmodified
-`code.pyret.org/test/*.js`, so all three land on the **same 236 assertions**.
+A `node:test` suite over an in-page port of `util.js`, run against three
+environments. Each environment runs the **same five suites** loaded from the
+unmodified `code.pyret.org/test/*.js`, so all three land on the **same 236
+assertions** (`node:assert`, one per content check).
 
-Captured logs in `results/`. Reproduce with `./run-all.sh` (or `node run.js
---env=<env>`).
+Captured logs in `results/`. Reproduce with `./run-all.sh`, `node run.js
+--env=<env>`, or filter with `node run.js --env=<env> --grep <regex>`.
 
 | `--env` | What it drives | Result |
 |---|---|---|
@@ -45,6 +46,15 @@ dual-path stage (committed history of this directory) showed the `util.js` path
 and the port producing identical results (embed 240 via `util.js`; fidelity
 224+4 and vscode 236 via the port) before the harness was consolidated onto the
 single port-based runner.
+
+## Failure legibility
+
+Content checks use `node:assert`, so a wrong rendering fails as an
+`AssertionError` with a value diff (e.g. a check block expected to contain
+`"failed"` but showing `"Passed"`). Setup problems that prevent a test from being
+conducted — a program that wouldn't install, a value that never rendered, the
+REPL erroring — throw a `ProceduralError`. The error class distinguishes "the
+editor produced the wrong thing" from "the test couldn't run."
 
 ## Notes
 

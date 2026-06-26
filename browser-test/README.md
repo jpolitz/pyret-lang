@@ -1,10 +1,11 @@
 # browser-test — code.pyret.org's editor assertions, on embed instances and vscode webviews
 
 This directory runs the **same assertions** from `code.pyret.org`'s editor test
-suite against the three places the Pyret editor renders, through **one runner**:
+suite against the three places the Pyret editor renders. It's a **`node:test`**
+suite (no extra test-framework dependency) driven through **one runner**:
 
 ```
-node run.js --env=cpo|embed|vscode [--suites=all|check-blocks,errors,...] [--limit=N]
+node run.js --env=cpo|embed|vscode [--grep=<regex>] [--suites=all|check-blocks,errors,...]
 ```
 
 | `--env` | What it drives |
@@ -35,16 +36,24 @@ Two mechanisms keep the inputs and assertions identical to upstream:
 - **Same assertions.** `shared/page-assertions.js` is a line-for-line, in-page
   port of the `util.js` predicates (`checkAllTestsPassed` / `testErrorRendersString`
   / `testRunsAndHasCheckBlocks` / `testRunAndUseRepl` / `checkTableRendersCorrectly`);
-  `shared/cpo-assertions.js` orchestrates them exactly as `util.js` does. Each
-  function carries its `util.js` source reference. Because the port runs in-page
-  via Playwright, it can reach a vscode webview (Selenium can't), so the *same*
-  assertion code runs in all three environments.
+  `shared/cpo-assertions.js` orchestrates them exactly as `util.js` does, using
+  **`node:assert`** for the content checks. Each function carries its `util.js`
+  source reference. Because the port runs in-page via Playwright, it can reach a
+  vscode webview (Selenium can't), so the *same* assertion code runs in all three
+  environments.
 
   Running `--env=cpo` reproduces upstream's pass/fail on the real `/editor` page,
   which is what makes the port a trustworthy stand-in for `util.js`. (The port was
   first validated head-to-head against the real Selenium `util.js` suite; see the
   git history of this directory — the `util.js` path and the port produced
   identical results before the harness was consolidated onto the port.)
+
+- **Two failure kinds, kept distinct.** Content checks use `node:assert`, so a
+  wrong rendering fails as an **`AssertionError`** (with a value diff — "expected
+  `failed`, got `Passed`"). Anything that prevents the test from being conducted —
+  a program that wouldn't install, a value that never rendered, the REPL erroring —
+  throws a **`ProceduralError`** (`shared/errors.js`). Both fail the test; the
+  error class tells you which kind at a glance.
 
 ### Two webview details the port handles
 
@@ -60,7 +69,8 @@ Two mechanisms keep the inputs and assertions identical to upstream:
 ## Layout
 
 ```
-run.js                  the runner: env -> editor frame -> runSpecs(suites)
+run.js                  friendly CLI: --env/--grep -> `node --test ...` + PYRET_ENV
+tests/suite.test.js     the node:test entry: boots one env, one test() per spec
 envs/
   cpo.js                launch chromium, goto /editor
   embed.js              goto /embed/embed1.html, sendReset, find the iframe
@@ -68,10 +78,12 @@ envs/
 shared/
   load-cpo-specs.js     extract exact specs from code.pyret.org/test/*.js (no copying)
   page-assertions.js    in-page DOM port of util.js predicates (window.PA)
-  cpo-assertions.js     node-side orchestration mirroring util.js assertions
-  run-specs.js          dispatch loaded specs through the assertions
+  cpo-assertions.js     node:assert assertions mirroring util.js, per content check
+  dispatch.js           map a loaded spec to its assertion
+  errors.js             ProceduralError (procedural failures vs content AssertionError)
   playwright-page.js    `page` adapter over a Playwright frame
   find-frame.js         locate the editor frame (the one with #runButton)
+  browser.js            launch Chromium (system Chrome or Playwright's bundled one)
 vscode/fixture-workspace/test.arr   the .arr the custom editor opens
 results/                captured run logs
 ```
@@ -108,7 +120,22 @@ node run.js --env=vscode
 ./run-all.sh
 ```
 
-`--limit=N` runs only the first N specs per suite (handy for a quick smoke).
+### Filtering (local dev)
+
+`--grep` is a regex matched against both suite names and individual test names —
+so you can scope to one feature or one env:
+
+```bash
+node run.js --env=embed  --grep tables       # the tables suite, in the embed instance
+node run.js --env=cpo    --grep 'is-not'      # every is-not* test, in /editor
+node run.js --env=vscode --grep field-not-found
+
+npm run embed -- --grep tables                # same, via package scripts
+```
+
+Other flags: `--suites=check-blocks,errors,...` (default `all`),
+`--reporter=spec|tap|dot|junit` (default `spec`). Or skip the wrapper entirely:
+`PYRET_ENV=embed node --test --test-name-pattern=tables tests/suite.test.js`.
 
 ## Results
 

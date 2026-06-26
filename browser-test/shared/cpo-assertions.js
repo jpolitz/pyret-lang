@@ -1,25 +1,31 @@
 /*
  * cpo-assertions.js
  *
- * Node-side orchestration that reproduces the upstream assertion functions from
- * code.pyret.org/test-util/util.js, but expressed against an abstract `page`
- * adapter (so the same assertions run over Selenium, Playwright, or anything
- * that can evaluate JS in the editor frame). The DOM-level work is delegated to
- * window.PA (shared/page-assertions.js), which is a line-for-line port of the
- * util.js predicates.
+ * Reproduces the upstream assertion functions from
+ * code.pyret.org/test-util/util.js against an abstract `page` adapter. The
+ * DOM-level work is delegated to window.PA (shared/page-assertions.js), a
+ * line-for-line port of the util.js predicates.
+ *
+ * Failure taxonomy (see shared/errors.js):
+ *   - CONTENT checks -- the things actually under test -- use node:assert, so a
+ *     wrong rendering surfaces as an AssertionError (with a value diff).
+ *   - PROCEDURAL problems -- couldn't install the program, a value never
+ *     rendered, the REPL errored unexpectedly -- throw ProceduralError.
+ *   - Setup waits (page.waitFor) throw Playwright TimeoutError, also procedural.
  *
  * `page` adapter contract:
- *   page.inject()                  -> Promise   ; ensure window.PA is defined
- *   page.eval(exprString)          -> Promise<any> ; evaluate expr in editor frame
- *   page.waitFor(exprString, ms)   -> Promise   ; poll expr until truthy / throw on timeout
+ *   page.inject()                  -> Promise
+ *   page.eval(exprString)          -> Promise<any>   ; evaluate expr in editor frame
+ *   page.waitFor(exprString, ms)   -> Promise         ; poll until truthy / throw on timeout
  */
+const assert = require("node:assert/strict");
+const { ProceduralError } = require("./errors");
 
-// mirrors util.js ensureRendered
+// mirrors util.js ensureRendered -- an internal render error means the run
+// itself broke, so this is procedural rather than a content mismatch.
 function ensureRendered(text) {
   if (text.indexOf("One or more internal errors") > -1) {
-    throw new Error(
-      'Internal error occurred while rendering output.  Text content of error "' + text + '"'
-    );
+    throw new ProceduralError('internal error while rendering output: "' + text + '"');
   }
 }
 
@@ -34,7 +40,7 @@ async function setDefinitionsConfirmed(page, code) {
     if ((await page.eval("window.PA.cmValue()")) === code) return;
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error("could not install definitions into the editor (doc-sync race)");
+  throw new ProceduralError("could not install definitions into the editor (doc-sync race)");
 }
 
 // mirrors util.setDefinitionsEvalAndWait (set definitions, run, wait for break btn)
@@ -49,14 +55,17 @@ async function setDefinitionsRunAndWait(page, code, options) {
   await page.waitFor("window.PA.breakDone()", 30000);
 }
 
-// mirrors util.checkAllTestsPassed
+// mirrors util.checkAllTestsPassed -- CONTENT: "Looks shipshape" must be present.
 async function checkAllTestsPassed(page, name, timeout) {
   await page.inject();
   await page.waitFor("window.PA.testingSummaryPresent()", timeout || 20000);
   await page.waitFor("window.PA.doneRendering()", 20000);
   const res = await page.eval("window.PA.shipshapeResult()");
-  if (res.shipshape) return true;
-  throw new Error("Expected all tests to pass, but got: " + JSON.stringify(res.failures));
+  assert.ok(
+    res.shipshape,
+    'expected all tests to pass ("Looks shipshape"), but these blocks failed: ' +
+      JSON.stringify(res.failures, null, 2)
+  );
 }
 
 // mirrors util.runAndCheckAllTestsPassed
@@ -64,59 +73,53 @@ async function runAndCheckAllTestsPassed(page, code, name, timeout) {
   await setDefinitionsConfirmed(page, code);
   await page.eval("window.PA.clearOutput()");
   await page.eval("window.PA.run()");
-  // Wait for the run to actually finish (break button disabled) before reading,
-  // so a reused frame can't observe the previous program's results.
+  // Wait for the run to actually finish before reading, so a reused frame can't
+  // observe the previous program's results.
   await page.waitFor("window.PA.breakDone()", timeout || 900000);
   return checkAllTestsPassed(page, name, timeout);
 }
 
-// mirrors util.testErrorRendersString
+// mirrors util.testErrorRendersString -- CONTENT: error output contains `expected`.
 async function testErrorRendersString(page, code, expected, options) {
   await setDefinitionsRunAndWait(page, code, options);
   await page.waitFor("window.PA.compileErrorPresent()", 6000);
   await page.eval("window.PA.removeOutputCodeMirrors()");
   const text = await page.eval("window.PA.outputText()");
   ensureRendered(text);
-  if (text.indexOf(expected) === -1) {
-    throw new Error('Text content of error "' + text + '" did not match "' + expected + '"');
-  }
-  return true;
+  assert.ok(
+    text.indexOf(expected) !== -1,
+    "error output should contain " + JSON.stringify(expected) + ", but was:\n" + text
+  );
 }
 
-// mirrors util.testRunsAndHasCheckBlocks
+// mirrors util.testRunsAndHasCheckBlocks -- CONTENT: block/test counts and the
+// substrings each test must contain.
 async function testRunsAndHasCheckBlocks(page, code, specs, options) {
   await setDefinitionsRunAndWait(page, code, options);
   await page.waitFor("window.PA.doneRendering()", 20000);
   await page.eval("window.PA.removeOutputCodeMirrors()");
   const specLens = specs.map((s) => s.length);
   const blocks = await page.eval("window.PA.collectCheckBlocks(" + JSON.stringify(specLens) + ")");
-  if (specs.length !== blocks.length) {
-    throw new Error(
-      "Expected to see output for " + specs.length + " check blocks, but saw " + blocks.length
-    );
-  }
+
+  assert.strictEqual(blocks.length, specs.length, "number of check blocks rendered");
   blocks.forEach((b, i) => {
-    if (b.length !== specs[i].length) {
-      throw new Error(
-        "Expected to see output for " + specs[i].length +
-        " tests within check block at index " + i + ", but saw " + b.length
-      );
-    }
+    assert.strictEqual(b.length, specs[i].length, "number of tests in check block " + i);
     b.forEach((text, j) => {
       ensureRendered(text);
       specs[i][j].forEach((must) => {
-        if (text.indexOf(must) === -1) {
-          throw new Error('Text content of error "' + text + '" did not contain "' + must + '"');
-        }
+        assert.ok(
+          text.indexOf(must) !== -1,
+          "check block " + i + " test " + j + " should contain " + JSON.stringify(must) +
+            ", but was: " + JSON.stringify(text)
+        );
       });
     });
   });
-  return true;
 }
 
 // mirrors util.evalPyretNoError: submit code at the REPL, wait for a new result
-// child of #output, and return its .replOutput/.replTextOutput texts (throwing
-// if the result is not an echo-container/trace, i.e. an error).
+// child of #output, and return its .replOutput/.replTextOutput texts. A result
+// that isn't an echo-container/trace means the REPL errored -> procedural.
 async function evalAtReplNoError(page, code) {
   await page.inject();
   await page.waitFor("window.PA.replPromptVisible()", 15000);
@@ -132,29 +135,25 @@ async function evalAtReplNoError(page, code) {
     await new Promise((r) => setTimeout(r, 200));
   }
   if (!res || !(res.class === "echo-container" || res.class === "trace")) {
-    throw new Error("Failed to run Pyret code: " + code);
+    throw new ProceduralError("REPL did not run cleanly for: " + code);
   }
   return res.outputs;
 }
 
-// mirrors util.testRunAndUseRepl: run definitions (optionally type-checked),
-// then evaluate a sequence of [code, expectedSubstring] pairs at the REPL.
+// mirrors util.testRunAndUseRepl -- CONTENT: each REPL result contains the
+// expected substring. (An empty `expected` is trivially contained, matching
+// util.js, so assignment statements with no output pass.)
 async function testRunAndUseRepl(page, code, toRepl, options) {
   await setDefinitionsRunAndWait(page, code, options);
   for (const tr of toRepl) {
     const outputs = await evalAtReplNoError(page, tr[0]);
-    if (outputs.length === 0 && tr[1] === "") {
-      continue;
-    } else if (outputs.length === 0 && tr[1] !== "") {
-      throw new Error("Expected repl text content " + tr[1] + " but got empty output for repl entry " + tr[0]);
-    } else {
-      const t = outputs[0];
-      if (t.indexOf(tr[1]) === -1) {
-        throw new Error("Expected repl text content " + tr[1] + " not contained in output " + t + " for repl entry " + tr[0]);
-      }
-    }
+    const got = outputs[0] || "";
+    assert.ok(
+      got.indexOf(tr[1]) !== -1,
+      "REPL " + JSON.stringify(tr[0]) + " output " + JSON.stringify(got) +
+        " should contain " + JSON.stringify(tr[1])
+    );
   }
-  return true;
 }
 
 // Submit code at the REPL, wait for a new result child, then poll a reader
@@ -173,7 +172,8 @@ async function evalAtReplThenRead(page, code, readerExpr) {
   return v;
 }
 
-// mirrors util.checkTableRendersCorrectly
+// mirrors util.checkTableRendersCorrectly -- CONTENT: each table cell's rendered
+// HTML equals the rendered HTML of the corresponding value expression.
 async function checkTableRendersCorrectly(page, code, name, timeout) {
   await setDefinitionsConfirmed(page, code);
   await page.eval("window.PA.clearOutput()");
@@ -181,22 +181,21 @@ async function checkTableRendersCorrectly(page, code, name, timeout) {
   await page.waitFor("window.PA.breakDone()", timeout || 900000);
   await page.waitFor("window.PA.tablePre() !== null", 20000);
   const tests = JSON.parse(await page.eval("window.PA.tablePre()"));
-  if (!tests.length) throw new Error("No tables tests found");
+  if (!tests.length) throw new ProceduralError("table program produced no cell specs");
+
   for (const t of tests) {
     const cellHTML = await evalAtReplThenRead(
       page, t.table, "window.PA.lastReplTableCellHTML(" + t.row + "," + t.col + ")"
     );
     const valHTML = await evalAtReplThenRead(page, t.val, "window.PA.lastReplOutputHTML()");
-    if (cellHTML !== valHTML) {
-      throw new Error(
-        "Table renders example " + t.val + " incorrectly:\n  cell: " + cellHTML + "\n  val:  " + valHTML
-      );
-    }
+    assert.strictEqual(
+      cellHTML, valHTML,
+      "table cell (row " + t.row + ", col " + t.col + ") should render like " + t.val
+    );
   }
   // NOTE: util.checkTableRendersCorrectly has a checkAllTestsPassed(...) call
-  // after its `return maybeTest.then(...)`, i.e. it is unreachable dead code and
-  // never runs. We match that: the assertion is the per-cell render comparison.
-  return true;
+  // after its `return maybeTest.then(...)`, i.e. unreachable dead code. We match
+  // that: the assertion is the per-cell render comparison.
 }
 
 module.exports = {

@@ -1,76 +1,52 @@
 #!/usr/bin/env node
 /*
- * run.js -- run code.pyret.org's assertions against one environment.
+ * run.js -- friendly CLI over the node:test suite.
  *
- *   node run.js --env=cpo|embed|vscode [--suites=all|a,b,...] [--limit=N]
+ *   node run.js --env=cpo|embed|vscode [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]
  *
- * One mechanism for all three: an environment adapter (envs/<env>.js) returns a
- * Playwright frame focused on the CPO editor DOM; the shared in-page port of
- * util.js (shared/page-assertions.js + shared/cpo-assertions.js, driven via
- * shared/run-specs.js) then runs the SAME specs -- loaded straight out of the
- * unmodified code.pyret.org/test/*.js by shared/load-cpo-specs.js -- against it.
+ * Examples:
+ *   node run.js --env=embed --grep tables        # one feature, in the embed instance
+ *   node run.js --env=cpo   --grep 'is-not'      # regex over test names
+ *   node run.js --env=vscode                     # everything, in the vscode webview
  *
- *   cpo    = the reference: reproduces upstream's outcomes on /editor
- *   embed  = the embed API's embedded instance
- *   vscode = the pyret-parley.cpo webview (headless VS Code for the Web)
+ * This just shells out to `node --test` with the right flags + PYRET_ENV, so you
+ * get node:test's native reporters and exit code. `--grep` maps to
+ * --test-name-pattern (matches suite names and individual test names).
  *
- * Exit code 0 iff every spec passes.
+ * It needs no build of its own; cpo/embed need the CPO server running, vscode
+ * does not (its assets come from the built extension).
  */
-const { loadSpecsFromFile } = require("./shared/load-cpo-specs");
-const { makePlaywrightPage } = require("./shared/playwright-page");
-const { runSpecs } = require("./shared/run-specs");
+const path = require("path");
+const { spawn } = require("child_process");
 
-// suite name -> the upstream test file whose specs it loads
-const SUITES = {
-  "check-blocks": "check-blocks.js",
-  "errors": "errors.js",
-  "charts": "chart.js",
-  "type-check": "type-check.js",
-  "tables": "tables.js",
-};
-
-function arg(name, def) {
-  const p = process.argv.find((a) => a.startsWith("--" + name + "="));
-  return p ? p.slice(name.length + 3) : def;
+function arg(name) {
+  // supports "--name=value" and "--name value"
+  const argv = process.argv.slice(2);
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--" + name) return argv[i + 1];
+    if (argv[i].startsWith("--" + name + "=")) return argv[i].slice(name.length + 3);
+  }
+  return undefined;
 }
 
 const env = arg("env");
-const suitesArg = arg("suites", "all");
-const limit = arg("limit") ? parseInt(arg("limit"), 10) : Infinity;
-
 if (!env || !["cpo", "embed", "vscode"].includes(env)) {
-  console.error("usage: node run.js --env=cpo|embed|vscode [--suites=all|check-blocks,errors,...] [--limit=N]");
+  console.error("usage: node run.js --env=cpo|embed|vscode [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]");
   process.exit(2);
 }
-const chosen = suitesArg === "all" ? Object.keys(SUITES) : suitesArg.split(",").map((s) => s.trim());
+const grep = arg("grep");
+const suites = arg("suites") || "all";
+const reporter = arg("reporter") || "spec";
 
-(async () => {
-  const { setup, label } = require("./envs/" + env);
-  console.log("== Environment: " + label + " ==");
-  const { frame, cleanup } = await setup();
-  const results = {};
-  try {
-    const page = makePlaywrightPage(frame);
-    await page.inject();
-    await page.waitFor("window.PA.editorReady()", 120000);
+const nodeArgs = ["--test", "--test-reporter=" + reporter];
+if (grep) nodeArgs.push("--test-name-pattern=" + grep);
+nodeArgs.push(path.join(__dirname, "tests", "suite.test.js"));
 
-    for (const suite of chosen) {
-      const file = SUITES[suite];
-      if (!file) { console.log("(skip unknown suite " + suite + ")"); continue; }
-      let specs = loadSpecsFromFile(file);
-      if (limit !== Infinity) specs = specs.slice(0, limit);
-      console.log("\n== " + suite + " (" + specs.length + " specs from test/" + file + ") ==");
-      results[suite] = await runSpecs(page, specs, { log: console.log });
-    }
-  } finally {
-    await cleanup();
-  }
-
-  let pass = 0, fail = 0;
-  for (const k of Object.keys(results)) { pass += results[k].pass; fail += results[k].fail; }
-  console.log("\n==== " + label + ": " + pass + " passing, " + fail + " failing ====");
-  for (const k of Object.keys(results)) {
-    results[k].failures.forEach((f) => console.log("  " + k + ": " + f.label + " :: " + f.error));
-  }
-  process.exit(fail === 0 ? 0 : 1);
-})().catch((e) => { console.error("FATAL:", e.stack || e.message); process.exit(2); });
+const child = spawn(process.execPath, nodeArgs, {
+  stdio: "inherit",
+  env: { ...process.env, PYRET_ENV: env, PYRET_SUITES: suites },
+});
+child.on("exit", (code, signal) => {
+  if (signal) process.kill(process.pid, signal);
+  else process.exit(code == null ? 1 : code);
+});

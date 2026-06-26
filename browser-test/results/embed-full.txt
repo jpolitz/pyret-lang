@@ -1,250 +1,256 @@
-== Environment: embed API embedded instance (#embed1 iframe) ==
-
-== check-blocks (29 specs from test/check-blocks.js) ==
-  ✔ simple
-  ✔ simple2
-  ✔ simple3
-  ✔ pass-then-fail
-  ✔ satisfies0
-  ✔ doesNotRaise0
-  ✔ is-pass
-  ✔ is-fail
-  ✔ is-not-fail
-  ✔ is-not-pass
-  ✔ is-op-fail
-  ✔ is-op-pass
-  ✔ is-not-op-pass
-  ✔ is-not-op-fail
-  ✔ satisfies-pass
-  ✔ satisfies-fail
-  ✔ violates-fail
-  ✔ violates-pass
-  ✔ raises-pass
-  ✔ raises-fail
-  ✔ raises-other-than-fail
-  ✔ raises-other-than-pass
-  ✔ does-not-raise-fail
-  ✔ does-not-raise-pass
-  ✔ raises-satisfies-pass
-  ✔ raises-satisfies-fail
-  ✔ raises-violates-fail
-  ✔ raises-violates-pass
-  ✔ deep-recursion-in-first-test
-
-== errors (193 specs from test/errors.js) ==
-  ✔ field-not-found
-  ✔ lookup-non-object
-  ✔ lookup-constructor-not-object
-  ✔ update-non-obj
-  ✔ update-non-ref
-  ✔ update-non-existent-field
-  ✔ no-cases-matched
-  ✔ no-branches-matched
-  ✔ template-not-finished
-  ✔ template-not-finished
-  ✔ lookup-non-tuple
-  ✔ lookup-large-index
-  ✔ type-id-used-as-value
-  ✔ images-equal-preds
-  ✔ text-preds
-  ✔ text-font-preds
-  ✔ regular-polygon
-  ✔ deeply-recursive-field-not-found
-  ✔ is-pass1
-  ✔ is-pass2
-  ✔ is-fail1
-  ✔ is-fail2
-  ✔ is-fail3
-  ✔ is-fail4
-  ✔ is-fail5
-  ✔ is-because-fail1
-  ✔ is-because-fail2
-  ✔ is-because-fail3
-  ✔ is-because-fail4
-  ✔ is-because-fail5
-  ✔ is-because-fail6
-  ✔ is==-pass1
-  ✔ is==-pass2
-  ✔ is==-fail1
-  ✔ is==-fail2
-  ✔ is==-fail3
-  ✔ is==-fail4
-  ✔ is==-fail5
-  ✔ is==-because-fail1
-  ✔ is==-because-fail2
-  ✔ is==-because-fail3
-  ✔ is==-because-fail4
-  ✔ is==-because-fail5
-  ✔ is==-because-fail6
-  ✔ is=~-pass1
-  ✔ is=~-pass2
-  ✔ is=~-fail1
-  ✔ is=~-fail2
-  ✔ is=~-fail3
-  ✔ is=~-fail4
-  ✔ is=~-fail5
-  ✔ is=~-because-fail1
-  ✔ is=~-because-fail2
-  ✔ is=~-because-fail3
-  ✔ is=~-because-fail4
-  ✔ is=~-because-fail5
-  ✔ is=~-because-fail6
-  ✔ is<=>-pass1
-  ✔ is<=>-pass2
-  ✔ is<=>-fail1
-  ✔ is<=>-fail2
-  ✔ is<=>-fail3
-  ✔ is<=>-fail4
-  ✔ is<=>-fail5
-  ✔ is<=>-because-fail1
-  ✔ is<=>-because-fail2
-  ✔ is<=>-because-fail3
-  ✔ is<=>-because-fail4
-  ✔ is<=>-because-fail5
-  ✔ is<=>-because-fail6
-  ✔ is-roughly-pass1
-  ✔ is-roughly-pass2
-  ✔ is-roughly-pass3
-  ✔ is-roughly-pass4
-  ✔ is-roughly-fail1
-  ✔ is-roughly-fail2
-  ✔ is-roughly-fail3
-  ✔ is-roughly-because-fail1
-  ✔ is-roughly-because-fail2
-  ✔ is-roughly-because-fail3
-  ✔ is-roughly-because-fail4
-  ✔ is-roughly-because-fail5
-  ✔ is-not-pass1
-  ✔ is-not-pass2
-  ✔ is-not-pass3
-  ✔ is-not-pass4
-  ✔ is-not-fail1
-  ✔ is-not-fail2
-  ✔ is-not-because-fail1
-  ✔ is-not==-pass
-  ✔ is-not==-fail1
-  ✔ is-not==-fail2
-  ✔ is-not==-fail3
-  ✔ is-not==-fail4
-  ✔ is-not==-fail5
-  ✔ is-not==-because-fail1
-  ✔ is-not==-because-fail2
-  ✔ is-not==-because-fail3
-  ✔ is-not==-because-fail4
-  ✔ is-not=~-pass1
-  ✔ is-not=~-pass2
-  ✔ is-not=~-fail1
-  ✔ is-not=~-fail2
-  ✔ is-not=~-fail3
-  ✔ is-not=~-fail4
-  ✔ is-not=~-fail5
-  ✔ is-not=~-because-fail1
-  ✔ is-not=~-because-fail2
-  ✔ is-not=~-because-fail3
-  ✔ is-not=~-because-fail4
-  ✔ is-not<=>-pass1
-  ✔ is-not<=>-pass2
-  ✔ is-not<=>-fail1
-  ✔ is-not<=>-fail2
-  ✔ is-not<=>-fail3
-  ✔ is-not<=>-fail4
-  ✔ is-not<=>-fail5
-  ✔ is-not<=>-because-fail1
-  ✔ is-not<=>-because-fail2
-  ✔ is-not<=>-because-fail3
-  ✔ is-not<=>-because-fail4
-  ✔ satisfies-pass1
-  ✔ satisfies-pass2
-  ✔ satisfies-fail1
-  ✔ satisfies-fail2
-  ✔ satisfies-fail3
-  ✔ satisfies-fail4
-  ✔ satisfies-fail5
-  ✔ satisfies-fail6
-  ✔ satisfies-because-fail1
-  ✔ satisfies-because-fail2
-  ✔ satisfies-because-fail3
-  ✔ satisfies-because-fail4
-  ✔ violates-pass1
-  ✔ violates-pass2
-  ✔ violates-fail1
-  ✔ violates-fail2
-  ✔ violates-fail3
-  ✔ violates-fail4
-  ✔ violates-fail5
-  ✔ violates-fail6
-  ✔ violates-because-fail1
-  ✔ violates-because-fail2
-  ✔ violates-because-fail3
-  ✔ violates-because-fail4
-  ✔ raises-pass1
-  ✔ raises-pass2
-  ✔ raises-fail1
-  ✔ raises-fail2
-  ✔ raises-fail3
-  ✔ raises-fail4
-  ✔ does-not-raise-pass1
-  ✔ does-not-raise-pass2
-  ✔ does-not-raise-fail1
-  ✔ does-not-raise-fail2
-  ✔ raises-other-than-pass1
-  ✔ raises-other-than-pass2
-  ✔ raises-other-than-fail1
-  ✔ raises-other-than-fail2
-  ✔ raises-other-than-fail3
-  ✔ raises-other-than-fail4
-  ✔ raises-satisfies-pass1
-  ✔ raises-satisfies-pass2
-  ✔ raises-satisfies-pass3
-  ✔ raises-satisfies-fail1
-  ✔ raises-satisfies-fail2
-  ✔ raises-satisfies-fail3
-  ✔ raises-satisfies-fail4
-  ✔ raises-satisfies-fail5
-  ✔ raises-satisfies-fail6
-  ✔ raises-satisfies-because-fail1
-  ✔ raises-satisfies-because-fail2
-  ✔ raises-satisfies-because-fail3
-  ✔ raises-satisfies-because-fail4
-  ✔ raises-satisfies-because-fail5
-  ✔ raises-satisfies-because-fail6
-  ✔ raises-satisfies-because-fail7
-  ✔ raises-violates-pass1
-  ✔ raises-violates-pass2
-  ✔ raises-violates-pass3
-  ✔ raises-violates-fail1
-  ✔ raises-violates-fail2
-  ✔ raises-violates-fail3
-  ✔ raises-violates-fail4
-  ✔ raises-violates-fail5
-  ✔ raises-violates-fail6
-  ✔ raises-violates-because-fail1
-  ✔ raises-violates-because-fail2
-  ✔ raises-violates-because-fail3
-  ✔ raises-violates-because-fail4
-  ✔ raises-violates-because-fail5
-  ✔ raises-violates-because-fail6
-  ✔ raises-violates-because-fail7
-
-== charts (10 specs from test/chart.js) ==
-  ✔ bar-chart-test.arr
-  ✔ box-plot-test.arr
-  ✔ dot-chart-test.arr
-  ✔ image-bar-chart-test.arr
-  ✔ image-histogram-test.arr
-  ✔ image-pie-chart-test.arr
-  ✔ image-scatter-and-line-test.arr
-  ✔ interval-chart-test.arr
-  ✔ labeled-num-dot-chart-test.arr
-  ✔ num-dot-chart-test.arr
-
-== type-check (3 specs from test/type-check.js) ==
-  ✔ string-dict-import
-  ✔ string-dict-include
-  ✔ beside-list
-
-== tables (1 specs from test/tables.js) ==
-  ✔ tables-test.arr
-
-==== embed API embedded instance (#embed1 iframe): 236 passing, 0 failing ====
-EMBED EXIT 0
+environment: embed API embedded instance (#embed1 iframe)
+▶ check-blocks
+  ✔ simple (316.866196ms)
+  ✔ simple2 (272.594034ms)
+  ✔ simple3 (401.700207ms)
+  ✔ pass-then-fail (216.480017ms)
+  ✔ satisfies0 (397.706966ms)
+  ✔ doesNotRaise0 (202.347418ms)
+  ✔ is-pass (207.803959ms)
+  ✔ is-fail (210.091142ms)
+  ✔ is-not-fail (214.905129ms)
+  ✔ is-not-pass (180.166447ms)
+  ✔ is-op-fail (197.612674ms)
+  ✔ is-op-pass (98.679139ms)
+  ✔ is-not-op-pass (200.892498ms)
+  ✔ is-not-op-fail (198.365268ms)
+  ✔ satisfies-pass (197.296102ms)
+  ✔ satisfies-fail (278.168673ms)
+  ✔ violates-fail (232.047304ms)
+  ✔ violates-pass (198.045239ms)
+  ✔ raises-pass (203.072523ms)
+  ✔ raises-fail (208.010547ms)
+  ✔ raises-other-than-fail (214.932507ms)
+  ✔ raises-other-than-pass (288.780907ms)
+  ✔ does-not-raise-fail (159.839613ms)
+  ✔ does-not-raise-pass (213.623267ms)
+  ✔ raises-satisfies-pass (226.614473ms)
+  ✔ raises-satisfies-fail (177.049159ms)
+  ✔ raises-violates-fail (199.256309ms)
+  ✔ raises-violates-pass (192.824466ms)
+  ✔ deep-recursion-in-first-test (321.807229ms)
+✔ check-blocks (11120.670645ms)
+▶ errors
+  ✔ field-not-found (253.719509ms)
+  ✔ lookup-non-object (162.87662ms)
+  ✔ lookup-constructor-not-object (240.215225ms)
+  ✔ update-non-obj (210.36543ms)
+  ✔ update-non-ref (190.232774ms)
+  ✔ update-non-existent-field (154.65747ms)
+  ✔ no-cases-matched (245.594388ms)
+  ✔ no-branches-matched (201.093085ms)
+  ✔ template-not-finished (141.97409ms)
+  ✔ template-not-finished (196.013903ms)
+  ✔ lookup-non-tuple (165.045595ms)
+  ✔ lookup-large-index (206.608397ms)
+  ✔ type-id-used-as-value (104.140523ms)
+  ✔ images-equal-preds (282.730441ms)
+  ✔ text-preds (119.778113ms)
+  ✔ text-font-preds (194.810801ms)
+  ✔ regular-polygon (190.886338ms)
+  ✔ deeply-recursive-field-not-found (241.871974ms)
+  ✔ is-pass1 (206.610046ms)
+  ✔ is-pass2 (196.643469ms)
+  ✔ is-fail1 (194.029006ms)
+  ✔ is-fail2 (213.748266ms)
+  ✔ is-fail3 (255.520477ms)
+  ✔ is-fail4 (244.9065ms)
+  ✔ is-fail5 (240.188105ms)
+  ✔ is-because-fail1 (245.064151ms)
+  ✔ is-because-fail2 (193.221922ms)
+  ✔ is-because-fail3 (188.757525ms)
+  ✔ is-because-fail4 (214.244521ms)
+  ✔ is-because-fail5 (203.054962ms)
+  ✔ is-because-fail6 (193.178163ms)
+  ✔ is==-pass1 (198.649743ms)
+  ✔ is==-pass2 (219.447475ms)
+  ✔ is==-fail1 (186.159235ms)
+  ✔ is==-fail2 (205.270793ms)
+  ✔ is==-fail3 (256.36326ms)
+  ✔ is==-fail4 (219.190946ms)
+  ✔ is==-fail5 (209.286867ms)
+  ✔ is==-because-fail1 (287.217258ms)
+  ✔ is==-because-fail2 (238.308879ms)
+  ✔ is==-because-fail3 (182.6619ms)
+  ✔ is==-because-fail4 (189.703776ms)
+  ✔ is==-because-fail5 (176.274525ms)
+  ✔ is==-because-fail6 (241.885643ms)
+  ✔ is=~-pass1 (203.15376ms)
+  ✔ is=~-pass2 (265.068736ms)
+  ✔ is=~-fail1 (370.668456ms)
+  ✔ is=~-fail2 (220.39099ms)
+  ✔ is=~-fail3 (217.582237ms)
+  ✔ is=~-fail4 (188.436487ms)
+  ✔ is=~-fail5 (219.568193ms)
+  ✔ is=~-because-fail1 (188.675765ms)
+  ✔ is=~-because-fail2 (216.05041ms)
+  ✔ is=~-because-fail3 (191.948601ms)
+  ✔ is=~-because-fail4 (197.407662ms)
+  ✔ is=~-because-fail5 (219.509133ms)
+  ✔ is=~-because-fail6 (181.199619ms)
+  ✔ is<=>-pass1 (223.552845ms)
+  ✔ is<=>-pass2 (251.589023ms)
+  ✔ is<=>-fail1 (198.851302ms)
+  ✔ is<=>-fail2 (223.581013ms)
+  ✔ is<=>-fail3 (211.000315ms)
+  ✔ is<=>-fail4 (167.328438ms)
+  ✔ is<=>-fail5 (218.191492ms)
+  ✔ is<=>-because-fail1 (215.063496ms)
+  ✔ is<=>-because-fail2 (185.099071ms)
+  ✔ is<=>-because-fail3 (218.265752ms)
+  ✔ is<=>-because-fail4 (184.734983ms)
+  ✔ is<=>-because-fail5 (172.044444ms)
+  ✔ is<=>-because-fail6 (244.683163ms)
+  ✔ is-roughly-pass1 (219.306646ms)
+  ✔ is-roughly-pass2 (189.735867ms)
+  ✔ is-roughly-pass3 (175.59329ms)
+  ✔ is-roughly-pass4 (214.202159ms)
+  ✔ is-roughly-fail1 (204.471851ms)
+  ✔ is-roughly-fail2 (175.651088ms)
+  ✔ is-roughly-fail3 (195.828424ms)
+  ✔ is-roughly-because-fail1 (200.941227ms)
+  ✔ is-roughly-because-fail2 (282.745539ms)
+  ✔ is-roughly-because-fail3 (215.175025ms)
+  ✔ is-roughly-because-fail4 (185.068701ms)
+  ✔ is-roughly-because-fail5 (199.944525ms)
+  ✔ is-not-pass1 (165.935309ms)
+  ✔ is-not-pass2 (164.447668ms)
+  ✔ is-not-pass3 (189.513569ms)
+  ✔ is-not-pass4 (182.613069ms)
+  ✔ is-not-fail1 (119.130115ms)
+  ✔ is-not-fail2 (204.609439ms)
+  ✔ is-not-because-fail1 (177.077778ms)
+  ✔ is-not==-pass (215.921019ms)
+  ✔ is-not==-fail1 (211.161546ms)
+  ✔ is-not==-fail2 (249.864861ms)
+  ✔ is-not==-fail3 (209.188527ms)
+  ✔ is-not==-fail4 (164.939025ms)
+  ✔ is-not==-fail5 (162.516466ms)
+  ✔ is-not==-because-fail1 (217.754973ms)
+  ✔ is-not==-because-fail2 (284.058032ms)
+  ✔ is-not==-because-fail3 (379.864772ms)
+  ✔ is-not==-because-fail4 (245.470823ms)
+  ✔ is-not=~-pass1 (162.394923ms)
+  ✔ is-not=~-pass2 (194.915191ms)
+  ✔ is-not=~-fail1 (230.855752ms)
+  ✔ is-not=~-fail2 (210.041562ms)
+  ✔ is-not=~-fail3 (198.167007ms)
+  ✔ is-not=~-fail4 (257.119043ms)
+  ✔ is-not=~-fail5 (215.748161ms)
+  ✔ is-not=~-because-fail1 (217.713426ms)
+  ✔ is-not=~-because-fail2 (205.389194ms)
+  ✔ is-not=~-because-fail3 (195.927622ms)
+  ✔ is-not=~-because-fail4 (190.417835ms)
+  ✔ is-not<=>-pass1 (180.158673ms)
+  ✔ is-not<=>-pass2 (196.050712ms)
+  ✔ is-not<=>-fail1 (210.12972ms)
+  ✔ is-not<=>-fail2 (198.314755ms)
+  ✔ is-not<=>-fail3 (99.158948ms)
+  ✔ is-not<=>-fail4 (225.987706ms)
+  ✔ is-not<=>-fail5 (178.16598ms)
+  ✔ is-not<=>-because-fail1 (188.655225ms)
+  ✔ is-not<=>-because-fail2 (224.186139ms)
+  ✔ is-not<=>-because-fail3 (208.73171ms)
+  ✔ is-not<=>-because-fail4 (212.585712ms)
+  ✔ satisfies-pass1 (171.420519ms)
+  ✔ satisfies-pass2 (184.741963ms)
+  ✔ satisfies-fail1 (206.467527ms)
+  ✔ satisfies-fail2 (204.932547ms)
+  ✔ satisfies-fail3 (185.886423ms)
+  ✔ satisfies-fail4 (202.152128ms)
+  ✔ satisfies-fail5 (217.281559ms)
+  ✔ satisfies-fail6 (198.391358ms)
+  ✔ satisfies-because-fail1 (195.174594ms)
+  ✔ satisfies-because-fail2 (197.875508ms)
+  ✔ satisfies-because-fail3 (404.046697ms)
+  ✔ satisfies-because-fail4 (229.809458ms)
+  ✔ violates-pass1 (265.034076ms)
+  ✔ violates-pass2 (205.92463ms)
+  ✔ violates-fail1 (198.565625ms)
+  ✔ violates-fail2 (192.17632ms)
+  ✔ violates-fail3 (194.525842ms)
+  ✔ violates-fail4 (204.954747ms)
+  ✔ violates-fail5 (203.990554ms)
+  ✔ violates-fail6 (189.603607ms)
+  ✔ violates-because-fail1 (215.336574ms)
+  ✔ violates-because-fail2 (219.031854ms)
+  ✔ violates-because-fail3 (252.564324ms)
+  ✔ violates-because-fail4 (168.4602ms)
+  ✔ raises-pass1 (250.766248ms)
+  ✔ raises-pass2 (211.162532ms)
+  ✔ raises-fail1 (211.081152ms)
+  ✔ raises-fail2 (198.779811ms)
+  ✔ raises-fail3 (204.881258ms)
+  ✔ raises-fail4 (215.465722ms)
+  ✔ does-not-raise-pass1 (183.132383ms)
+  ✔ does-not-raise-pass2 (200.580529ms)
+  ✔ does-not-raise-fail1 (205.423453ms)
+  ✔ does-not-raise-fail2 (215.419762ms)
+  ✔ raises-other-than-pass1 (230.286814ms)
+  ✔ raises-other-than-pass2 (219.112406ms)
+  ✔ raises-other-than-fail1 (213.584565ms)
+  ✔ raises-other-than-fail2 (230.117605ms)
+  ✔ raises-other-than-fail3 (195.962812ms)
+  ✔ raises-other-than-fail4 (183.922557ms)
+  ✔ raises-satisfies-pass1 (180.79021ms)
+  ✔ raises-satisfies-pass2 (220.070858ms)
+  ✔ raises-satisfies-pass3 (216.141196ms)
+  ✔ raises-satisfies-fail1 (191.796814ms)
+  ✔ raises-satisfies-fail2 (181.250106ms)
+  ✔ raises-satisfies-fail3 (212.83952ms)
+  ✔ raises-satisfies-fail4 (267.624397ms)
+  ✔ raises-satisfies-fail5 (245.744293ms)
+  ✔ raises-satisfies-fail6 (198.619073ms)
+  ✔ raises-satisfies-because-fail1 (202.710423ms)
+  ✔ raises-satisfies-because-fail2 (252.227387ms)
+  ✔ raises-satisfies-because-fail3 (321.251571ms)
+  ✔ raises-satisfies-because-fail4 (217.814125ms)
+  ✔ raises-satisfies-because-fail5 (192.690955ms)
+  ✔ raises-satisfies-because-fail6 (196.664065ms)
+  ✔ raises-satisfies-because-fail7 (214.857846ms)
+  ✔ raises-violates-pass1 (192.09422ms)
+  ✔ raises-violates-pass2 (175.632909ms)
+  ✔ raises-violates-pass3 (188.036638ms)
+  ✔ raises-violates-fail1 (156.458836ms)
+  ✔ raises-violates-fail2 (235.906745ms)
+  ✔ raises-violates-fail3 (233.240284ms)
+  ✔ raises-violates-fail4 (215.399772ms)
+  ✔ raises-violates-fail5 (183.63354ms)
+  ✔ raises-violates-fail6 (203.499128ms)
+  ✔ raises-violates-because-fail1 (219.187974ms)
+  ✔ raises-violates-because-fail2 (196.936434ms)
+  ✔ raises-violates-because-fail3 (194.009296ms)
+  ✔ raises-violates-because-fail4 (215.242183ms)
+  ✔ raises-violates-because-fail5 (244.136855ms)
+  ✔ raises-violates-because-fail6 (288.837184ms)
+  ✔ raises-violates-because-fail7 (221.11104ms)
+✔ errors (40473.488231ms)
+▶ charts
+  ✔ bar-chart-test.arr (22181.157037ms)
+  ✔ box-plot-test.arr (532.958826ms)
+  ✔ dot-chart-test.arr (682.208601ms)
+  ✔ image-bar-chart-test.arr (336.749199ms)
+  ✔ image-histogram-test.arr (356.93281ms)
+  ✔ image-pie-chart-test.arr (413.351524ms)
+  ✔ image-scatter-and-line-test.arr (1097.238563ms)
+  ✔ interval-chart-test.arr (5023.330512ms)
+  ✔ labeled-num-dot-chart-test.arr (376.287542ms)
+  ✔ num-dot-chart-test.arr (426.390971ms)
+✔ charts (31427.54393ms)
+▶ type-check
+  ✔ string-dict-import (13592.683666ms)
+  ✔ string-dict-include (13183.95531ms)
+  ✔ beside-list (7124.610465ms)
+✔ type-check (33901.753768ms)
+▶ tables
+  ✔ tables-test.arr (796.295634ms)
+✔ tables (796.670681ms)
+ℹ tests 236
+ℹ suites 5
+ℹ pass 236
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 118689.186595
+embed EXIT 0
