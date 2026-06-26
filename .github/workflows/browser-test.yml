@@ -38,9 +38,12 @@ jobs:
 
       - name: Build vscode extension
         working-directory: ./vscode
+        # --ignore-scripts: compiling needs only webpack/ts-loader, but a devDep
+        # (@vscode/test-web -> @playwright/browser-chromium) would otherwise
+        # download a ~150MB Chromium in postinstall, which the build doesn't use.
         run: |
           ln -sf ../code.pyret.org/build build
-          npm ci
+          npm ci --ignore-scripts
           npm run compile
 
       # /editor + the embed host page are served from code.pyret.org/build;
@@ -86,8 +89,12 @@ jobs:
 
       - name: Install browser-test deps + Chromium
         working-directory: ./browser-test
+        # --ignore-scripts skips the implicit @playwright/browser-chromium and
+        # playwright browser downloads from npm ci; we then install exactly one
+        # Chromium (with OS deps) explicitly. The vscode env runs @vscode/test-web
+        # in browserType:'none' and launches that Chromium itself.
         run: |
-          npm ci
+          npm ci --ignore-scripts
           npx playwright install --with-deps chromium
 
       - name: Install CPO server runtime deps
