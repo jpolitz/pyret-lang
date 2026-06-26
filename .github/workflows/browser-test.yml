@@ -1,0 +1,90 @@
+name: browser-test (embed + vscode webviews)
+
+# Runs code.pyret.org's editor assertions against three environments via the
+# single Playwright runner in browser-test/:
+#   cpo    -- the reference (/editor)
+#   embed  -- the embed API's embedded instance
+#   vscode -- the pyret-parley.cpo webview (headless VS Code for the Web)
+
+on:
+  push:
+    tags-ignore:
+      - automated*
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  browser-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      # --- build code.pyret.org (provides /editor + the embed host page) ---
+      - name: Link pyret-lang
+        working-directory: ./code.pyret.org
+        run: |
+          ln -s ../lang pyret
+          cd ../lang && npm install && make phaseA-deps
+
+      - name: Build code.pyret.org web assets
+        working-directory: ./code.pyret.org
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+
+      # --- build the vscode extension (provides the webview's editor assets) ---
+      - name: Build vscode extension
+        working-directory: ./vscode
+        run: |
+          ln -sf ../code.pyret.org/build build
+          npm ci
+          npm run compile
+
+      # --- browser-test harness + a Chromium for Playwright ---
+      - name: Install browser-test deps
+        working-directory: ./browser-test
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # --- start the CPO server (cpo + embed environments load /editor from it) ---
+      - name: Start CPO server
+        working-directory: ./code.pyret.org
+        env:
+          BASE_URL: http://localhost:4999
+          PORT: '4999'
+          PYRET: http://localhost:4999/js/cpo-main.jarr
+          POSTMESSAGE_ORIGIN: '*'
+          NODE_ENV: development
+          SESSION_SECRET: not-so-secret
+          REDISCLOUD_URL: ''
+          URL_FILE_MODE: all-remote
+          IMAGE_PROXY_BYPASS: 'true'
+          SHARED_FETCH_SERVER: https://code.pyret.org
+          CURRENT_PYRET_RELEASE: ''
+        run: |
+          node src/run.js &
+          for _ in $(seq 1 30); do curl -fs -o /dev/null http://localhost:4999/editor && break; sleep 1; done
+          curl -f http://localhost:4999/editor
+
+      # --- run the three environments (no GOOGLE_CHROME_BINARY => Playwright's Chromium) ---
+      - name: cpo (reference)
+        working-directory: ./browser-test
+        env: { BASE_URL: 'http://localhost:4999' }
+        run: node run.js --env=cpo
+
+      - name: embed instances
+        working-directory: ./browser-test
+        env: { BASE_URL: 'http://localhost:4999' }
+        run: node run.js --env=embed
+
+      - name: vscode webviews
+        working-directory: ./browser-test
+        run: node run.js --env=vscode

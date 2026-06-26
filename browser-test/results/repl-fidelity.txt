@@ -1,8 +1,0 @@
-== CPO /editor fidelity: type-check (test/type-check.js) ==
-  ✔ string-dict-import
-  ✔ string-dict-include
-  ✔ beside-list
-== CPO /editor fidelity: tables (test/tables.js) ==
-  ✔ tables-test.arr
-
-==== REPL FIDELITY TOTAL: 4 passing, 0 failing ====

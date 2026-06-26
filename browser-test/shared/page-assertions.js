@@ -35,8 +35,17 @@ function PYRET_PAGE_ASSERTIONS() {
       const cm = document.querySelector(".CodeMirror");
       return !!(cm && cm.CodeMirror);
     },
+    cmValue() {
+      const cm = document.querySelector(".CodeMirror");
+      return cm && cm.CodeMirror ? cm.CodeMirror.getValue() : null;
+    },
+    // Ready means Pyret has loaded AND the editor's initial contents have been
+    // installed (CM is non-empty). Mirrors util.waitForPyretLoad, which waits
+    // for getValue() !== '' so a test's setDefinitions can't race with the
+    // initial content load (important for the vscode webview, whose custom
+    // editor pushes the file contents into CM asynchronously).
     editorReady() {
-      return PA.pyretLoaded() && PA.cmPresent();
+      return PA.pyretLoaded() && PA.cmPresent() && PA.cmValue() !== "";
     },
 
     // ---- input (mirrors util.setCodemirror on the definitions CM) ----

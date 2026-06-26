@@ -1,4 +1,6 @@
-== CPO /editor fidelity: check-blocks (test/check-blocks.js) ==
+== Environment: code.pyret.org /editor (reference) ==
+
+== check-blocks (29 specs from test/check-blocks.js) ==
   ✔ simple
   ✔ simple2
   ✔ simple3
@@ -28,7 +30,8 @@
   ✔ raises-violates-fail
   ✔ raises-violates-pass
   ✔ deep-recursion-in-first-test
-== CPO /editor fidelity: errors (test/errors.js) ==
+
+== errors (193 specs from test/errors.js) ==
   ✔ field-not-found
   ✔ lookup-non-object
   ✔ lookup-constructor-not-object
@@ -222,8 +225,26 @@
   ✔ raises-violates-because-fail5
   ✔ raises-violates-because-fail6
   ✔ raises-violates-because-fail7
-== CPO /editor fidelity: charts (test/chart.js) ==
+
+== charts (10 specs from test/chart.js) ==
   ✔ bar-chart-test.arr
   ✔ box-plot-test.arr
+  ✔ dot-chart-test.arr
+  ✔ image-bar-chart-test.arr
+  ✔ image-histogram-test.arr
+  ✔ image-pie-chart-test.arr
+  ✔ image-scatter-and-line-test.arr
+  ✔ interval-chart-test.arr
+  ✔ labeled-num-dot-chart-test.arr
+  ✔ num-dot-chart-test.arr
 
-==== CPO FIDELITY TOTAL: 224 passing, 0 failing ====
+== type-check (3 specs from test/type-check.js) ==
+  ✔ string-dict-import
+  ✔ string-dict-include
+  ✔ beside-list
+
+== tables (1 specs from test/tables.js) ==
+  ✔ tables-test.arr
+
+==== code.pyret.org /editor (reference): 236 passing, 0 failing ====
+CPO EXIT 0

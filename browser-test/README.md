@@ -1,53 +1,50 @@
-# browser-test — running code.pyret.org's assertions on embed instances and vscode webviews
+# browser-test — code.pyret.org's editor assertions, on embed instances and vscode webviews
 
-This directory runs the **same assertions** from `code.pyret.org`'s mocha suite
-against two other places the Pyret editor shows up:
+This directory runs the **same assertions** from `code.pyret.org`'s editor test
+suite against the three places the Pyret editor renders, through **one runner**:
 
-1. **The embed API's embedded instances** — the editor running inside an
-   `<iframe>` host page (`/embed/embed1.html`), driven exactly like
-   `code.pyret.org/test/embed.js`.
-2. **The vscode extension's webviews** — the `pyret-parley.cpo` custom editor,
-   running headless VS Code-for-the-Web via `@vscode/test-web` + Playwright (no
-   desktop VS Code).
+```
+node run.js --env=cpo|embed|vscode [--suites=all|check-blocks,errors,...] [--limit=N]
+```
+
+| `--env` | What it drives |
+|---|---|
+| `cpo` | the reference — `code.pyret.org`'s `/editor` page (reproduces upstream's outcomes) |
+| `embed` | the embed API's embedded instance (`<iframe>` in `/embed/embed1.html`) |
+| `vscode` | the `pyret-parley.cpo` webview, in headless VS Code for the Web |
 
 It is **strictly additive**: nothing under `code.pyret.org/` or `vscode/` is
-modified. The upstream test files are read as-is.
+modified; the upstream test files are read as-is.
 
 ## Why this is "the same tests"
 
-All three environments render the **same CPO editor** (`editor.html`: CodeMirror,
+All three environments render the **same** CPO editor (`editor.html`: CodeMirror,
 `#runButton`, `#output`, `.check-block`, `.testing-summary`, "Looks shipshape").
-Only the way you *reach* that DOM differs:
+Only how you *reach* that DOM differs — the editor is the main page (cpo), a child
+iframe (embed), or a webview frame (vscode) — and a single `findEditorFrame`
+helper (the frame with a `#runButton`) locates it in every case.
 
-| Environment | How the editor is reached |
-|---|---|
-| `code.pyret.org` (baseline) | top-level page at `/editor` |
-| embed instance | `<iframe id="embed1" src="/editor#controlled=true">` inside `/embed/embed1.html` |
-| vscode webview | webview iframe of the `pyret-parley.cpo` custom editor, loading the same `editor.html` |
+Two mechanisms keep the inputs and assertions identical to upstream:
 
-Two mechanisms keep the assertions and inputs identical to upstream:
+- **Same inputs, zero copying.** `shared/load-cpo-specs.js` `require`s the
+  unmodified `code.pyret.org/test/*.js` with the mocha globals and `util.js`
+  replaced by *recording shims*, capturing the exact `(program, expected)` tuples
+  upstream feeds its assertions — the same check-block table, the same
+  error→substring table, the same `.arr` chart/table programs. No spec is copied.
 
-- **Same inputs, zero copying** — `shared/load-cpo-specs.js` `require`s the
-  unmodified upstream test files (`code.pyret.org/test/errors.js`,
-  `check-blocks.js`, `chart.js`, `tables.js`, `type-check.js`) with the mocha
-  globals and `util.js` replaced by *recording shims*. It captures the exact
-  `(program, expected-content)` tuples upstream feeds to its assertions — so the
-  same `check: 1 is 2 end → ["failed"]`, the same error→substring table, and the
-  same `.arr` chart programs are used here. No spec is hand-copied.
+- **Same assertions.** `shared/page-assertions.js` is a line-for-line, in-page
+  port of the `util.js` predicates (`checkAllTestsPassed` / `testErrorRendersString`
+  / `testRunsAndHasCheckBlocks` / `testRunAndUseRepl` / `checkTableRendersCorrectly`);
+  `shared/cpo-assertions.js` orchestrates them exactly as `util.js` does. Each
+  function carries its `util.js` source reference. Because the port runs in-page
+  via Playwright, it can reach a vscode webview (Selenium can't), so the *same*
+  assertion code runs in all three environments.
 
-- **Same assertions**
-  - **embed** reuses `code.pyret.org/test-util/util.js` **unchanged**. The embed
-    specs call the real `tester.testRunsAndHasCheckBlocks` /
-    `testErrorRendersString` / `runAndCheckAllTestsPassed` /
-    `checkTableRendersCorrectly` / `testRunAndUseRepl`; the only difference from
-    upstream is a `before` hook that points the Selenium driver inside the embed
-    iframe (`embed/embed-setup.js`).
-  - **vscode** can't use Selenium (it can't reach a VS Code webview), so it uses
-    `shared/page-assertions.js` + `shared/cpo-assertions.js`, a line-for-line
-    **in-page port** of the same `util.js` predicates. That port is proven
-    faithful by `fidelity/run-cpo-fidelity.js` and `fidelity/run-repl-fidelity.js`,
-    which run it (via Playwright) against the very same `/editor` page and the
-    very same specs and show it passes exactly what `util.js` passes.
+  Running `--env=cpo` reproduces upstream's pass/fail on the real `/editor` page,
+  which is what makes the port a trustworthy stand-in for `util.js`. (The port was
+  first validated head-to-head against the real Selenium `util.js` suite; see the
+  git history of this directory — the `util.js` path and the port produced
+  identical results before the harness was consolidated onto the port.)
 
 ### Two webview details the port handles
 
@@ -56,28 +53,26 @@ Two mechanisms keep the assertions and inputs identical to upstream:
   first run (`beforePyret.js:1594`), so the REPL becomes available — which is why
   the REPL-driven suites (type-check, tables) run in the webview too.
 - The run mode is sticky (`cpo-main.js`: `currentAction`): after a type-check
-  run, the plain Run button keeps running type-checked. Upstream never sees this
-  (a fresh browser per suite); since we reuse one editor frame across suites,
-  `PA.run()` selects the explicit "Run" dropdown item, which resets the mode.
+  run, the plain Run button keeps running type-checked. Since one editor frame is
+  reused across suites, `PA.run()` selects the explicit "Run" dropdown item, which
+  resets the mode. (Upstream never sees this — a fresh browser per suite.)
 
 ## Layout
 
 ```
+run.js                  the runner: env -> editor frame -> runSpecs(suites)
+envs/
+  cpo.js                launch chromium, goto /editor
+  embed.js              goto /embed/embed1.html, sendReset, find the iframe
+  vscode.js             boot @vscode/test-web, open the custom editor, find the webview
 shared/
   load-cpo-specs.js     extract exact specs from code.pyret.org/test/*.js (no copying)
   page-assertions.js    in-page DOM port of util.js predicates (window.PA)
   cpo-assertions.js     node-side orchestration mirroring util.js assertions
+  run-specs.js          dispatch loaded specs through the assertions
   playwright-page.js    `page` adapter over a Playwright frame
-  run-specs.js          run loaded specs through the shared assertions
-embed/
-  embed-setup.js        Selenium setup that focuses the embed1 iframe
-  *.spec.js             embed versions of errors/check-blocks/charts/tables/type-check
-  probe.spec.js         small end-to-end sanity check
-fidelity/
-  run-cpo-fidelity.js   prove the in-page port == util.js, against /editor
-vscode/
-  run-vscode-tests.js   boot VS Code Web + Pyret extension, run specs in the webview
-  fixture-workspace/    one test.arr opened by the custom editor
+  find-frame.js         locate the editor frame (the one with #runButton)
+vscode/fixture-workspace/test.arr   the .arr the custom editor opens
 results/                captured run logs
 ```
 
@@ -86,33 +81,35 @@ results/                captured run logs
 Prereqs (one-time):
 
 ```bash
-# code.pyret.org built + deps (already present in this checkout)
-#   build/web/js/cpo-main.jarr, code.pyret.org/node_modules
+# code.pyret.org built + deps (build/web/js/cpo-main.jarr, code.pyret.org/node_modules)
 
 # vscode extension built
 cd vscode && ln -sf ../code.pyret.org/build build && npm install && npm run compile
 
 # this harness's deps
-cd ../browser-test && npm install
+cd ../browser-test && npm install     # playwright + @vscode/test-web
 
-# a Chrome + a *matching* chromedriver for the Selenium (embed) path
-#   export CHROMEDRIVER_BINARY=/path/to/chromedriver   (matching `google-chrome --version`)
+# Chrome (Playwright drives it via executablePath)
+export GOOGLE_CHROME_BINARY=/bin/google-chrome
 ```
 
-Then, with the CPO server running (`BASE_URL=http://localhost:4999`):
+Then:
 
 ```bash
+# cpo + embed load /editor from the CPO server, so start it first:
+#   (cd code.pyret.org && BASE_URL=... PYRET=... PORT=4999 ... node src/run.js &)
+BASE_URL=http://localhost:4999 node run.js --env=cpo
+BASE_URL=http://localhost:4999 node run.js --env=embed
+
+# vscode needs no CPO server (assets come from the built extension):
+node run.js --env=vscode
+
+# everything (starts the CPO server if needed):
 ./run-all.sh
-# or individually:
-#   (embed)    cd ../code.pyret.org && mocha ../browser-test/embed/*.spec.js
-#   (fidelity) node fidelity/run-cpo-fidelity.js
-#   (vscode)   node vscode/run-vscode-tests.js
 ```
 
-The embed path needs the CPO server (the iframe loads `/editor`). The vscode
-path does **not** need the CPO server — `@vscode/test-web` serves the editor
-assets out of the built extension (`vscode/dist/web/build/web`).
+`--limit=N` runs only the first N specs per suite (handy for a quick smoke).
 
 ## Results
 
-See `RESULTS.md` for the captured run output and counts.
+See `RESULTS.md` and `results/`.

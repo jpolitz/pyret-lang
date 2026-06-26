@@ -23,10 +23,23 @@ function ensureRendered(text) {
   }
 }
 
+// Set the definitions and confirm CM actually holds them before continuing.
+// The vscode custom editor binds CM to the TextDocument and may asynchronously
+// push contents back, so a single setDefinitions can be overwritten; we re-apply
+// until it sticks. (On cpo/embed the first attempt already matches.)
+async function setDefinitionsConfirmed(page, code) {
+  await page.inject();
+  for (let i = 0; i < 20; i++) {
+    await page.eval("window.PA.setDefinitions(" + JSON.stringify(code) + ")");
+    if ((await page.eval("window.PA.cmValue()")) === code) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error("could not install definitions into the editor (doc-sync race)");
+}
+
 // mirrors util.setDefinitionsEvalAndWait (set definitions, run, wait for break btn)
 async function setDefinitionsRunAndWait(page, code, options) {
-  await page.inject();
-  await page.eval("window.PA.setDefinitions(" + JSON.stringify(code) + ")");
+  await setDefinitionsConfirmed(page, code);
   await page.eval("window.PA.clearOutput()");
   if (options && options.typeCheck) {
     await page.eval("window.PA.runTypeCheck()");
@@ -48,8 +61,7 @@ async function checkAllTestsPassed(page, name, timeout) {
 
 // mirrors util.runAndCheckAllTestsPassed
 async function runAndCheckAllTestsPassed(page, code, name, timeout) {
-  await page.inject();
-  await page.eval("window.PA.setDefinitions(" + JSON.stringify(code) + ")");
+  await setDefinitionsConfirmed(page, code);
   await page.eval("window.PA.clearOutput()");
   await page.eval("window.PA.run()");
   // Wait for the run to actually finish (break button disabled) before reading,
@@ -163,8 +175,7 @@ async function evalAtReplThenRead(page, code, readerExpr) {
 
 // mirrors util.checkTableRendersCorrectly
 async function checkTableRendersCorrectly(page, code, name, timeout) {
-  await page.inject();
-  await page.eval("window.PA.setDefinitions(" + JSON.stringify(code) + ")");
+  await setDefinitionsConfirmed(page, code);
   await page.eval("window.PA.clearOutput()");
   await page.eval("window.PA.run()");
   await page.waitFor("window.PA.breakDone()", timeout || 900000);

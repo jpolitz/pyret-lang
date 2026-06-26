@@ -1,9 +1,4 @@
-== Environment: vscode pyret-parley.cpo webview ==
-Serving dev extensions from /home/exedev/pyret-lang-drydock/vscode
-Serving local content /home/exedev/pyret-lang-drydock/browser-test/vscode/fixture-workspace at /static/mount
-Listening on http://localhost:3198
-Using ESM loader: true
-[0mGET /static/devextensions/package.nls.json [33m404[0m 9.088 ms - 9[0m
+== Environment: embed API embedded instance (#embed1 iframe) ==
 
 == check-blocks (29 specs from test/check-blocks.js) ==
   ✔ simple
@@ -251,5 +246,5 @@ Using ESM loader: true
 == tables (1 specs from test/tables.js) ==
   ✔ tables-test.arr
 
-==== vscode pyret-parley.cpo webview: 236 passing, 0 failing ====
-VSCODE EXIT 0
+==== embed API embedded instance (#embed1 iframe): 236 passing, 0 failing ====
+EMBED EXIT 0

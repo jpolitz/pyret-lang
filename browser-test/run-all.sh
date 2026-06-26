@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 #
-# run-all.sh -- reproduce the whole cross-environment demonstration:
-#   (0) baseline: code.pyret.org's own mocha suite on /editor
-#   (1) the SAME assertions on the embed API's embedded instances
-#   (2) fidelity check of the in-page assertion port against /editor
-#   (3) the SAME assertions on the vscode extension's webviews
+# run-all.sh -- run code.pyret.org's editor assertions against all three
+# environments, via the single Playwright runner (run.js):
 #
-# It is strictly additive: it only reads code.pyret.org / vscode, and writes
-# results under browser-test/results/.
+#   cpo    -- the reference: reproduces upstream's outcomes on /editor
+#   embed  -- the embed API's embedded instance
+#   vscode -- the pyret-parley.cpo webview (headless VS Code for the Web)
 #
-# Prereqs (installed/built once):
-#   - code.pyret.org built (build/web/js/cpo-main.jarr present) + npm deps
-#   - vscode extension built: (cd vscode && npm i && npm run compile) with
-#     `build` symlinked to ../code.pyret.org/build
-#   - browser-test deps: (cd browser-test && npm i)
-#   - a Chrome + matching chromedriver (see CHROMEDRIVER_BINARY below)
+# Strictly additive: only reads code.pyret.org / vscode, writes under results/.
+#
+# Prereqs (once):
+#   - code.pyret.org built (build/web/js/cpo-main.jarr) + its npm deps
+#   - vscode extension built: (cd vscode && ln -sf ../code.pyret.org/build build
+#       && npm install && npm run compile)
+#   - this harness's deps: (cd browser-test && npm install)
+#   - Chrome (GOOGLE_CHROME_BINARY, default /bin/google-chrome)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/.." && pwd)"
-CPO="$ROOT/code.pyret.org"
+CPO="$(cd "$HERE/.." && pwd)/code.pyret.org"
 RESULTS="$HERE/results"
 mkdir -p "$RESULTS"
 
-# ---- environment expected by the CPO server + selenium harness ----
 export BASE_URL="${BASE_URL:-http://localhost:4999}"
+export GOOGLE_CHROME_BINARY="${GOOGLE_CHROME_BINARY:-/bin/google-chrome}"
+# env expected by the CPO server (cpo + embed environments load /editor from it)
 export PORT="${PORT:-4999}"
 export PYRET="${PYRET:-http://localhost:4999/js/cpo-main.jarr}"
 export POSTMESSAGE_ORIGIN="${POSTMESSAGE_ORIGIN:-*}"
@@ -32,28 +32,20 @@ export SESSION_SECRET="${SESSION_SECRET:-not-so-secret}"
 export URL_FILE_MODE="${URL_FILE_MODE:-all-remote}"
 export IMAGE_PROXY_BYPASS="${IMAGE_PROXY_BYPASS:-true}"
 export SHARED_FETCH_SERVER="${SHARED_FETCH_SERVER:-https://code.pyret.org}"
-export GOOGLE_CHROME_BINARY="${GOOGLE_CHROME_BINARY:-/bin/google-chrome}"
-# CHROMEDRIVER_BINARY should point at a chromedriver matching your Chrome.
-export CHROMEDRIVER_BINARY="${CHROMEDRIVER_BINARY:-}"
 
-# ---- (re)start the CPO server if not already serving /editor ----
+# Start the CPO server if /editor isn't already being served (cpo + embed need it).
 if ! curl -fs -o /dev/null "$BASE_URL/editor"; then
   echo "Starting CPO server..."
   ( cd "$CPO" && node src/run.js > "$RESULTS/cpo-server.log" 2>&1 & )
-  for i in $(seq 1 30); do curl -fs -o /dev/null "$BASE_URL/editor" && break; sleep 1; done
+  for _ in $(seq 1 30); do curl -fs -o /dev/null "$BASE_URL/editor" && break; sleep 1; done
 fi
 curl -fs -o /dev/null "$BASE_URL/editor" || { echo "CPO server not reachable at $BASE_URL"; exit 1; }
-echo "CPO server reachable at $BASE_URL"
 
-echo "=== (1) EMBED: upstream assertions on embedded instances ==="
-( cd "$CPO" && ./node_modules/.bin/mocha \
-    "$HERE"/embed/*.spec.js --reporter spec ) | tee "$RESULTS/embed-full.txt"
-
-echo "=== (2) FIDELITY: in-page port vs /editor (same specs) ==="
-( cd "$HERE" && node fidelity/run-cpo-fidelity.js ) | tee "$RESULTS/cpo-fidelity-full.txt"
-( cd "$HERE" && node fidelity/run-repl-fidelity.js ) | tee "$RESULTS/repl-fidelity.txt"
-
-echo "=== (3) VSCODE: same assertions on the extension's webviews ==="
-( cd "$HERE" && node vscode/run-vscode-tests.js ) | tee "$RESULTS/vscode-full.txt"
-
-echo "Done. See $RESULTS/."
+rc=0
+for ENVNAME in cpo embed vscode; do
+  echo "=== $ENVNAME ==="
+  node "$HERE/run.js" --env="$ENVNAME" | tee "$RESULTS/$ENVNAME-full.txt"
+  test "${PIPESTATUS[0]}" -eq 0 || rc=1
+done
+echo "Done. See $RESULTS/. (overall rc=$rc)"
+exit $rc

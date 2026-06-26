@@ -1,94 +1,57 @@
 # Results
 
-Captured runs (logs in `results/`). Every number below is the **same assertion**
-from `code.pyret.org`'s mocha suite checking the **same content** on the **same
-test program**, just in a different environment.
+One runner (`run.js`), one in-page port of `util.js`, three environments. Each
+environment runs the **same five suites** loaded from the unmodified
+`code.pyret.org/test/*.js`, so all three land on the **same 236 assertions**.
 
-## Baseline — code.pyret.org `/editor` (upstream, unmodified)
+Captured logs in `results/`. Reproduce with `./run-all.sh` (or `node run.js
+--env=<env>`).
 
-Ran upstream mocha directly as a control (`code.pyret.org` + Selenium):
+| `--env` | What it drives | Result |
+|---|---|---|
+| `cpo` | `code.pyret.org` `/editor` (reference) | **236 passing, 0 failing** |
+| `embed` | embed API embedded instance (`#embed1` iframe) | **236 passing, 0 failing** |
+| `vscode` | `pyret-parley.cpo` webview (headless VS Code Web) | **236 passing, 0 failing** |
 
-```
-Basic page loads            ✔ load the editor
-Rendering check blocks      29 passing      (test/check-blocks.js)
-Embedding API               4 passing, 1 pending  (test/embed.js)
-```
+Per-suite breakdown (identical in every environment):
 
-## Target 1 — Embed API embedded instances  →  240 passing, 0 failing
-
-`results/embed-all.txt`. The embed specs reuse `code.pyret.org/test-util/util.js`
-**unchanged**; only the `before` hook differs (it focuses the Selenium driver
-inside the `<iframe id="embed1">` of `/embed/embed1.html`). Inputs come straight
-out of the upstream test files via `shared/load-cpo-specs.js`.
-
-| Suite (upstream file) | assertion reused from util.js | count |
+| Suite (upstream file) | assertion (util.js → port) | count |
 |---|---|---:|
-| probe | testRunsAndHasCheckBlocks / testErrorRendersString / testRunAndAllTestsPass | 4 |
 | check-blocks (`test/check-blocks.js`) | `testRunsAndHasCheckBlocks` | 29 |
 | errors (`test/errors.js`) | `testErrorRendersString` + `testRunsAndHasCheckBlocks` | 193 |
+| charts (`test/chart.js`) | `runAndCheckAllTestsPassed` → "Looks shipshape" | 10 |
 | type-check (`test/type-check.js`) | `testRunAndUseRepl` (typeCheck) | 3 |
 | tables (`test/tables.js`) | `checkTableRendersCorrectly` | 1 |
-| charts (`test/chart.js`) | `runAndCheckAllTestsPassed` → `checkAllTestsPassed` ("Looks shipshape") | 10 |
-| **total** | | **240** |
-
-(The embed path reuses `util.js` directly, so type-check and tables already run
-there. The vscode path now runs the same suites — see Target 2.)
-
-## Fidelity — in-page port vs `/editor`  →  224 + 4 passing, 0 failing
-
-`results/cpo-fidelity-full.txt` (errors/check-blocks/charts) and
-`fidelity/run-repl-fidelity.js` (type-check/tables). The vscode path can't use
-Selenium, so it uses the in-page port (`shared/page-assertions.js` +
-`shared/cpo-assertions.js`). These runs drive that port, via Playwright, against
-the **same** `/editor` page and the **same** specs `util.js` checks — proving the
-port is a faithful stand-in.
-
-| Suite | count |
-|---|---:|
-| check-blocks | 29 |
-| errors | 193 |
-| charts | 2 |
-| type-check | 3 |
-| tables | 1 |
-| **total** | **228** |
-
-## Target 2 — vscode extension webviews  →  236 passing, 0 failing
-
-`results/vscode-full.txt`. Real VS Code for the Web (headless, via
-`@vscode/test-web`) loads the `vscode/` extension; Playwright opens `test.arr`,
-which the `pyret-parley.cpo` custom editor renders as a webview of the same
-`editor.html`. The same specs run through the same (ported) assertions inside
-that webview frame — the **same suite set as embed**, including the REPL-driven
-type-check and tables suites (the custom editor reveals the REPL on the first
-run; see README).
-
-| Suite (upstream file) | count |
-|---|---:|
-| check-blocks (`test/check-blocks.js`) | 29 |
-| errors (`test/errors.js`) | 193 |
-| charts (`test/chart.js`) | 10 |
-| type-check (`test/type-check.js`) | 3 |
-| tables (`test/tables.js`) | 1 |
-| **total** | **236** |
-
-All 10 chart programs that pass upstream also pass in the vscode webview
-(e.g. `bar-chart-test.arr`, `box-plot-test.arr`, `image-pie-chart-test.arr`, …),
-the full error-rendering table (`field-not-found → "did not have a field"`, the
-entire `is`/`is==`/`raises-satisfies`/… matrix) checks the same substrings, the
-type-checked REPL evaluations return the same values, and the table cells render
-identically to their value expressions.
+| **total** | | **236** |
 
 ## What this shows
 
-- The **same `checkAllTestsPassed` / "Looks shipshape"** assertion that gates
-  chart programs upstream passes on the same chart `.arr` files in both an embed
-  instance and a vscode webview.
-- The **same error-rendering checks** (`testErrorRendersString`) verify the same
-  text content (193 cases) in all three environments.
-- The **same check-block content checks** (`testRunsAndHasCheckBlocks`, 29 cases)
-  match the same expected substrings everywhere.
-- The **same REPL checks** (`testRunAndUseRepl`, type-check) and **table-render
-  checks** (`checkTableRendersCorrectly`) pass in both the embed instance and the
-  vscode webview — the custom editor reveals its REPL on the first run.
+- The **same `checkAllTestsPassed` / "Looks shipshape"** gate that passes chart
+  programs upstream passes the same 10 chart `.arr` files in the `/editor`
+  reference, an embed instance, and a vscode webview.
+- The **same error-rendering checks** verify the same text content (193 cases),
+  the **same check-block content checks** match the same substrings (29 cases),
+  the **same type-checked REPL evaluations** return the same values (3 cases),
+  and the **same table cells** render identically to their value expressions —
+  everywhere.
 
-Reproduce with `./run-all.sh` (see `README.md`).
+## On equivalence to `util.js`
+
+`--env=cpo` runs the port against the real `/editor` page and reproduces
+upstream's pass/fail, which is what makes the port a trustworthy stand-in for
+`util.js`. The port was additionally validated head-to-head against the actual
+Selenium `util.js` suite while the harness was being built: that earlier
+dual-path stage (committed history of this directory) showed the `util.js` path
+and the port producing identical results (embed 240 via `util.js`; fidelity
+224+4 and vscode 236 via the port) before the harness was consolidated onto the
+single port-based runner.
+
+## Notes
+
+- `cpo` and `embed` need the CPO server (they load `/editor`); `vscode` does not.
+- Charts are slow (~38s each), so a full run is several minutes per environment.
+- A couple of webview-specific details the port handles: the custom editor
+  reveals its REPL on the first run (`beforePyret.js:1594`); the run mode is
+  sticky, so `PA.run()` selects the explicit "Run" item (`cpo-main.js`); and the
+  editor's initial contents are awaited (CM non-empty) before each program is
+  installed, so `setDefinitions` can't race the custom editor's content push.
