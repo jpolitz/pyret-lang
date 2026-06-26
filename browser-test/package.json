@@ -1,0 +1,16 @@
+{
+  "name": "pyret-browser-test",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cross-environment harness that runs code.pyret.org's mocha assertions against the embed API's embedded instances and the vscode extension's webviews.",
+  "scripts": {
+    "embed": "cd ../code.pyret.org && mocha ../browser-test/embed/*.spec.js --reporter spec",
+    "fidelity": "node fidelity/run-cpo-fidelity.js",
+    "vscode": "node vscode/run-vscode-tests.js"
+  },
+  "devDependencies": {
+    "@vscode/test-web": "^0.0.81",
+    "mocha": "^11.7.6",
+    "playwright": "^1.49.1"
+  }
+}
