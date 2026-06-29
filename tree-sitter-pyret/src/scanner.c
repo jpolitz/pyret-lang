@@ -195,6 +195,15 @@ static bool emit(TSLexer *lexer, ScannerState *s, enum TokenType sym) {
   return true;
 }
 
+// Like emit() but does NOT mark_end — for tokens whose end was already marked
+// (e.g. an identifier whose trailing '-' was consumed as lookahead, as in `Row->`).
+static bool emit_premarked(TSLexer *lexer, ScannerState *s, enum TokenType sym) {
+  lexer->result_symbol = sym;
+  s->paren_state = paren_after(sym);
+  s->prior_ws = false;
+  return true;
+}
+
 // ---------- number lexing ----------
 // Assumes leading '~' and/or sign may have been consumed already (flags).
 // On success emits NUMBER/RATIONAL/ROUGHRATIONAL. On failure returns false
@@ -410,6 +419,11 @@ bool tree_sitter_pyret_external_scanner_scan(void *payload, TSLexer *lexer,
       if (ck != UNKNOWN) { ADV(false); return emit(lexer, s, ck); }
     }
     enum TokenType kw = keyword_lookup(buf);
+    if (marked_short) {
+      // end already marked before the trailing '-'(s) we consumed as lookahead;
+      // re-marking would wrongly absorb the '-' (breaking e.g. `Row->Boolean`).
+      return emit_premarked(lexer, s, kw != UNKNOWN ? kw : NAME);
+    }
     if (kw != UNKNOWN) return emit(lexer, s, kw);
     return emit(lexer, s, NAME);
   }
