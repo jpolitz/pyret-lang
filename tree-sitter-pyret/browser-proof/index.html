@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body>
+<script type="module">
+import { Parser, Language } from './web-tree-sitter.js';
+window.RESULT = (async () => {
+  try {
+    await Parser.init();
+    const Lang = await Language.load('./tree-sitter-pyret.wasm');
+    const p = new Parser(); p.setLanguage(Lang);
+    const progs = [
+      "x = 1\n",
+      "fun f(y): y + 1 end",
+      "data D: | a | b(x) end",
+      "check: 1 + 1 is 2 end",
+      "cases(List) l:\n  | empty => 0\n  | link(f, r) => 1\nend"
+    ];
+    return progs.map(s => { const t = p.parse(s); return {src:s, hasError:t.rootNode.hasError, sexp:t.rootNode.toString()}; });
+  } catch (e) { return {error: String(e), stack: e.stack}; }
+})();
+</script>
+</body></html>

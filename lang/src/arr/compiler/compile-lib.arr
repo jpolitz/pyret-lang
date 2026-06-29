@@ -3,6 +3,7 @@ provide-types *
 
 import either as E
 import parse-pyret as P
+import parse-tree-sitter as TS
 import ast as A
 import load-lib as L
 import render-error-display as RED
@@ -359,7 +360,11 @@ fun compile-module(locator :: Locator, provide-map :: SD.StringDict<URI>, module
       mod = locator.get-module()
       var ast = cases(PyretCode) mod:
         | pyret-string(module-string) =>
-          P.surface-parse(module-string, locator.uri())
+          if options.use-tree-sitter:
+            TS.surface-parse(module-string, locator.uri())
+          else:
+            P.surface-parse(module-string, locator.uri())
+          end
         | pyret-ast(module-ast) =>
           module-ast
       end

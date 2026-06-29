@@ -40,3 +40,14 @@ define("ws", [], function () { return ws });
 
 resolve = nodeRequire("resolve");
 define("resolve", [], function () { return resolve });
+
+// tree-sitter frontend (for --use-tree-sitter). nodeRequire (not require) so browserify
+// leaves these to node's resolver at runtime. Absolute paths: the tree-sitter runtime +
+// built grammar live under tree-sitter-pyret/, outside lang/node_modules. (Machine-specific;
+// make configurable for a real integration.)
+treeSitterRuntime = nodeRequire("/home/exedev/pyret-lang/tree-sitter-pyret/node_modules/tree-sitter");
+define("tree-sitter-runtime", [], function () { return treeSitterRuntime; });
+treeSitterGrammar = nodeRequire("/home/exedev/pyret-lang/tree-sitter-pyret/build/Release/tree_sitter_pyret_binding.node");
+define("tree-sitter-grammar", [], function () { return treeSitterGrammar; });
+treeSitterLowering = nodeRequire("/home/exedev/pyret-lang/lang/src/js/trove/tree-sitter-lowering.bundle.js");
+define("tree-sitter-lowering", [], function () { return treeSitterLowering; });

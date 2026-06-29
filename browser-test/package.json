@@ -12,6 +12,6 @@
   "//": "Filter with --grep (regex over suite + test names), e.g. `npm run embed -- --grep tables`.",
   "devDependencies": {
     "@vscode/test-web": "^0.0.81",
-    "playwright": "^1.49.1"
+    "playwright": "^1.61.1"
   }
 }

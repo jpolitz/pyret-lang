@@ -82,11 +82,26 @@ define("cpo/file-locator", [], function() {
                 CPO.documents.set(uri, new CodeMirror.Doc(contents, "pyret"));
                 runtime.runThunk(() => {
                   return runtime.safeCall(function() {
+                    // tree-sitter (WASM) parser, when eagerly initialized by editor.html.
+                    // Falls back to the built-in parser on parse-error or if not ready.
+                    var TS = window.__PYRET_TS__;
+                    if (TS && TS.ready) {
+                      try {
+                        var tree = TS.parser.parse(contents);
+                        if (!tree.rootNode.hasError) {
+                          var val = new TS.Lowering(contents, uri).lowerProgram(tree.rootNode);
+                          var astV = gf(runtime.modules["builtin://ast"], "values");
+                          var srclocV = gf(runtime.modules["builtin://srcloc"], "values");
+                          if (!window.__TS_LOGGED__) { window.__TS_LOGGED__ = true; console.log("[tree-sitter] parsing via WASM grammar:", uri); }
+                          return TS.toRuntime(val, { RUNTIME: runtime, ast: astV, srcloc: srclocV });
+                        }
+                      } catch (e) { console.error("[tree-sitter] failed, falling back to built-in parser:", e); }
+                    }
                     return gmf(parsePyret, "surface-parse").app(contents, uri);
                   }, function(ret) {
                     // Known flat constructor
                     ast = gmf(compileLib, "pyret-ast").app(ret);
-                    return ast; 
+                    return ast;
                   }, "file-locator:parse-contents");
                 }, function(result) {
                   console.log("Result from getModule runThunk: ", result);

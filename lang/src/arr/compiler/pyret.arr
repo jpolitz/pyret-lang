@@ -10,6 +10,7 @@ import file("cli-module-loader.arr") as CLI
 import file("compile-lib.arr") as CL
 import file("compile-structs.arr") as CS
 import file("locators/builtin.arr") as B
+import file("locators/file.arr") as FLOC
 import file("server.arr") as S
 
 # this value is the limit of number of steps that could be inlined in case body
@@ -77,6 +78,8 @@ fun main(args :: List<String>) -> Number block:
     C.flag(C.once, "Collect timing information about compilation"),
     "type-check",
     C.flag(C.once, "Type-check the program during compilation"),
+    "use-tree-sitter",
+    C.flag(C.once, "Use the tree-sitter parser frontend instead of the default parser"),
     "inline-case-body-limit",
     C.next-val-default(C.Num, DEFAULT-INLINE-CASE-LIMIT, none, C.once, "Set number of steps that could be inlined in case body"),
     "deps-file",
@@ -114,6 +117,7 @@ fun main(args :: List<String>) -> Number block:
       module-dir = r.get-value("module-load-dir")
       inline-case-body-limit = r.get-value("inline-case-body-limit")
       type-check = r.has-key("type-check")
+      use-tree-sitter = r.has-key("use-tree-sitter")
       tail-calls = not(r.has-key("improper-tail-calls"))
       compiled-dir = r.get-value("compiled-dir")
       standalone-file = r.get-value("standalone-file")
@@ -136,6 +140,7 @@ fun main(args :: List<String>) -> Number block:
       when r.has-key("allow-builtin-overrides"):
         B.set-allow-builtin-overrides(r.get-value("allow-builtin-overrides"))
       end
+      FLOC.set-use-tree-sitter(r.has-key("use-tree-sitter"))
       url-file-mode-str = r.get-value("url-file-mode")
       url-file-mode = ask:
         | url-file-mode-str == "all-remote" then: CS.all-remote
@@ -159,7 +164,8 @@ fun main(args :: List<String>) -> Number block:
         result = CLI.run(r.get-value("run"), CS.default-compile-options.{
             standalone-file: standalone-file,
             display-progress: display-progress,
-            checks: checks
+            checks: checks,
+            use-tree-sitter: use-tree-sitter
           }, run-args)
         _ = print(result.message + "\n")
         result.exit-code
@@ -197,7 +203,8 @@ fun main(args :: List<String>) -> Number block:
             module-eval: module-eval,
             user-annotations: user-annotations,
             runtime-annotations: runtime-annotations,
-            url-file-mode: url-file-mode
+            url-file-mode: url-file-mode,
+            use-tree-sitter: use-tree-sitter
           })
         success-code
       else if r.has-key("serve"):
@@ -217,7 +224,8 @@ fun main(args :: List<String>) -> Number block:
             ignore-unbound: false,
             proper-tail-calls: tail-calls,
             compile-module: false,
-            display-progress: display-progress
+            display-progress: display-progress,
+            use-tree-sitter: use-tree-sitter
           })
         failures = filter(CS.is-err, result.loadables)
         if is-link(failures) block:

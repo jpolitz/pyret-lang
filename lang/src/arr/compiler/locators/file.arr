@@ -2,11 +2,18 @@ provide *
 
 import builtin-modules as B
 import parse-pyret as PP
+import parse-tree-sitter as TS
 import file("../compile-lib.arr") as CL
 import file("../compile-structs.arr") as CS
 import file("../js-of-pyret.arr") as JSP
 import file as F
 import pathlib as P
+
+# Parser selection (set by the CLI from --use-tree-sitter). The file locator parses
+# eagerly in get-module (for dependency gathering), so the parser choice is routed here
+# via a module-level switch rather than through CompileOptions.
+var use-tree-sitter-parser = false
+fun set-use-tree-sitter(b :: Boolean): use-tree-sitter-parser := b end
 
 # Still unsure if just a path is the right input for this.
 #data FileLocator:
@@ -35,7 +42,12 @@ fun mockable-file-locator(file-ops):
           str = f.read-file()
           f.close-file()
           # spy "Parsing": uri: self.uri() end
-          ast := CL.pyret-ast(PP.surface-parse(str, self.uri()))
+          ast := CL.pyret-ast(
+            if use-tree-sitter-parser:
+              TS.surface-parse(str, self.uri())
+            else:
+              PP.surface-parse(str, self.uri())
+            end)
         end
         ast
       end,
