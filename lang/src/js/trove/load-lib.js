@@ -14,6 +14,8 @@
       "get-result-stacktrace": "tany",
       "render-check-results": "tany",
       "render-error-message": "tany",
+      "get-result-repr": "tany",
+      "result-has-checks": "tany",
       "empty-realm": "tany",
       "is-exit": "tany",
       "is-exit-quiet": "tany",
@@ -313,6 +315,42 @@
       checkSuccess(mr, "answer");
       return mr.val.runtime.getField(mr.val.result.result, "answer");
     }
+
+    // Returns Option<String>: the torepr of the interaction's answer value,
+    // or none if the answer is nothing (e.g. a definition like x = 5).
+    // Uses the execution runtime to call torepr so complex values render correctly.
+    function getResultRepr(mr) {
+      if(!isSuccessResult(mr)) { return runtime.ffi.makeNone(); }
+      var execRt = mr.val.runtime;
+      var answer;
+      try {
+        answer = execRt.getField(mr.val.result.result, "answer");
+      } catch(e) {
+        return runtime.ffi.makeNone();
+      }
+      if(answer === undefined || answer === execRt.nothing) {
+        return runtime.ffi.makeNone();
+      }
+      // execRt.toRepr renders synchronously (toReprJS handles recursion
+      // internally), so no trampoline is needed here.
+      try {
+        return runtime.ffi.makeSome(runtime.makeString(execRt.toRepr(answer)));
+      } catch(e) {
+        return runtime.ffi.makeNone();
+      }
+    }
+    // Returns true when the (successful) interaction defined at least one
+    // check/test, so the REPL can suppress the "didn't define any tests"
+    // message that would otherwise print after every plain expression.
+    function resultHasChecks(mr) {
+      if(!isSuccessResult(mr)) { return false; }
+      try {
+        var checks = getModuleResultChecks(mr);
+        return mr.val.runtime.ffi.toArray(checks).length > 0;
+      } catch(e) {
+        return false;
+      }
+    }
     /* ProgramString is a staticModules/depMap/toLoad tuple as a string */
     // TODO(joe): this should take natives as an argument, as well, and requirejs them
     function runProgram(otherRuntimeObj, realmObj, programString, options, commandLineArguments) {
@@ -381,6 +419,8 @@
       "get-result-stacktrace": runtime.makeFunction(getResultStackTrace, "get-result-stacktrace"),
       "render-check-results": runtime.makeFunction(renderCheckResults, "render-check-results"),
       "render-error-message": runtime.makeFunction(renderErrorMessage, "render-error-message"),
+      "get-result-repr": runtime.makeFunction(getResultRepr, "get-result-repr"),
+      "result-has-checks": runtime.makeFunction(resultHasChecks, "result-has-checks"),
       "empty-realm": runtime.makeFunction(emptyRealm, "empty-realm"),
       "is-exit": runtime.makeFunction(isExit, "is-exit"),
       "is-exit-quiet": runtime.makeFunction(isExitQuiet, "is-exit-quiet"),

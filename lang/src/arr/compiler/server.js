@@ -1,7 +1,8 @@
 {
   provides: {
     values: {
-      "make-server": "tany"
+      "make-server": "tany",
+      "generate-session-id": "tany"
     }
   },
   requires: [],
@@ -106,7 +107,7 @@
 
             if(parsed.command === "stop") {
               runtime.schedulePause(function(restarter) {
-                restarter.break(); 
+                restarter.break();
               });
               tryQueue();
             }
@@ -117,8 +118,12 @@
               process.exit(0);
             }
 
-            if(parsed.command === "compile") {
-              runQueue.push(parsed.compileOptions);
+            // compile and all repl-* commands go through the Pyret onmessage handler.
+            // The full message string is passed so server.arr can route on "command".
+            // ws delivers frames as Buffers; coerce to a String since the Pyret
+            // handler calls J.read-json on it (which requires a String).
+            if(parsed.command === "compile" || (parsed.command && parsed.command.startsWith("repl-"))) {
+              runQueue.push(message.toString());
               tryQueue();
             }
 
@@ -140,8 +145,15 @@
       });
     };
 
+    var sessionCounter = 0;
+    function generateSessionId() {
+      sessionCounter = sessionCounter + 1;
+      return runtime.makeString("repl-" + String(process.pid) + "-" + String(sessionCounter));
+    }
+
     return runtime.makeModuleReturn({
-      "make-server": runtime.makeFunction(makeServer, "make-server")
+      "make-server": runtime.makeFunction(makeServer, "make-server"),
+      "generate-session-id": runtime.makeFunction(generateSessionId, "generate-session-id")
     }, {});
   }
 }

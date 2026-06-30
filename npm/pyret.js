@@ -3,6 +3,7 @@
 const usage = require('command-line-usage');
 const commandLineArgs = require('command-line-args');
 const pyretClient = require('./client-lib');
+const pyretRepl = require('./repl-client');
 const path = require('path');
 const fs = require('fs');
 const stripAnsi = require('strip-ansi');
@@ -217,6 +218,8 @@ const optionDefinitions = [
   { name: 'global-parley', type: String, defaultValue: "~/.parley/" },
   { name: 'local-parley', type: String, defaultValue: ".pyret" },
 
+  { name: 'repl', alias: 'r', type: Boolean, group: "meta", defaultValue: false },
+
   { name: 'program', alias: 'p', type: String, group: "pyret-options", defaultOption: true },
 
   // These options are passed on to the compiler, and have no effect (yet)
@@ -280,5 +283,9 @@ if(!options["pyret-options"]["outfile"] && options["pyret-options"]["program"]) 
   }
 }
 
-pyretClient.start(options);
+if(options.meta.repl) {
+  pyretRepl.start(options);
+} else {
+  pyretClient.start(options);
+}
 

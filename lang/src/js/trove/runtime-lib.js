@@ -3,7 +3,8 @@
   nativeRequires: ["pyret-base/js/runtime"],
   provides: {
     values: {
-      "make-runtime": "tany"
+      "make-runtime": "tany",
+      "set-stdout": "tany"
     },
     types: {
       "Runtime": "tany"
@@ -28,8 +29,22 @@
         }))
       }));
     }
+
+    // Sets the stdout of a Runtime object to a Pyret function (String -> Nothing).
+    // Used by the REPL server to redirect print() output per interaction.
+    function setStdout(rtObj, fn) {
+      var jsRt = runtime.getField(rtObj, "runtime").val;
+      jsRt.setStdout(function(s) {
+        runtime.runThunk(function() {
+          return fn.app(runtime.makeString(s));
+        }, function() {});
+      });
+      return runtime.nothing;
+    }
+
     var values = {
-      "make-runtime": runtime.makeFunction(makeRuntime, "make-runtime")
+      "make-runtime": runtime.makeFunction(makeRuntime, "make-runtime"),
+      "set-stdout": runtime.makeFunction(setStdout, "set-stdout")
     };
     var types = {
       Runtime: annRuntime
