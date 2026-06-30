@@ -1,0 +1,21 @@
+{
+  "name": "lezer-pyret",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@lezer/common": "^1.5.2",
+    "@lezer/generator": "^1.8.0",
+    "@lezer/highlight": "^1.2.3",
+    "@lezer/lr": "^1.4.10"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}

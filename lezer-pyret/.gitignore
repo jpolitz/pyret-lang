@@ -1,0 +1,9 @@
+# dependencies
+node_modules/
+
+# build artifacts (regenerable: `npm run build`, `node gen-table.js`, esbuild)
+lezer-bundle.js
+cm6-demo/bundle.js
+cm6-demo/verify-bundle.cjs
+cm6-demo/pyret-parser.gen.js
+cm6-demo/pyret-terms.gen.js

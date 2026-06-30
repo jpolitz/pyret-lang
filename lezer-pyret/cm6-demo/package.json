@@ -1,0 +1,27 @@
+{
+  "name": "cm6-demo",
+  "version": "1.0.0",
+  "description": "",
+  "main": "test-tokenizer.js",
+  "scripts": {
+    "gen": "node gen-table.js",
+    "build": "node gen-table.js && esbuild index.js --bundle --minify --format=iife --loader:.arr=text --loader:.amdtext=text --outfile=bundle.js",
+    "verify": "node gen-table.js && esbuild verify.js --bundle --platform=node --format=cjs --loader:.arr=text --loader:.amdtext=text --outfile=verify-bundle.cjs && node verify-bundle.cjs",
+    "test": "node test-tokenizer.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.0",
+    "@codemirror/view": "^6.43.4",
+    "@lezer/common": "^1.5.2",
+    "@lezer/generator": "^1.8.0",
+    "@lezer/highlight": "^1.2.3",
+    "@lezer/lr": "^1.4.10",
+    "codemirror": "^6.0.2",
+    "esbuild": "^0.28.1"
+  }
+}
