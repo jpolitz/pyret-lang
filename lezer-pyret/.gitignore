@@ -1,8 +1,11 @@
 # dependencies
 node_modules/
 
-# build artifacts (regenerable: `npm run build`, `node gen-table.js`, esbuild)
-lezer-bundle.js
+# build artifacts (regenerable: `npm run build`, `node gen-table.js`, esbuild).
+# NOTE: lezer-bundle.js is intentionally COMMITTED (not ignored) — the lang
+# --use-lezer integration loads it at runtime via a relative path, so it must
+# exist on a fresh checkout / CI. Rebuild it with:
+#   node_modules/.bin/esbuild bundle-entry.js --bundle --platform=node --format=cjs --outfile=lezer-bundle.js
 cm6-demo/bundle.js
 cm6-demo/verify-bundle.cjs
 cm6-demo/pyret-parser.gen.js

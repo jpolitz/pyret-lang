@@ -1659,6 +1659,12 @@
     // grammar (bundled in lezerFrontend). Returns the SAME Either<{exn;message},
     // Program> contract as parseDataRaw.
     function parseDataRawLezer(data, fileName) {
+      if (!lezerFrontend || !lezerFrontend.lezerParseToRnglr) {
+        throw new Error("--use-lezer was requested but the Lezer parser bundle " +
+          "(lezer-pyret/lezer-bundle.js) was not found. Build it with " +
+          "`cd lezer-pyret && node_modules/.bin/esbuild bundle-entry.js --bundle " +
+          "--platform=node --format=cjs --outfile=lezer-bundle.js`.");
+      }
       var message = "";
       try {
         // Tokenize with Pyret's own tokenizer (same stream parseDataRaw replays into

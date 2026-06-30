@@ -42,9 +42,33 @@ resolve = nodeRequire("resolve");
 define("resolve", [], function () { return resolve });
 
 // Lezer parser frontend (for --use-lezer). nodeRequire (not require) so browserify
-// leaves it to node's resolver at runtime. Absolute path: the self-contained Lezer
-// bundle (parser + external tokenizer + to-rnglr adapter + @lezer/lr) lives under
-// lezer-pyret/, outside lang/node_modules. (Machine-specific; make configurable for
-// a real integration.)
-lezerPyretFrontend = nodeRequire("/home/exedev/pyret-lang/lezer-pyret/lezer-bundle.js");
+// leaves it to node's resolver at runtime. The self-contained Lezer bundle (parser +
+// external tokenizer + to-rnglr adapter + @lezer/lr) lives under lezer-pyret/, outside
+// lang/node_modules. Resolve it PORTABLY (relative to cwd, which is lang/ for the
+// Makefile, or the repo root) and NON-FATALLY: if it's absent, the default parser is
+// completely unaffected and only --use-lezer is unavailable.
+lezerPyretFrontend = null;
+(function () {
+  var p, fs, proc;
+  try { p = nodeRequire("path"); fs = nodeRequire("fs"); } catch (e) { return; }
+  // IMPORTANT: use the REAL node `process` via nodeRequire, not the global `process`
+  // — in the browserify standalone the global one is a shim whose cwd() returns '/'.
+  try { proc = nodeRequire("process"); } catch (e) { proc = null; }
+  var bases = [];
+  if (proc) {
+    try { bases.push(proc.cwd()); } catch (e) {}                       // lang/ for the Makefile
+    try { if (proc.argv && proc.argv[1]) bases.push(p.dirname(proc.argv[1])); } catch (e) {} // dir of pyret.jarr
+  }
+  try { bases.push(__dirname); } catch (e) {}
+  var rels = ["../lezer-pyret/lezer-bundle.js", "lezer-pyret/lezer-bundle.js",
+              "../../lezer-pyret/lezer-bundle.js", "../../../lezer-pyret/lezer-bundle.js"];
+  for (var b = 0; b < bases.length && !lezerPyretFrontend; b++) {
+    if (!bases[b]) continue;
+    for (var r = 0; r < rels.length; r++) {
+      var cand;
+      try { cand = p.resolve(bases[b], rels[r]); } catch (e) { continue; }
+      try { if (fs.existsSync(cand)) { lezerPyretFrontend = nodeRequire(cand); break; } } catch (e) {}
+    }
+  }
+})();
 define("lezer-pyret-frontend", [], function () { return lezerPyretFrontend; });
