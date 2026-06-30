@@ -40,3 +40,11 @@ define("ws", [], function () { return ws });
 
 resolve = nodeRequire("resolve");
 define("resolve", [], function () { return resolve });
+
+// Lezer parser frontend (for --use-lezer). nodeRequire (not require) so browserify
+// leaves it to node's resolver at runtime. Absolute path: the self-contained Lezer
+// bundle (parser + external tokenizer + to-rnglr adapter + @lezer/lr) lives under
+// lezer-pyret/, outside lang/node_modules. (Machine-specific; make configurable for
+// a real integration.)
+lezerPyretFrontend = nodeRequire("/home/exedev/pyret-lang/lezer-pyret/lezer-bundle.js");
+define("lezer-pyret-frontend", [], function () { return lezerPyretFrontend; });

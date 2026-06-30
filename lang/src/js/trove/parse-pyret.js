@@ -6,7 +6,8 @@
   ],
   nativeRequires: [
     "pyret-base/js/pyret-tokenizer",
-    "pyret-base/js/pyret-parser"
+    "pyret-base/js/pyret-parser",
+    "lezer-pyret-frontend"
   ],
   provides: {
     shorthands: {
@@ -19,9 +20,11 @@
     values: {
       "surface-parse": ["arrow", ["String", "String"], "Program"],
       "maybe-surface-parse": ["arrow", ["String", "String"], ["Option", "Program"]],
+      "surface-parse-lezer": ["arrow", ["String", "String"], "Program"],
+      "maybe-surface-parse-lezer": ["arrow", ["String", "String"], ["Option", "Program"]],
     }
   },
-  theModule: function(RUNTIME, NAMESPACE, uri, srclocLib, astLib, listsLib, tokenizer, parser) {
+  theModule: function(RUNTIME, NAMESPACE, uri, srclocLib, astLib, listsLib, tokenizer, parser, lezerFrontend) {
     var srcloc = RUNTIME.getField(srclocLib, "values");
     var ast = RUNTIME.getField(astLib, "values");
     var lists = RUNTIME.getField(listsLib, "values");
@@ -1524,6 +1527,13 @@
       return tr(node);
     }
 
+    // Additive (P5 Lezer-for-Pyret): translate a parse tree (RNGLR-shaped node)
+    // directly into a Pyret AST, reusing translate() unchanged. Exposed via the
+    // module's `internal` so it does not affect the provided interface.
+    function translateTree(node, fileName) {
+      return translate(node, fileName);
+    }
+
     const opLookup = {
       "+":   RUNTIME.makeString("op+"),
       "-":   RUNTIME.makeString("op-"),
@@ -1643,9 +1653,82 @@
       return parseDataRaw(RUNTIME.unwrap(data), RUNTIME.unwrap(fileName));
     }
 
+    // --- Lezer frontend (selected by --use-lezer; see compile-lib.arr) ---
+    // A drop-in alternative to parseDataRaw that drives the SAME in-closure
+    // translate() with the SAME tokenizer, but routes parsing through the Lezer
+    // grammar (bundled in lezerFrontend). Returns the SAME Either<{exn;message},
+    // Program> contract as parseDataRaw.
+    function parseDataRawLezer(data, fileName) {
+      var message = "";
+      try {
+        // Tokenize with Pyret's own tokenizer (same stream parseDataRaw replays into
+        // RNGLR), collect the token array, and hand it to the Lezer frontend bundle.
+        const toks = tokenizer.Tokenizer;
+        toks.tokenizeFrom(data);
+        var pyretTokens = [];
+        while (toks.hasNext()) {
+          var tk = toks.next();
+          if (tk.name === "EOF") break;
+          pyretTokens.push({ name: tk.name, value: tk.value,
+            startChar: tk.pos.startChar, endChar: tk.pos.endChar });
+        }
+        var rnglrTree;
+        try {
+          rnglrTree = lezerFrontend.lezerParseToRnglr(pyretTokens, data);
+        } catch (le) {
+          if (le && le.lezerParseError) {
+            // Lezer rejected the input. The Lezer parser has 100% accept/reject
+            // parity with RNGLR, so RNGLR also rejects it — defer to the canonical
+            // parseDataRaw error path to raise the EXACT same Pyret parse error
+            // (throwParseErrorEOF / *NextToken / etc.), keeping the contract byte
+            // identical to surface-parse.
+            return parseDataRaw(data, fileName);
+          }
+          throw le;
+        }
+        return RUNTIME.ffi.makeRight(translate(rnglrTree, fileName));
+      } catch (e) {
+        if (RUNTIME.isPyretException(e)) {
+          return RUNTIME.ffi.makeLeft(RUNTIME.makeObject({
+            exn: e.exn,
+            message: RUNTIME.makeString(message)
+          }));
+        } else {
+          throw e;
+        }
+      }
+    }
+
+    function parsePyretLezer(data, fileName) {
+      RUNTIME.ffi.checkArity(2, arguments, "surface-parse-lezer", false);
+      RUNTIME.checkString(data);
+      RUNTIME.checkString(fileName);
+      var result = parseDataRawLezer(RUNTIME.unwrap(data), RUNTIME.unwrap(fileName));
+      return RUNTIME.ffi.cases(RUNTIME.ffi.isEither, "is-Either", result, {
+        left: function(err) {
+          var exn = RUNTIME.getField(err, "exn");
+          var message = RUNTIME.getField(err, "message");
+          console.error(message);
+          RUNTIME.raise(exn);
+        },
+        right: function(ast) {
+          return ast;
+        }
+      });
+    }
+
+    function maybeParsePyretLezer(data, fileName) {
+      RUNTIME.ffi.checkArity(2, arguments, "maybe-surface-parse-lezer", false);
+      RUNTIME.checkString(data);
+      RUNTIME.checkString(fileName);
+      return parseDataRawLezer(RUNTIME.unwrap(data), RUNTIME.unwrap(fileName));
+    }
+
     return RUNTIME.makeModuleReturn({
           'surface-parse': RUNTIME.makeFunction(parsePyret, "surface-parse"),
           'maybe-surface-parse': RUNTIME.makeFunction(maybeParsePyret, "maybe-surface-parse"),
-        }, {});
+          'surface-parse-lezer': RUNTIME.makeFunction(parsePyretLezer, "surface-parse-lezer"),
+          'maybe-surface-parse-lezer': RUNTIME.makeFunction(maybeParsePyretLezer, "maybe-surface-parse-lezer"),
+        }, {}, { translateTree: translateTree });
   }
 })
