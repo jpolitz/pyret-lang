@@ -1,3 +1,4 @@
+define("lezer-pyret-frontend", [], function() { var module = { exports: {} }; var exports = module.exports;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   try {
@@ -8284,3 +8285,4 @@ function lezerParseToRnglr(pyretTokens, src) {
   return toRnglr(buildNested(tree), src);
 }
 module.exports = { lezerParseToRnglr };
+return module.exports; });
