@@ -27,6 +27,8 @@
     "cpo/cpo-builtin-modules": "src/web/js/cpo-builtin-modules.js",
     "cpo/modal-prompt": "src/web/js/modal-prompt.js",
 
+    "lezer-pyret-frontend": "src/web/js/trove/lezer-bundle.js",
+
     "jglr/jglr": "pyret/lib/jglr/jglr.js",
     "jglr/rnglr": "pyret/lib/jglr/rnglr.js",
     "jglr/cyclicJSON": "pyret/lib/jglr/cyclicJSON.js"

@@ -66,6 +66,33 @@ define("cpo/file-locator", [], function() {
     var gf = runtime.getField;
     var gmf = function(m, f) { return gf(gf(m, "values"), f); };
 
+    // Lezer frontend opt-in. Add ?parser=lezer to the editor URL to route parsing
+    // through the Lezer-for-Pyret grammar (provided by parse-pyret as
+    // `surface-parse-lezer`, backed by the browser bundle wired in cpo-config.json
+    // raw-js as `lezer-pyret-frontend`). Default (no/other param) keeps the built-in
+    // RNGLR `surface-parse`. The Lezer path has 100% accept/reject parity and already
+    // defers genuine parse errors to RNGLR internally; the try/catch here is a final
+    // safety net so the editor never breaks if the bundle is missing or throws.
+    function lezerToggleOn() {
+      try { return /[?&]parser=lezer\b/.test(window.location.search); }
+      catch (e) { return false; }
+    }
+    function cpoSurfaceParse(contents, uri) {
+      var values = gf(parsePyret, "values");
+      if (lezerToggleOn() && runtime.hasField(values, "surface-parse-lezer")) {
+        if (!window.__LEZER_LOGGED__) {
+          window.__LEZER_LOGGED__ = true;
+          console.log("[lezer] parsing via Lezer frontend (?parser=lezer):", uri);
+        }
+        try {
+          return gf(values, "surface-parse-lezer").app(contents, uri);
+        } catch (e) {
+          console.error("[lezer] failed, falling back to built-in parser:", e);
+          return gf(values, "surface-parse").app(contents, uri);
+        }
+      }
+      return gf(values, "surface-parse").app(contents, uri);
+    }
 
     function makeFileLocator(path) {
       return runtime.pauseStack((restarter) => {
@@ -82,7 +109,7 @@ define("cpo/file-locator", [], function() {
                 CPO.documents.set(uri, new CodeMirror.Doc(contents, "pyret"));
                 runtime.runThunk(() => {
                   return runtime.safeCall(function() {
-                    return gmf(parsePyret, "surface-parse").app(contents, uri);
+                    return cpoSurfaceParse(contents, uri);
                   }, function(ret) {
                     // Known flat constructor
                     ast = gmf(compileLib, "pyret-ast").app(ret);
