@@ -6,8 +6,7 @@
   ],
   nativeRequires: [
     "pyret-base/js/pyret-tokenizer",
-    "pyret-base/js/pyret-parser",
-    "lezer-pyret-frontend"
+    "pyret-base/js/pyret-parser"
   ],
   provides: {
     shorthands: {
@@ -24,7 +23,7 @@
       "maybe-surface-parse-lezer": ["arrow", ["String", "String"], ["Option", "Program"]],
     }
   },
-  theModule: function(RUNTIME, NAMESPACE, uri, srclocLib, astLib, listsLib, tokenizer, parser, lezerFrontend) {
+  theModule: function(RUNTIME, NAMESPACE, uri, srclocLib, astLib, listsLib, tokenizer, parser) {
     var srcloc = RUNTIME.getField(srclocLib, "values");
     var ast = RUNTIME.getField(astLib, "values");
     var lists = RUNTIME.getField(listsLib, "values");
@@ -1659,6 +1658,12 @@
     // grammar (bundled in lezerFrontend). Returns the SAME Either<{exn;message},
     // Program> contract as parseDataRaw.
     function parseDataRawLezer(data, fileName) {
+      // The Lezer bundle is NOT a nativeRequire of parse-pyret (that would make it a
+      // hard dependency of every standalone that bundles parse-pyret, e.g. all.jarr,
+      // which never defines it -> "Unknown module"). Instead the compile-deps module
+      // stashes it on a global, set only in the compiler context. --use-lezer is only
+      // ever reached during compilation, so this is null exactly when it's unused.
+      var lezerFrontend = (typeof global !== "undefined" && global.__PYRET_LEZER_FRONTEND__) || null;
       if (!lezerFrontend || !lezerFrontend.lezerParseToRnglr) {
         throw new Error("--use-lezer was requested but the Lezer parser bundle " +
           "(lezer-pyret/lezer-bundle.js) was not found. Build it with " +

@@ -71,4 +71,8 @@ lezerPyretFrontend = null;
     }
   }
 })();
-define("lezer-pyret-frontend", [], function () { return lezerPyretFrontend; });
+// Publish on a global rather than via define()/nativeRequires: parse-pyret reads it
+// lazily (only for --use-lezer), so built standalones that bundle parse-pyret but not
+// this compile-deps module don't need the module defined. This module only loads in
+// the compiler, which is the only place --use-lezer runs.
+try { (typeof global !== "undefined" ? global : this).__PYRET_LEZER_FRONTEND__ = lezerPyretFrontend; } catch (e) {}
