@@ -5,7 +5,7 @@ suite against the three places the Pyret editor renders. It's a **`node:test`**
 suite (no extra test-framework dependency) driven through **one runner**:
 
 ```
-node run.js --env=cpo|embed|vscode [--grep=<regex>] [--suites=all|check-blocks,errors,...]
+node run.js --env=cpo|embed|vscode [--compiler=pyret|ts] [--grep=<regex>] [--suites=all|check-blocks,errors,...]
 ```
 
 | `--env` | What it drives |
@@ -13,6 +13,15 @@ node run.js --env=cpo|embed|vscode [--grep=<regex>] [--suites=all|check-blocks,e
 | `cpo` | the reference — `code.pyret.org`'s `/editor` page (reproduces upstream's outcomes) |
 | `embed` | the embed API's embedded instance (`<iframe>` in `/embed/embed1.html`) |
 | `vscode` | the `pyret-parley.cpo` webview, in headless VS Code for the Web |
+
+`--compiler` (default `pyret`) additionally selects which **compiler backend**
+the environment boots — the stock Pyret-hosted compiler or the TypeScript port
+(code.pyret.org's `?compiler=ts` opt-in). Each env adapter maps it to its own
+flavor knob: cpo appends `?compiler=ts` to `/editor`, embed forwards it through
+the host page to the iframe URL (as the embed library's `compiler` config
+option does), and vscode opens the fixture workspace whose settings set
+`pyret-parley.compiler: "ts"`. The suites and assertions are identical in both
+configurations; `run-all.sh` runs the full env × compiler matrix.
 
 It is **strictly additive**: nothing under `code.pyret.org/` or `vscode/` is
 modified; the upstream test files are read as-is.

@@ -43,6 +43,23 @@ before(async () => {
   const page = makePlaywrightPage(s.frame);
   await page.inject();
   await page.waitFor("window.PA.editorReady()", 120000);
+  // Guard against a silent fallback: when a compiler flavor was requested
+  // (PYRET_COMPILER), the editor must actually be running on it -- otherwise
+  // a broken flavor knob would "pass" the whole suite on the default path.
+  const wantCompiler = process.env.PYRET_COMPILER || "pyret";
+  const gotCompiler = await page.eval("window.CPO_COMPILER || 'pyret'");
+  if (gotCompiler !== wantCompiler) {
+    throw new Error("expected the " + wantCompiler + " compiler flavor, but the editor loaded " + gotCompiler);
+  }
+  if (wantCompiler === "ts") {
+    // CPO_COMPILER only records the request; the proof the TS backend is
+    // really in play is its browser bundle (the PyretTSCompiler global that
+    // cpo-main-ts.js compiles through).
+    const hasBundle = await page.eval("typeof window.PyretTSCompiler !== 'undefined'");
+    if (!hasBundle) {
+      throw new Error("the ts compiler flavor was requested, but the PyretTSCompiler bundle is not loaded");
+    }
+  }
   // Absorb the one-time runtime/render warmup so no actual test pays it.
   await warmUp(page);
   session = { page, cleanup: s.cleanup };

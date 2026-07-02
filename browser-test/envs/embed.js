@@ -14,12 +14,17 @@ const { launchChromium } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:4999";
+// PYRET_COMPILER=ts makes the host page embed the TS-compiler flavor of the
+// editor (embed1.js forwards it to the iframe as /editor?compiler=ts, the
+// same knob the embed library's `compiler` config option uses).
+const COMPILER = process.env.PYRET_COMPILER || "pyret";
 
 async function setup() {
   const browser = await launchChromium();
   const page = await browser.newPage();
   page.setDefaultTimeout(60000);
-  await page.goto(BASE_URL + "/embed/embed1.html?" + BASE_URL, { waitUntil: "domcontentloaded", timeout: 120000 });
+  const compilerParam = COMPILER === "pyret" ? "" : "&compiler=" + COMPILER;
+  await page.goto(BASE_URL + "/embed/embed1.html?" + BASE_URL + compilerParam, { waitUntil: "domcontentloaded", timeout: 120000 });
 
   // Wait for the embedded instance to announce itself (pyret-init).
   await page.waitForFunction(
@@ -43,4 +48,4 @@ async function setup() {
   return { page, frame, cleanup: () => browser.close() };
 }
 
-module.exports = { setup, label: "embed API embedded instance (#embed1 iframe)" };
+module.exports = { setup, label: `embed API embedded instance (#embed1 iframe, ${COMPILER} compiler)` };

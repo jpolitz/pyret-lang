@@ -15,7 +15,12 @@ const { launchChromium } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
 
 const VSCODE_DIR = path.resolve(__dirname, "..", "..", "vscode");
-const WORKSPACE = path.resolve(__dirname, "..", "vscode", "fixture-workspace");
+// PYRET_COMPILER=ts opens the workspace whose .vscode/settings.json sets
+// "pyret-parley.compiler": "ts", so the webview boots the TS-compiler flavor
+// of the editor; the default workspace leaves the setting at its default.
+const COMPILER = process.env.PYRET_COMPILER || "pyret";
+const WORKSPACE = path.resolve(__dirname, "..", "vscode",
+  COMPILER === "ts" ? "fixture-workspace-ts" : "fixture-workspace");
 const PORT = parseInt(process.env.VSCODE_TEST_PORT || "3198", 10);
 
 async function setup() {
@@ -58,4 +63,4 @@ async function setup() {
   };
 }
 
-module.exports = { setup, label: "vscode pyret-parley.cpo webview" };
+module.exports = { setup, label: `vscode pyret-parley.cpo webview (${COMPILER} compiler)` };

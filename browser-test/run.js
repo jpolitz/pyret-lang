@@ -2,12 +2,17 @@
 /*
  * run.js -- friendly CLI over the node:test suite.
  *
- *   node run.js --env=cpo|embed|vscode [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]
+ *   node run.js --env=cpo|embed|vscode [--compiler=pyret|ts] [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]
  *
  * Examples:
  *   node run.js --env=embed --grep tables        # one feature, in the embed instance
  *   node run.js --env=cpo   --grep 'is-not'      # regex over test names
  *   node run.js --env=vscode                     # everything, in the vscode webview
+ *   node run.js --env=cpo --compiler=ts          # same suite, on the TS-compiler flavor
+ *
+ * --compiler selects which compiler backend the environment loads (the
+ * editor's ?compiler= flavor; default pyret). It maps to PYRET_COMPILER,
+ * which each env adapter honors; the assertions themselves are identical.
  *
  * This just shells out to `node --test` with the right flags + PYRET_ENV, so you
  * get node:test's native reporters and exit code. `--grep` maps to
@@ -37,6 +42,11 @@ if (!env || !["cpo", "embed", "vscode"].includes(env)) {
 const grep = arg("grep");
 const suites = arg("suites") || "all";
 const reporter = arg("reporter") || "spec";
+const compiler = arg("compiler") || process.env.PYRET_COMPILER || "pyret";
+if (!["pyret", "ts"].includes(compiler)) {
+  console.error("--compiler must be pyret or ts");
+  process.exit(2);
+}
 
 const nodeArgs = ["--test", "--test-reporter=" + reporter];
 if (grep) nodeArgs.push("--test-name-pattern=" + grep);
@@ -44,7 +54,7 @@ nodeArgs.push(path.join(__dirname, "tests", "suite.test.js"));
 
 const child = spawn(process.execPath, nodeArgs, {
   stdio: "inherit",
-  env: { ...process.env, PYRET_ENV: env, PYRET_SUITES: suites },
+  env: { ...process.env, PYRET_ENV: env, PYRET_SUITES: suites, PYRET_COMPILER: compiler },
 });
 child.on("exit", (code, signal) => {
   if (signal) process.kill(process.pid, signal);
