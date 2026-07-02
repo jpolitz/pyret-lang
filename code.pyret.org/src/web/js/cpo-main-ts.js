@@ -191,15 +191,19 @@
 
     var T = tsLib.tsCompiler();
     var builtinSupport = tsLib.makeBuiltinSupport(runtime.getParam("staticModules"));
-    var sourceCache = new Map();
     var executor = tsLib.makeExecutor(pyRuntime);
 
+    // Mirrors the stock editor's finder configuration (cpo-main.js): the
+    // url-file mode comes from the host page, and the root compile context
+    // seeds the load-path at "." (the open tab's directory, which is what
+    // the embedding host resolves every fs path against).
+    var urlFileMode = window.URL_FILE_MODE || "all-remote";
     var tsRepl = T.repl.makeRepl(
       executor,
       builtinSupport.loadables,
       pyRealm,
-      {},
-      tsLib.makeFinderFactory(builtinSupport, sourceCache));
+      { "load-path": "." },
+      tsLib.makeFinderFactory(builtinSupport, urlFileMode));
 
     function tsOptions(options) {
       var o = Object.assign({}, T.compileStructs.defaultCompileOptions);
@@ -223,13 +227,10 @@
         var ret = Q.defer();
         setTimeout(function() {
           var opts = tsOptions(options);
-          tsLib.prefetchDependencies(source, "definitions://", sourceCache)
-            .then(function() {
-              var defsLocator = tsRepl.makeDefinitionsLocator(
-                function() { return source; },
-                T.compileStructs.standardGlobals);
-              return tsRepl.restartInteractions(defsLocator, opts);
-            })
+          var defsLocator = tsRepl.makeDefinitionsLocator(
+            function() { return source; },
+            T.compileStructs.standardGlobals);
+          tsRepl.restartInteractions(defsLocator, opts)
             .then(function(either) { tsLib.resolveWithEither(ret, either); })
             .catch(function(err) { tsLib.resolveWithError(ret, err); });
         }, 0);
@@ -238,11 +239,8 @@
       run: function(str, name) {
         var ret = Q.defer();
         setTimeout(function() {
-          tsLib.prefetchDependencies(str, "interactions://prefetch", sourceCache)
-            .then(function() {
-              var locator = tsRepl.makeInteractionLocator(function() { return str; });
-              return tsRepl.runInteraction(locator);
-            })
+          var locator = tsRepl.makeInteractionLocator(function() { return str; });
+          tsRepl.runInteraction(locator)
             .then(function(either) { tsLib.resolveWithEither(ret, either); })
             .catch(function(err) { tsLib.resolveWithError(ret, err); });
         }, 0);

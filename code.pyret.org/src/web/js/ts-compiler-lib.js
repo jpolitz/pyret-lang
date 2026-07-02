@@ -8,8 +8,10 @@
 
     - builtin Loadables/locators for the TS compiler, built from the
       same staticModules record the page already carries;
-    - a module finder for the dependency protocols CPO supports (with a
-      prefetch pass, since the TS compile pipeline is synchronous);
+    - an async, context-aware module finder for the dependency
+      protocols CPO supports ((url-)file imports resolve relative to the
+      importing module via the embedding host's fs/path RPCs, exactly
+      like the stock finder);
     - a ReplExecutor that runs compiled programs through the builtin
       load-lib's run-program, so results are genuine load-lib
       ModuleResults and render exactly as they do today;
@@ -271,9 +273,17 @@
     }
 
     // ---------------------------------------------------------------
-    // Source locators for url / url-file imports.  The TS compile
-    // pipeline is synchronous, so sources are prefetched (see
-    // prefetchDependencies) into sourceCache before compiling.
+    // Module finder. The TS compiler's dependency chase is async
+    // (CL.compileWorklist awaits each finder result), so modules are
+    // located and loaded on demand -- fetch for url imports, the
+    // embedding host's fs/path RPCs for (url-)file imports -- with NO
+    // prefetch pass. Resolution is context-aware, mirroring the stock
+    // finder (cpo-main.js makeFindModule / 913740d28eb): a (url-)file
+    // import resolves relative to the directory of the importing
+    // module, threaded as a "load-path", and all path arithmetic goes
+    // through the same host path RPC the running program uses (the
+    // filesystem-internal builtin), so imports and runtime file ops
+    // resolve a given path identically.
     // ---------------------------------------------------------------
 
     function maybeAppendSlash(s) {
@@ -285,23 +295,98 @@
       return new URL(path, base).href;
     }
 
-    function dependencyUrl(dep) {
-      // Returns the fetchable URL for url-flavored dependencies, or null.
-      if(dep.protocol === "url") { return dep.arguments[0]; }
-      if(dep.protocol === "url-file") {
-        return urlResolve(dep.arguments[1], maybeAppendSlash(dep.arguments[0]));
+    // The same wire calls filesystem-internal.js makes; that module is
+    // the single source of truth for path semantics in embedded hosts.
+    function hostRpc(module, method, args) {
+      if(!window.MESSAGES) {
+        return Promise.reject(new Error(
+          "This import needs an embedding host (vscode / embed) that provides '" +
+          module + "." + method + "' over RPC"));
       }
-      return null;
+      return window.MESSAGES.sendRpc(module, method, args);
+    }
+    function hostReadFileString(p) {
+      return hostRpc('fs', 'readFile', [p]).then(function(contents) {
+        // The RPC delivers whatever the host's fs produced after a
+        // structured clone: a string, a Uint8Array (vscode), or a
+        // JSONified Buffer. Decode without assuming a Buffer global --
+        // this module's scope inside the jarr doesn't have one.
+        if(typeof contents === "string") { return contents; }
+        if(contents instanceof Uint8Array) { return new TextDecoder("utf-8").decode(contents); }
+        if(contents && contents.type === "Buffer" && Array.isArray(contents.data)) {
+          return new TextDecoder("utf-8").decode(new Uint8Array(contents.data));
+        }
+        if(Array.isArray(contents)) { return new TextDecoder("utf-8").decode(new Uint8Array(contents)); }
+        return new TextDecoder("utf-8").decode(new Uint8Array(contents));
+      });
+    }
+    function hostExists(p) {
+      return hostRpc('fs', 'stat', [p]).then(function() { return true; }, function(e) {
+        if(String(e).includes("EntryNotFound")) { return false; }
+        throw e;
+      });
     }
 
-    function makeUrlLocator(url, sourceCache) {
+    function getLoadPath(context) {
+      if(context && typeof context["load-path"] === "string") { return context["load-path"]; }
+      return ".";
+    }
+    // get-real-path: an absolute REL is honored as-is, otherwise it is
+    // joined onto the importer's load-path (both via the host path RPC).
+    function getRealPath(context, rel) {
+      return hostRpc('path', 'isAbsolute', [rel]).then(function(abs) {
+        if(abs) { return rel; }
+        return hostRpc('path', 'join', [getLoadPath(context), rel]);
+      });
+    }
+    // For a dependency, compute a Promise of { path, context }: the local
+    // path to load (null for non-local protocols) and the context to
+    // thread to that module's own imports. Unlike the stock finder we
+    // skip the path RPCs entirely when a url-file import will load
+    // remotely (all-remote mode, or no embedding host) -- observable
+    // behavior is identical, but the plain-web editor never touches RPCs.
+    function dependencyResolveInfo(context, dep, urlFileMode) {
+      var CS = tsCompiler().compileStructs;
+      var rel = null;
+      if(CS.isDependency(dep)) {
+        if(dep.protocol === "file" || dep.protocol === "js-file") { rel = dep.arguments[0]; }
+        else if(dep.protocol === "url-file" && urlFileMode !== "all-remote" && window.MESSAGES) {
+          rel = dep.arguments[1];
+        }
+      }
+      if(rel === null) {
+        // builtin/gdrive/url and remote url-file: nothing local to track,
+        // thread the importer's context through unchanged.
+        return Promise.resolve({ path: null, context: context });
+      }
+      return getRealPath(context, rel).then(function(realPath) {
+        return hostRpc('path', 'dirname', [realPath]).then(function(dir) {
+          return { path: realPath, context: { "load-path": dir } };
+        });
+      });
+    }
+
+    // Register a loaded source with CPO's document map so error
+    // highlighting (cmcode) can render srclocs into it.
+    function registerDocument(uri, text) {
+      if(window.CPO && CPO.documents && typeof CodeMirror !== "undefined" && !CPO.documents.has(uri)) {
+        CPO.documents.set(uri, new CodeMirror.Doc(text, "pyret"));
+      }
+    }
+
+    function fetchText(url) {
+      return fetch(url).then(function(response) {
+        if(!response.ok) {
+          throw new Error("Failed to load " + url + ": " + response.status);
+        }
+        return response.text();
+      });
+    }
+
+    function makeTextLocator(uri, text) {
       var T = tsCompiler();
       var CS = T.compileStructs;
       var CL = T.compileLib;
-      var text = sourceCache.get(url);
-      if(text === undefined) {
-        throw new Error("Source for " + url + " was not prefetched before compiling");
-      }
       var self = {
         getUncached: function() { return undefined; },
         needsCompile: function(_provides) { return true; },
@@ -310,91 +395,81 @@
         getModule: function() { return new CL.PyretString(text); },
         getExtraImports: function() { return CS.standardImports; },
         getDependencies: function() {
-          return CL.getStandardDependencies(self.getModule(), url);
+          return CL.getStandardDependencies(self.getModule(), uri);
         },
         getNativeModules: function() { return []; },
         getGlobals: function() { return CS.standardGlobals; },
-        uri: function() { return url; },
-        name: function() { return url; },
+        uri: function() { return uri; },
+        name: function() { return uri; },
         setCompiled: function(_loadable, _provides) { return; },
         getCompiled: function() { return undefined; }
       };
       return self;
     }
 
-    // Walks the dependency graph of `code`, fetching the source of any
-    // url / url-file imports (transitively) into sourceCache. Returns a
-    // promise. Parse errors here are swallowed: the compile pass will
-    // re-encounter and report them properly.
-    function prefetchDependencies(code, fromUri, sourceCache) {
-      var T = tsCompiler();
-      var CL = T.compileLib;
-      var CS = T.compileStructs;
-
-      function depsOf(text, srcUri) {
-        try {
-          var parsed = T.parsePyret.surfaceParse(text, srcUri);
-          return CL.getDependencies(new CL.PyretAst(parsed), srcUri);
-        } catch(e) {
-          return [];
-        }
-      }
-
-      function fetchAll(deps) {
-        return Promise.all(deps.map(function(dep) {
-          if(!CS.isDependency(dep)) { return Promise.resolve(); }
-          var url = dependencyUrl(dep);
-          if(url === null || sourceCache.has(url)) { return Promise.resolve(); }
-          return fetch(url).then(function(response) {
-            if(!response.ok) {
-              throw new Error("Failed to load " + url + ": " + response.status);
-            }
-            return response.text();
-          }).then(function(text) {
-            sourceCache.set(url, text);
-            if(window.CPO && CPO.documents && typeof CodeMirror !== "undefined") {
-              CPO.documents.set(url, new CodeMirror.Doc(text, "pyret"));
-            }
-            return fetchAll(depsOf(text, url));
-          });
-        }));
-      }
-
-      return fetchAll(depsOf(code, fromUri));
-    }
-
-    // ---------------------------------------------------------------
-    // The module finder handed to the TS repl
-    // ---------------------------------------------------------------
-
-    function makeFinderFactory(builtinSupport, sourceCache) {
+    function makeFinderFactory(builtinSupport, urlFileMode) {
       return function makeFinder() {
         var locatorCache = {};
         return function finder(context, dep) {
           var T = tsCompiler();
           var CS = T.compileStructs;
           var CL = T.compileLib;
-          function located(locator) {
-            locatorCache[locator.uri()] = locator;
-            return new CL.Located(locator, context);
+          function located(uri, locator, ctx) {
+            locatorCache[uri] = locator;
+            return new CL.Located(locator, ctx);
           }
           if(CS.isBuiltin(dep)) {
             var builtinLocator = builtinSupport.locators["builtin://" + dep.modname];
             if(!builtinLocator) {
               throw new Error("Unknown module: " + dep.modname);
             }
-            return located(builtinLocator);
+            return located("builtin://" + dep.modname, builtinLocator, context);
           }
-          else {
-            var url = dependencyUrl(dep);
-            if(url !== null) {
-              if(locatorCache[url]) { return new CL.Located(locatorCache[url], context); }
-              return located(makeUrlLocator(url, sourceCache));
+          return dependencyResolveInfo(context, dep, urlFileMode).then(function(info) {
+            function textLocated(uri, textPromise, ctx) {
+              if(locatorCache[uri]) {
+                return new CL.Located(locatorCache[uri], ctx);
+              }
+              return textPromise.then(function(text) {
+                registerDocument(uri, text);
+                return located(uri, makeTextLocator(uri, text), ctx);
+              });
+            }
+            function localFileLocated(fullUrlForDocs, ctx) {
+              return hostRpc('path', 'resolve', [info.path]).then(function(realpath) {
+                var uri = "file://" + realpath;
+                return textLocated(uri, hostReadFileString(info.path).then(function(text) {
+                  if(fullUrlForDocs) { registerDocument(fullUrlForDocs, text); }
+                  return text;
+                }), ctx);
+              });
+            }
+            if(dep.protocol === "file") {
+              return localFileLocated(null, info.context);
+            }
+            if(dep.protocol === "url") {
+              var url = dep.arguments[0];
+              return textLocated(url, fetchText(url), context);
+            }
+            if(dep.protocol === "url-file") {
+              var fullUrl = urlResolve(dep.arguments[1], maybeAppendSlash(dep.arguments[0]));
+              if(info.path === null) {
+                // all-remote (or no embedding host)
+                return textLocated(fullUrl, fetchText(fullUrl), context);
+              }
+              if(urlFileMode === "all-local") {
+                return localFileLocated(fullUrl, info.context);
+              }
+              // local-if-present
+              return hostExists(info.path).then(function(exists) {
+                if(exists) { return localFileLocated(fullUrl, info.context); }
+                return textLocated(fullUrl, fetchText(fullUrl), context);
+              });
             }
             throw new Error("The import protocol '" + dep.protocol +
               "' is not supported when running with the TypeScript compiler: " +
               dep.protocol + "://" + dep.arguments.join(":"));
-          }
+          });
         };
       };
     }
@@ -482,7 +557,6 @@
       makeBuiltinSupport: makeBuiltinSupport,
       makeFinderFactory: makeFinderFactory,
       makeExecutor: makeExecutor,
-      prefetchDependencies: prefetchDependencies,
       resolveWithEither: resolveWithEither,
       resolveWithError: resolveWithError,
       bridgeCompileErrors: bridgeCompileErrors,
