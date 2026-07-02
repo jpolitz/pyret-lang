@@ -361,6 +361,23 @@ $(TS_COMP_OUT)/config.json: src/scripts/node_modules-config.json
 .PHONY : ts-compiler
 ts-compiler: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
 
+# Precompiled builtins for the TS compiler's --serve mode, mirroring libA:
+# the serve handler resolves lib-compiled/ next to its own pyret.js (see
+# src/ts-compiler/src/server.ts), the way the Pyret-hosted server uses
+# build/phaseA/lib-compiled. Used by the npm CLI's `--backend ts`.
+$(TS_COMP_OUT)/libs.jarr: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
+	$(TS_PYRET) --outfile $(TS_COMP_OUT)/libs.jarr \
+                      --build-runnable src/arr/compiler/libs.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir $(TS_COMP_OUT)/lib-compiled/ \
+                      --deps-file $(TS_COMP_OUT)/bundled-node-compile-deps.js \
+                      -no-check-mode $(EF) \
+                      --require-config src/scripts/standalone-configA.json
+
+.PHONY : ts-libA
+ts-libA : $(TS_COMP_OUT)/libs.jarr
+
 # Unit tests for the TS compiler implementation itself
 .PHONY : ts-unit-test
 ts-unit-test: ts-compiler
