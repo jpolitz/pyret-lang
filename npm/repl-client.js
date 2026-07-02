@@ -227,7 +227,7 @@ function start(options) {
 
     process.stdout.write(DIM + 'Initializing REPL (compiling standard library)...' + RESET + '\n');
 
-    wsRound(portFile, replStartMsg).then(function(responses) {
+    return wsRound(portFile, replStartMsg).then(function(responses) {
       // Find the repl-ready message
       const ready = responses.find(r => r.type === 'repl-ready');
       const errMsg = responses.find(r => r.type === 'repl-error');

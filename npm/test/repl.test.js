@@ -94,4 +94,18 @@ describe('pyret --repl', () => {
     expect(out).toContain('the-end');
     expect(out).not.toContain('internal error');
   });
+
+  // Regression: `ensureServer()` returned `openRepl()`'s value, but openRepl
+  // didn't return its promise chain. On the first run the server isn't up yet,
+  // so ensureServer returns `startupServer().then(openRepl)` (a promise) and
+  // `.catch()` works. On a second run the server is already up, so it took the
+  // `return openRepl()` path and returned undefined — and `ensureServer().catch`
+  // threw "Cannot read properties of undefined (reading 'catch')".
+  test('a second invocation reuses the running server without crashing', () => {
+    // beforeAll left the server running, so this run hits the "already up" path.
+    const secondOut = runRepl(['4 + 5', ''].join('\n'));
+    expect(secondOut).not.toContain('Cannot read properties of undefined');
+    expect(secondOut).not.toContain('Starting Parley server');
+    expect(secondOut).toContain('9');
+  }, TIMEOUT);
 });
