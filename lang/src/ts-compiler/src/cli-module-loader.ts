@@ -398,7 +398,7 @@ export const defaultTestContext: CLIContext = {
   urlFileMode: CS.allRemote
 };
 
-export function compile(path: string, options: CS.CompileOptions): { loadables: Loadable[]; modules: Map<string, Loadable> } {
+export async function compile(path: string, options: CS.CompileOptions): Promise<{ loadables: Loadable[]; modules: Map<string, Loadable> }> {
   const baseModule = new CS.Dependency("file", [path]);
   const base = moduleFinder({
     currentLoadPath: P.resolve(options.baseDir),
@@ -406,7 +406,7 @@ export function compile(path: string, options: CS.CompileOptions): { loadables: 
     compiledReadOnlyDirs: options.compiledReadOnly.map((d) => P.resolve(d)),
     urlFileMode: options.urlFileMode
   }, baseModule);
-  const wl = CL.compileWorklist(moduleFinder, base.locator, base.context);
+  const wl = await CL.compileWorklist(moduleFinder, base.locator, base.context);
   const compiled = CL.compileProgram(wl, options);
   return compiled;
 }
@@ -440,9 +440,9 @@ export function propagateExit(_result: any): void {
   status. Note that the program sees the temp .jarr path (not the source
   path) as its zeroth command-line argument.
 */
-export function run(path: string, options: CS.CompileOptions, subsequentCommandLineArguments: string[]): { message: string; exitCode: number } {
+export async function run(path: string, options: CS.CompileOptions, subsequentCommandLineArguments: string[]): Promise<{ message: string; exitCode: number }> {
   const stats = new Map<string, any>();
-  const maybeProgram = buildProgram(path, options, stats);
+  const maybeProgram = await buildProgram(path, options, stats);
   if (isLeft(maybeProgram)) {
     return handleCompilationErrors((maybeProgram as any).v, options);
   } else {
@@ -468,11 +468,11 @@ export function run(path: string, options: CS.CompileOptions, subsequentCommandL
   Returns the program as a JavaScript AST of module list and dependency map,
   and its native dependencies as a list of strings
 */
-export function buildProgram(
+export async function buildProgram(
   path: string,
   options: CS.CompileOptions,
   stats: Map<string, any>
-): Either<any[], { jsAst: any; natives: string[] }> {
+): Promise<Either<any[], { jsAst: any; natives: string[] }>> {
   const printProgressClearing = (s: string, toClear: number | undefined) => {
     if (options.displayProgress) {
       options.log(s, toClear);
@@ -493,7 +493,7 @@ export function buildProgram(
     urlFileMode: options.urlFileMode
   }, baseModule);
   clearAndPrint("Compiling worklist...");
-  let wl: ToCompile[] = CL.compileWorklist(moduleFinder, base.locator, base.context);
+  let wl: ToCompile[] = await CL.compileWorklist(moduleFinder, base.locator, base.context);
 
   const maxDepTimes = CL.depTimesFromWorklist(wl);
 
@@ -555,7 +555,7 @@ export function buildProgram(
   return ans;
 }
 
-export function buildRunnableStandalone(path: string, requireConfigPath: string, outfile: string, options: CS.CompileOptions): boolean {
+export async function buildRunnableStandalone(path: string, requireConfigPath: string, outfile: string, options: CS.CompileOptions): Promise<boolean> {
   const stats = new Map<string, any>();
   const config = JSON.parse(fs.readFileSync(requireConfigPath, 'utf8'));
   const tb = config["typable-builtins"];
@@ -566,7 +566,7 @@ export function buildRunnableStandalone(path: string, requireConfigPath: string,
       raise("Expected a list for typable-builtins, but got: " + JSON.stringify(tb));
     }
   }
-  const maybeProgram = buildProgram(path, options, stats);
+  const maybeProgram = await buildProgram(path, options, stats);
   if (isLeft(maybeProgram)) {
     return handleCompilationErrors((maybeProgram as any).v, options);
   } else {
@@ -598,13 +598,13 @@ export function buildRunnableStandalone(path: string, requireConfigPath: string,
   }
 }
 
-export function buildRequireStandalone(path: string, options: CS.CompileOptions): void {
+export async function buildRequireStandalone(path: string, options: CS.CompileOptions): Promise<void> {
   const stats = new Map<string, any>();
   // NOTE: faithful to the Pyret original, which reads .natives/.js-ast
   // directly off the Either returned by build-program (and passes the raw
   // native strings where j-exprs are expected, and one argument too few to
   // j-fun); this function is bit-rotted upstream and ported structurally.
-  const program: any = buildProgram(path, options, stats);
+  const program: any = await buildProgram(path, options, stats);
 
   const natives = new J.JList(true, C.mapList((n: any) => n, program.natives));
 

@@ -23,7 +23,7 @@ let startedServer = false;
 function print(s: string): void { process.stdout.write(s); }
 function printError(s: string): void { process.stderr.write(s); }
 
-export function main(args: string[]): number {
+export async function main(args: string[]): Promise<number> {
 
   const thisPyretDir = P.dirname(P.resolve(C.fileName));
 
@@ -150,7 +150,7 @@ export function main(args: string[]): number {
       return failureCode;
     } else if (r.has('run')) {
       const runArgs = rest.length === 0 ? [] : rest.slice(1);
-      const result = CLI.run(r.get('run'), {
+      const result = await CLI.run(r.get('run'), {
         ...CS.defaultCompileOptions,
         standaloneFile: standaloneFile,
         displayProgress: displayProgress,
@@ -166,7 +166,7 @@ export function main(args: string[]): number {
         ? r.get('outfile')
         : r.get('build-runnable') + '.jarr';
       const compileOpts = CS.makeDefaultCompileOptions(thisPyretDir);
-      CLI.buildRunnableStandalone(
+      await CLI.buildRunnableStandalone(
         r.get('build-runnable'),
         r.has('require-config')
           ? r.get('require-config')
@@ -209,7 +209,7 @@ export function main(args: string[]): number {
       printError('Use build-runnable instead of build-standalone\n');
       return failureCode;
     } else if (r.has('build')) {
-      const result = CLI.compile(r.get('build'), {
+      const result = await CLI.compile(r.get('build'), {
         ...CS.defaultCompileOptions,
         checks: checks,
         typeCheck: typeCheck,
@@ -268,18 +268,16 @@ if (!hasStackSize && !process.env.PYRET_TS_NO_RESPAWN) {
   process.exit(res.status === null ? failureCode : res.status);
 }
 
-let exitCode: number;
-try {
-  exitCode = main(C.otherArgs);
-} catch (e: any) {
+main(C.otherArgs).then((exitCode) => {
+  if (!startedServer || exitCode !== successCode) {
+    process.exit(exitCode);
+  }
+}, (e: any) => {
   // When main raises (e.g. "There were compilation errors" out of
   // build-runnable-standalone), the Pyret runtime prints
   // "The run ended in error:" followed by the message and a Pyret stack
   // before exiting 1. Mirror the message portion.
   printError('The run ended in error:\n\n' +
     (e && e.message !== undefined ? e.message : String(e)) + '\n');
-  exitCode = failureCode;
-}
-if (!startedServer || exitCode !== successCode) {
-  process.exit(exitCode);
-}
+  process.exit(failureCode);
+});

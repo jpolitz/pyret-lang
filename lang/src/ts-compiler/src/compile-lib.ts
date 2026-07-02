@@ -211,23 +211,32 @@ export function dictMap<A2, B>(sd: Map<string, A2>, f: (k: string, v: A2) => B):
 export const dummyProvides = (uri: URI): CS.Provides =>
   new CS.Provides(uri, new Map(), new Map(), new Map(), new Map());
 
+// A module finder. The dependency chase awaits each result, so a finder may
+// be synchronous (CLI: node fs) or asynchronous (browser hosts: fetch, or
+// filesystem RPCs to an embedding host like the vscode extension) -- the
+// locator steps a host configures are respected either way.
+export type DFind<A2> = (context: A2, dep: CS.AnyDependency) => Located<A2> | Promise<Located<A2>>;
+
 export function compileWorklist<A2>(
-  dfind: (context: A2, dep: CS.AnyDependency) => Located<A2>,
+  dfind: DFind<A2>,
   locator: Locator,
   context: A2
-): ToCompile[] {
+): Promise<ToCompile[]> {
   return compileWorklistKnownModules(dfind, locator, context, new Map());
 }
 
-export function compileWorklistKnownModules<A2>(
-  dfind: (context: A2, dep: CS.AnyDependency) => Located<A2>,
+export async function compileWorklistKnownModules<A2>(
+  dfind: DFind<A2>,
   locator: Locator,
   context: A2,
   currentModules: Map<string, CS.Provides>
-): ToCompile[] {
+): Promise<ToCompile[]> {
   const tempMarked = new Map<string, boolean>();
   let topo: ToCompile[] = [];
-  function visit(locator: Locator, context: A2, currPath: Locator[]): ToCompile[] {
+  // Dependencies are located and visited strictly in order (awaited one at a
+  // time), so the topological order -- and therefore all downstream output --
+  // is byte-identical to the synchronous chase.
+  async function visit(locator: Locator, context: A2, currPath: Locator[]): Promise<ToCompile[]> {
     const mark = tempMarked.get(locator.uri());
     if (mark !== undefined) {
       if (mark) {
@@ -239,15 +248,16 @@ export function compileWorklistKnownModules<A2>(
       tempMarked.set(locator.uri(), true);
       const pmap = new Map<string, Locator>();
       const deps = locator.getDependencies();
-      const foundMods = deps.map((d) => {
-        const found = dfind(context, d);
+      const foundMods: Located<A2>[] = [];
+      for (const d of deps) {
+        const found = await dfind(context, d);
         pmap.set(d.key(), found.locator);
-        return found;
-      });
+        foundMods.push(found);
+      }
       // visit all dependents
       for (const f of foundMods) {
         if (!currentModules.has(f.locator.uri())) {
-          visit(f.locator, f.context, [f.locator, ...currPath]);
+          await visit(f.locator, f.context, [f.locator, ...currPath]);
         }
       }
       // add current locator to head of topo sort
@@ -259,7 +269,7 @@ export function compileWorklistKnownModules<A2>(
   }
   // our include edges are backwards to how the topological sort algorithm expects dependencies,
   // so reverse the result
-  const ans = [...visit(locator, context, [locator])].reverse();
+  const ans = [...await visit(locator, context, [locator])].reverse();
   return ans;
 }
 

@@ -36,7 +36,9 @@ export interface ReplExecutor<Realm = any, Result = any> {
   getResultRealm(result: Result): Realm;
 }
 
-export type Finder<A2> = (context: A2, dep: CS.AnyDependency) => CL.Located<A2>;
+// May be async: browser hosts locate modules via fetch or host RPCs, and the
+// dependency chase (CL.compileWorklist*) awaits each step.
+export type Finder<A2> = (context: A2, dep: CS.AnyDependency) => CL.Located<A2> | Promise<CL.Located<A2>>;
 
 export function makeProvideForRepl(p: A.Program): A.Program {
   return new A.SProgram(
@@ -135,7 +137,7 @@ export function makeRepl<A2, Realm = any, Result = any>(
   }
 
   async function runInteraction(locator: CL.Locator): Promise<Either<any[], Result>> {
-    const worklist = CL.compileWorklistKnownModules(finder, locator, compileContext, currentModules as any);
+    const worklist = await CL.compileWorklistKnownModules(finder, locator, compileContext, currentModules as any);
     const compiled = CL.compileProgramWith(worklist, currentModules, currentCompileOptions);
     for (const [k, v] of compiled.modules) {
       currentModules.set(k, v);

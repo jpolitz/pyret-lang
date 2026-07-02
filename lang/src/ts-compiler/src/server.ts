@@ -74,12 +74,12 @@ function orElse(options: { [key: string]: any }, key: string, dflt: any): any {
 // Port of server.arr's compile(options): options is the JSON-decoded dict
 // from the client, extended by the serve handler below. Kebab-case dict
 // keys map onto the camelCased CompileOptions fields.
-function compile(options: { [key: string]: any }): void {
+async function compile(options: { [key: string]: any }): Promise<void> {
   const outfile = 'outfile' in options
     ? options['outfile']
     : getValue(options, 'program') + '.jarr';
   const compileOpts = CS.makeDefaultCompileOptions(getValue(options, 'this-pyret-dir'));
-  CLI.buildRunnableStandalone(
+  await CLI.buildRunnableStandalone(
     getValue(options, 'program'),
     getValue(options, 'require-config'),
     outfile,
@@ -136,7 +136,7 @@ function tostring(v: any): string {
 // Port of server.js's make-server. Port is a string: a number-like string
 // is a TCP port, anything else is a unix socket path / windows pipe (node's
 // listen() makes the same distinction the original relied on).
-function makeServer(port: string, onmessage: (msg: string, sendMessage: (jsonData: string) => void) => void): void {
+function makeServer(port: string, onmessage: (msg: string, sendMessage: (jsonData: string) => void) => void | Promise<void>): void {
 
   const runQueue: string[] = [];
 
@@ -178,16 +178,21 @@ function makeServer(port: string, onmessage: (msg: string, sendMessage: (jsonDat
       info('Trying run queue, length is ', runQueue.length);
       if (runQueue.length > 0) {
         const current = runQueue.pop()!;
-        try {
-          onmessage(current, respond);
-          connection.close();
-        } catch (exn: any) {
-          error('Failed: ', exn, exn && exn.stack);
-          respondJSON({ type: 'echo-err', contents: 'There was an internal error, please report this as a bug' });
-          respondJSON({ type: 'echo-err', contents: String(exn) });
-          connection.close();
-        }
-        tryQueue();
+        // The compile handler is async (the dependency chase awaits
+        // locator steps), so the connection must stay open until it
+        // settles -- its success/failure message is the last thing the
+        // client sees before the close.
+        Promise.resolve()
+          .then(function () { return onmessage(current, respond); })
+          .then(function () {
+            connection.close();
+          }, function (exn: any) {
+            error('Failed: ', exn, exn && exn.stack);
+            respondJSON({ type: 'echo-err', contents: 'There was an internal error, please report this as a bug' });
+            respondJSON({ type: 'echo-err', contents: String(exn) });
+            connection.close();
+          })
+          .then(tryQueue);
       }
     }
 
@@ -273,13 +278,12 @@ export function serve(port: string, pyretDir: string): void {
     }
     opts['require-config'] = orElse(opts, 'require-config',
       P.resolve(P.join(pyretDir, 'config.json')));
-    try {
-      compile(opts);
+    return compile(opts).then(() => {
       sendMessage(serializeMessage([['type', 'compile-success']]));
-    } catch (exn: any) {
+    }, (exn: any) => {
       const errStr = RED.displayToString(renderReasonOf(exn), tostring, []);
       err(errStr + '\n');
       sendMessage(serializeMessage([['type', 'compile-failure']]));
-    }
+    });
   });
 }
