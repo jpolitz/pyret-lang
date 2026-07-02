@@ -148,4 +148,7 @@ Other flags: `--suites=check-blocks,errors,...` (default `all`),
 
 ## Results
 
-See `RESULTS.md` and `results/`.
+Captured run logs land in `results/` (`run-all.sh` writes one per
+env x compiler cell). Current state of the matrix: **236 passing,
+0 failing** in all six configurations (cpo / embed / vscode, each on
+both the stock and the ts compiler).
