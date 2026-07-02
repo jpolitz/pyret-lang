@@ -121,10 +121,20 @@ export function getHtmlForWebview(context: vscode.ExtensionContext, webview: vsc
   else {
     view = "hideInteractions=true";
   }
-  const templated = 
+  // The compiler backend is chosen by the pyret-parley.compiler setting --
+  // the same knob as code.pyret.org's ?compiler= flag, resolved here the way
+  // CPO's server resolves it: in ts mode PYRET points straight at the ts
+  // jarr, and editor.html's flavor script (keyed on CPO_COMPILER/PYRET_TS)
+  // loads the TS compiler bundle alongside it.
+  const compiler = config.get('compiler') === 'ts' ? 'ts' : 'pyret';
+  const jarr = compiler === 'ts' ? 'cpo-main-ts.jarr.js' : 'cpo-main.jarr.js';
+  const templated =
     render((code as string), {
       BASE_URL: baseURI.toString(),
-      PYRET: webview.asWebviewUri(vscode.Uri.joinPath(baseURI, 'js', 'cpo-main.jarr.js')).toString(),
+      PYRET: webview.asWebviewUri(vscode.Uri.joinPath(baseURI, 'js', jarr)).toString(),
+      PYRET_TS: compiler === 'ts' ? webview.asWebviewUri(vscode.Uri.joinPath(baseURI, 'js', 'cpo-main-ts.jarr.js')).toString() : "",
+      PYRET_TS_COMPILER: webview.asWebviewUri(vscode.Uri.joinPath(baseURI, 'js', 'ts-compiler.js')).toString(),
+      CPO_COMPILER: compiler,
       HASH_OPTIONS: `#footerStyle=hide&${view}&theme=${theme}`,
       URL_FILE_MODE: urlFileMode,
       IMAGE_PROXY_BYPASS: "true"
