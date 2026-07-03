@@ -403,8 +403,29 @@ tests/pyret/main2-ts.jarr: ts-compiler tests/pyret/main2.arr $(TEST_FILES)
 		--build-runnable tests/pyret/main2.arr \
 		-check-all
 
+# The suite's own compiler tests (test-repl.arr and friends) compile
+# through CLI.default-test-context, whose module cache is tests/compiled/.
+# The stock suite warms that cache as a side effect of building main2.jarr
+# there; the ts build keeps its own compile cache in tests/ts-compiled/, so
+# warm tests/compiled/ explicitly (compiled caches are interchangeable
+# between the two compilers). Without this, every repl-test restart
+# recompiles all builtins in-suite -- hours instead of seconds.
+TS_SUITE_CACHE_WARM=tests/compiled/.ts-suite-warm
+$(TS_SUITE_CACHE_WARM): $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
+	@$(call MKDIR,tests/compiled)
+	echo '"warm"' > $(TS_COMP_OUT)/suite-cache-warm.arr
+	$(TS_PYRET) --build-runnable $(TS_COMP_OUT)/suite-cache-warm.arr \
+                      --outfile $(TS_COMP_OUT)/suite-cache-warm.jarr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir tests/compiled/ \
+                      --deps-file $(TS_COMP_OUT)/bundled-node-compile-deps.js \
+                      -no-check-mode -no-display-progress \
+                      --require-config src/scripts/standalone-configA.json
+	touch $(TS_SUITE_CACHE_WARM)
+
 .PHONY : ts-pyret-test
-ts-pyret-test: tests/pyret/main2-ts.jarr
+ts-pyret-test: tests/pyret/main2-ts.jarr $(TS_SUITE_CACHE_WARM)
 	$(NODE) tests/pyret/main2-ts.jarr
 
 .PHONY : ts-test
@@ -459,7 +480,7 @@ tests/pyret/all-ts.jarr: ts-compiler $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST
 		-check-all
 
 .PHONY : all-ts-pyret-test
-all-ts-pyret-test: tests/pyret/all-ts.jarr
+all-ts-pyret-test: tests/pyret/all-ts.jarr $(TS_SUITE_CACHE_WARM)
 	$(NODE) tests/pyret/all-ts.jarr
 
 .PHONY : ts-repl-test
