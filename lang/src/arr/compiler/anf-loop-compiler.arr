@@ -761,8 +761,10 @@ fun compile-fun-body(l :: Loc, step :: A.Name, fun-name :: A.Name, compiler, arg
       [clist:
           j-if1(stack-attach-guard,
             j-block([clist:
-                j-expr(j-bracket-assign(j-dot(j-id(local-compiler.cur-ans), "stack"),
-                    j-unop(rt-field("EXN_STACKHEIGHT"), J.j-postincr), act-record))
+                j-expr(j-method(j-dot(j-id(local-compiler.cur-ans), "stack"), "push",
+                    [clist: act-record])),
+                j-expr(j-dot-assign(RUNTIME, "EXN_STACKHEIGHT",
+                    j-dot(j-dot(j-id(local-compiler.cur-ans), "stack"), "length")))
             ])),
           j-return(j-id(local-compiler.cur-ans))]
     end

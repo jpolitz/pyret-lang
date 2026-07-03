@@ -1684,12 +1684,12 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
           break;
         }
         if(isContinuation($ans)) {
-          $ans.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          ($ans.stack.push( thisRuntime.makeActivationRecord(
             ["runtime torepr"],
             toReprFun,
             $step,
             [],
-            []);
+            [])), thisRuntime.EXN_STACKHEIGHT = $ans.stack.length);
           return $ans;
         }
       }
@@ -1733,12 +1733,12 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
           }
           break;
         }
-        $ans.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+        ($ans.stack.push( thisRuntime.makeActivationRecord(
           ["runtime torepr (reentrant)"],
           reenterToReprFun,
           $step,
           [],
-          []);
+          [])), thisRuntime.EXN_STACKHEIGHT = $ans.stack.length);
         return $ans;
       }
       var toReprFunPy = makeFunction(reenterToReprFun, "toReprFun");
@@ -2207,12 +2207,12 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
             $step = 1;
             $ans = equalHelp();
             if(isContinuation($ans)) {
-              $ans.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+              ($ans.stack.push( thisRuntime.makeActivationRecord(
                 stackFrameDesc,
                 equalFun,
                 $step,
                 [],
-                []);
+                [])), thisRuntime.EXN_STACKHEIGHT = $ans.stack.length);
             }
             return $ans;
           case 1:
@@ -2238,12 +2238,12 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
             $step = 1;
             $ans = equalFun();
             if(isContinuation($ans)) {
-              $ans.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+              ($ans.stack.push( thisRuntime.makeActivationRecord(
                 stackFrameDesc,
                 reenterEqualFun,
                 $step,
                 [],
-                []);
+                [])), thisRuntime.EXN_STACKHEIGHT = $ans.stack.length);
               return $ans;
             }
             break;
@@ -3478,14 +3478,14 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         break;
       }
-      $ans.stack[thisRuntime.EXN_STACKHEIGHT++] =
+      ($ans.stack.push(
         thisRuntime.makeActivationRecord(
           "safeCall for " + stackFrame,
           safeCall,
           $step,
           [ fun, after, stackFrame ],
           [ $fun_ans ]
-        );
+        )), thisRuntime.EXN_STACKHEIGHT = $ans.stack.length);
       return $ans;
     }
 
@@ -3514,8 +3514,8 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
             }
           }
         }
-        res.stack[thisRuntime.EXN_STACKHEIGHT++] =
-          thisRuntime.makeActivationRecord("eachLoop", restart, true, [], []);
+        (res.stack.push(
+          thisRuntime.makeActivationRecord("eachLoop", restart, true, [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         return res;
       }
       return restart();
@@ -4249,8 +4249,8 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         return arr;
       }
       else {
-        $ans.stack[thisRuntime.EXN_STACKHEIGHT++] =
-          thisRuntime.makeActivationRecord(["raw-array-build"], raw_array_build, $step, [f, len], [curIdx, arr]);
+        ($ans.stack.push(
+          thisRuntime.makeActivationRecord(["raw-array-build"], raw_array_build, $step, [f, len], [curIdx, arr])), thisRuntime.EXN_STACKHEIGHT = $ans.stack.length);
         return $ans;
       }
     };
@@ -4310,8 +4310,8 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         return arr;
       }
       else {
-        $ans.stack[thisRuntime.EXN_STACKHEIGHT++] =
-          thisRuntime.makeActivationRecord(["raw-array-build-opt"], raw_array_build_opt, $step, [f, len], [curIdx, arr]);
+        ($ans.stack.push(
+          thisRuntime.makeActivationRecord(["raw-array-build-opt"], raw_array_build_opt, $step, [f, len], [curIdx, arr])), thisRuntime.EXN_STACKHEIGHT = $ans.stack.length);
         return $ans;
       }
     };
@@ -4442,11 +4442,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         var res = foldHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-array-fold"],
             foldFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }
@@ -4477,11 +4477,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         function foldFun($ar) {
           var res = foldHelp();
           if(isContinuation(res)) {
-            res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+            (res.stack.push( thisRuntime.makeActivationRecord(
               [name],
               foldFun,
               0, // step doesn't matter here
-              [], []);
+              [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
           }
           return res;
         }
@@ -4519,11 +4519,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         var res = mapHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-array-map"],
             mapFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }
@@ -4551,11 +4551,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
       function eachFun($ar) {
         var res = eachHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-array-each"],
             eachFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }
@@ -4588,11 +4588,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         var res = mapHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-array-mapi"],
             mapFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }
@@ -4626,11 +4626,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         var res = foldHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-list-map"],
             foldFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }
@@ -4667,11 +4667,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         var res = foldHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-list-join-str-last"],
             foldFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }
@@ -4709,11 +4709,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         var res = mapHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-array-map1"],
             mapFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }
@@ -4754,11 +4754,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         var res = foldHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-list-filter"],
             foldFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }
@@ -4796,11 +4796,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         var res = filterHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-array-filter"],
             filterFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }
@@ -4832,11 +4832,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         }
         var res = foldHelp();
         if(isContinuation(res)) {
-          res.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
+          (res.stack.push( thisRuntime.makeActivationRecord(
             ["raw-list-fold"],
             foldFun,
             0, // step doesn't matter here
-            [], []);
+            [], [])), thisRuntime.EXN_STACKHEIGHT = res.stack.length);
         }
         return res;
       }

@@ -883,8 +883,10 @@ export function compileFunBody(
       : clist<J.JStmt>(
         jIf1(stackAttachGuard,
           jBlock(clist<J.JStmt>(
-            jExpr(jBracketAssign(jDot(jId(localCompiler.curAns), 'stack'),
-              jUnop(rtField('EXN_STACKHEIGHT'), J.jPostincr), actRecord))
+            jExpr(jMethod(jDot(jId(localCompiler.curAns), 'stack'), 'push',
+              clist<J.JExprT>(actRecord))),
+            jExpr(jDotAssign(RUNTIME, 'EXN_STACKHEIGHT',
+              jDot(jDot(jId(localCompiler.curAns), 'stack'), 'length')))
           ))),
         jReturn(jId(localCompiler.curAns)));
 
