@@ -333,12 +333,11 @@
       var main = toLoad[toLoad.length - 1];
       runtime.setParam("currentMainURL", main);
 
+      var checker = null;
       if(realm.instantiated["builtin://checker"]) {
         // NOTE(joe): This is the place to add checkAll
         if (checks !== "none") {
-          var checker = otherRuntime.getField(otherRuntime.getField(realm.instantiated["builtin://checker"], "provide-plus-types"), "values");
-          var currentChecker = otherRuntime.getField(checker, "make-check-context").app(otherRuntime.makeString(main), checks);
-          otherRuntime.setParam("current-checker", currentChecker);
+          checker = otherRuntime.getField(otherRuntime.getField(realm.instantiated["builtin://checker"], "provide-plus-types"), "values");
         }
       }
 
@@ -353,6 +352,21 @@
         }
         return otherRuntime.runThunk(function() {
           otherRuntime.modules = realm.instantiated;
+          if (checker !== null) {
+            // make-check-context is a Pyret function, so it must be applied on
+            // otherRuntime's Pyret stack: a bare .app() here runs against
+            // whatever GAS/RUNGAS a previous run left behind, and if that gas
+            // runs out at function entry the "checker" comes back as a
+            // continuation and gets stored as data (a stale continuation that
+            // corrupts the stack when the program's checks epilogue calls
+            // current-checker()).
+            return otherRuntime.safeCall(function() {
+              return otherRuntime.getField(checker, "make-check-context").app(otherRuntime.makeString(main), checks);
+            }, function(currentChecker) {
+              otherRuntime.setParam("current-checker", currentChecker);
+              return otherRuntime.runStandalone(staticModules, realm, depMap, toLoad, postLoadHooks);
+            }, "make-check-context");
+          }
           return otherRuntime.runStandalone(staticModules, realm, depMap, toLoad, postLoadHooks);
         }, function(result) {
           if(!mainReached) {

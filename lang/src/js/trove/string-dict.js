@@ -743,12 +743,12 @@
           }
           $ans = recEq.app(getValue.full_meth(self, selfKeys[curIdx]), getValue.full_meth(other, selfKeys[curIdx]));
           if (runtime.isContinuation($ans)) {
-            ($ans.stack.push( thisRuntime.makeActivationRecord(
+            $ans.stack[thisRuntime.EXN_STACKHEIGHT++] = thisRuntime.makeActivationRecord(
               stackFrameDesc,
               equalFun,
               $step,
               [],
-              [])), thisRuntime.EXN_STACKHEIGHT = $ans.stack.length);
+              []);
             return $ans;
           }
           break;

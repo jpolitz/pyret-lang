@@ -111,6 +111,93 @@ ts-port work.
 - Suggested broader verification before merging: `lang` unit/io tests, the
   ts-compiler parity suite, and a full CPO mocha run (not just errors.js).
 
+## RESOLVED: the culprit, probe-confirmed
+
+Instrumented pre-fix runs (segment-tagged continuations, attach-freshness checks
+on all 6,870 attach sites, event-timeline ring buffer, and finally a targeted
+probe) named the violator:
+
+**`lang/src/js/trove/load-lib.js` `runProgram` (~line 340):**
+```js
+var currentChecker = otherRuntime.getField(checker, "make-check-context").app(...);
+otherRuntime.setParam("current-checker", currentChecker);
+```
+A bare `.app()` into Pyret code from JS, off any trampoline, result stored
+unchecked. This call runs *between* runs, when `otherRuntime`'s RUNGAS holds
+whatever residue the previous run left (RUNGAS is only reset when a run
+starts/bounces). Probe capture at the failing test:
+`CURRENT-CHECKER-IS-CONT cid=3356 GAS=997 RUNGAS=0` — after exactly 141 runs the
+residue hits 0 at this call, `make-check-context`'s entry gas-check returns a
+continuation, and it is stored as the current-checker *value*. The program then
+runs normally; its checks epilogue calls `current-checker()`, gets the stale
+continuation back, and the compiled `$ans` machinery re-enters propagation with
+a consumed, two-turns-old cont → desynced attach → hole at index 1 →
+`undefined.ans` TypeError on resume. Every previously observed fact (creator
+identity/loc/step, the immediate `pauseStack` after creation, the 141-run
+alignment, CLI irreproducibility) follows from this one call.
+
+**Invariant violated** (candidate wording for a boundary exception): host JS
+must not call Pyret functions bare (`fn.app(...)`) outside a trampoline —
+the result may be a continuation, and treating one as data re-enters the
+stack machinery with a stale object. Sibling bare `.app()` sites in the same
+layer: load-lib.js:47 (brand application), 204/210 (exn unwrap), 282
+(display-to-string); line 233 shows the correct `runThunk` pattern.
+
+**The fix (implemented; fail-loud policy)** — ff153a573's push-protocol
+changes to runtime.js/string-dict.js/anf-loop-compiler.{arr,ts} are reverted
+(the counter protocol is internally consistent once host code stops leaking
+continuations), replaced by:
+
+1. `load-lib.js` `runProgram`: the `make-check-context` application moves
+   inside the existing `otherRuntime.runThunk`, threaded via
+   `otherRuntime.safeCall` — it now runs on a fresh Pyret stack where a bounce
+   at function entry is handled by the machinery instead of escaping.
+2. `runtime.js` `setParam`: throws
+   `Internal: setParam("...") called with a continuation; a Pyret function was
+   likely applied off the Pyret stack (use runThunk or safeCall)` — the exact
+   spot where this bug stored the corrupt value, now loud.
+3. `runtime.js` `finishSuccess`: a continuation-valued run answer becomes a
+   clean failure result (`run completed with a continuation as its answer`)
+   instead of a success handing the caller a stale continuation.
+
+Sibling bare `.app()` sites (load-lib.js:47, 204, 210, 282) are left as
+follow-up; the asserts make any future escape through them loud rather than
+silently corrupting.
+
+## Minimization attempts (why there is no single-file .arr repro)
+
+Three increasingly targeted attempts to reproduce in a standalone CLI program
+against a pre-fix build (worktree at ff153a573^), all negative:
+
+1. `check: for each(i from range(0, 3000)): i violates lam(_): true end because true end end`
+   — 3000 identical iterations orbit a fixed set of gas phases (each iteration
+   costs the same RUNGAS), never landing in the window. Clean.
+2. Same loop with a phase dial woven in (tail-recursive `burn(num-modulo(i * 7, 611))`
+   folded into the test's left operand; TCO'd calls burn RUNGAS one-per-call
+   without bouncing) — 5000 iterations sweeping phase offsets. Clean.
+3. External fine-grained dial: one compiled program taking a burn count from
+   the command line, swept n = 0..5100 (full initialRunGas cycle = 5000, unit
+   granularity) with 200 violates-because tests per run. Clean.
+
+The reason these cannot work: the hole requires **two interleaved trampolines
+sharing one runtime's `EXN_STACKHEIGHT`**. `run-task` (`execThunk`,
+runtime.js:3977) is `pauseStack` + a new `{sync: false}` thread whose bounces
+yield through the event loop — but in a CLI run every such thread pauses its
+parent, so execution is fully serialized: one trampoline active per turn, and a
+continuation's create→attach chain completes within a single synchronous turn.
+In CPO, the *previous* run's check-results rendering (async `eachLoop`
+vivification on the same page runtime) is still bouncing when the next run
+executes — that cross-thread interleaving is what desynchronizes the counter,
+and it needs a long-lived host runtime (browser session), not a standalone
+program.
+
+Practical minimized repro (no CI, no mocha needed beyond the suite): build
+CPO locally, start the server with the workflow's env block, and run
+`mocha test/errors.js` — fails deterministically at `violates-because-fail1`
+on the 142nd program run of the shared browser session (reproduced on
+macOS/Chrome 149 and CI Linux). Any single dropped predecessor makes it pass —
+the alignment is exact.
+
 ## Investigation artifacts
 
 - Temp diagnostics were removed (`test/aaa-diag.js`, instrumented
