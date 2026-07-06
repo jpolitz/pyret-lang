@@ -25,6 +25,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as P from 'path';
 import { spawnSync } from 'child_process';
+import * as FF from './interop/fixed-fs';
 import * as A from './ast';
 import * as J from './js-ast';
 import * as C from './concat-lists';
@@ -578,7 +579,7 @@ export async function buildProgram(
 
 export async function buildRunnableStandalone(path: string, requireConfigPath: string, outfile: string, options: CS.CompileOptions): Promise<boolean> {
   const stats = new Map<string, any>();
-  const config = JSON.parse(fs.readFileSync(requireConfigPath, 'utf8'));
+  const config = JSON.parse(FF.readFixed(requireConfigPath, 'utf8'));
   const tb = config["typable-builtins"];
   if (tb !== undefined) {
     if (Array.isArray(tb)) {

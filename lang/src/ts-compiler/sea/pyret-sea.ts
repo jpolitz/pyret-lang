@@ -24,6 +24,7 @@
 
 import * as path from 'path';
 import { registerEmbeddedAssets } from './embedded-assets';
+import { installEmbeddedFs } from './embedded-fs';
 
 // Suppress the stack-size re-exec before pyret.ts's top-level code runs.
 if (!process.env.PYRET_TS_NO_RESPAWN) {
@@ -44,6 +45,9 @@ const tsHome = process.env.PYRET_TS_HOME
 process.argv[1] = path.join(tsHome, 'pyret.js');
 
 registerEmbeddedAssets();
+// Serve the embedded compiler-fixed sources when they are absent on disk, so
+// this binary can compile with no asset tree present (disk still wins if it is).
+installEmbeddedFs();
 
 // Hand off to the real CLI. Dynamic import so the env + registrations above
 // are in place before pyret.ts (and cmdline.ts, which snapshots process.argv)

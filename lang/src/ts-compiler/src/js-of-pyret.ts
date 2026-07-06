@@ -6,6 +6,7 @@
 */
 
 import * as fs from 'fs';
+import * as FF from './interop/fixed-fs';
 import * as A from './ast';
 import * as N from './anf';
 import * as AL from './anf-loop-compiler';
@@ -95,7 +96,7 @@ export class CCPFile extends CompiledCodePrinterBase {
   get $name(): 'ccp-file' { return 'ccp-file'; }
   constructor(public path: string) { super(); }
   pyretToJsRunnable(): string {
-    return fs.readFileSync(this.path, 'utf8');
+    return FF.readFixed(this.path, 'utf8');
   }
   printJsRunnable(printer: (s: string) => void): void {
     printer(this.pyretToJsRunnable());

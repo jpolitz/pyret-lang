@@ -40,35 +40,48 @@ make ts-sea-parity-test   # byte-for-byte parity vs the node build
 make ts-sea-bench         # startup + compile benchmarks
 ```
 
-## Is the binary shippable? What it needs at runtime
+## Self-contained *compiler*: no asset tree needed to compile
 
-The compiled binary is a genuine self-contained *executable*: `ldd` shows only
-stock system libraries (libc/libm/libpthread) — the bun runtime is statically
-embedded. Its **location is irrelevant** (copy it anywhere), and `--help` /
-`--version` work with no assets at all.
+The binary is an OS-self-contained executable (`ldd`: libc/libm/libpthread
+only; bun statically embedded), and it now also **embeds every compiler-fixed
+source**, so `.arr → .jarr` needs **no asset tree on disk**:
 
-It is **not** a self-contained *application*, though — it is a compiler that
-operates on a checkout. To compile/run a program it reads, from an asset tree:
+```
+# a directory containing ONLY the binary and a program — nothing else:
+PYRET_ROOT=/does/not/exist ./pyret -c prog.arr     # -> prog.jarr, exit 0
+```
 
-- the builtin trove **sources** it compiles (`src/js/trove`, `src/arr/trove`),
-- `src/js/base/handalone.js` (the standalone template),
-- `src/scripts/standalone-configA.json` and the runtime files its `raw-js`
-  concatenates (`build/phaseA/js/*`, `lib/jglr/*`),
-- `build/ts-compiler/{bundled-node-deps.js,config.json}`,
-- `node_modules` — to *run* the produced `.jarr` (it shells out to `node`; the
-  `.jarr` require()s ~79 runtime packages).
+Verified: compiling in an isolated dir with no `src/`, `build/`, `lib/`, or
+`node_modules` anywhere produces a `.jarr` **byte-identical** to a disk-mode
+compile of the same program, and that `.jarr` runs correctly.
 
-Point **`PYRET_ROOT`** at that tree and the binary runs from **any working
-directory** — the friendly CLI resolves your program/outfile to absolute paths,
-puts the per-project cache in `./​.pyret` where you invoke, and chdirs into the
-tree so the config's cwd-relative paths resolve. (With `PYRET_ROOT` unset it
-uses the cwd, i.e. run-from-checkout.) So the shippable unit is
-**binary + asset tree**, installed once and usable anywhere via `PYRET_ROOT`.
+What's embedded (via `gen-embedded-fs.mjs` → bun `type:"text"` imports, ~5 MB;
+binary grows 97 → 102 MB): the 42+42 trove sources, the runtime JS the
+standalone concatenates (`build/phaseA/js/*`, `lib/jglr/*`), the require-config,
+`handalone.js`, and the deps bundle. The compiler's fixed-source read sites go
+through `src/interop/fixed-fs.ts`, which is **disk-first, embedded-fallback**:
+a present checkout always wins (so byte-exactness is automatic and a user's own
+`--builtin-*-dir` is never shadowed), and the embedded copy is served only on
+`ENOENT`. With no provider registered (the node build) it's exactly plain `fs`,
+so the parity harness is still 16/16 byte-identical.
 
-The friendly CLI's output is byte-identical to `pyret-sea`'s given the same
-effective arguments (verified with a fixed absolute program path + fresh
-cache); it only differs when *you* hand it different paths (an absolute program
-path lands in the compiled srcloc URIs) or a different cache warmth.
+### What still needs disk: only *running* the output
+
+Compilation is self-contained; **running** the produced `.jarr` still needs a
+`node` + `node_modules` (the `.jarr` require()s ~79 runtime packages, some
+native — `canvas.node`). The friendly CLI shells out to `node` with
+`NODE_PATH` at `<PYRET_ROOT>/node_modules`. So:
+
+- **Ship a self-contained compiler**: just the binary. `pyret -c foo.arr`
+  works anywhere.
+- **Compile + run**: binary + a `node` and `node_modules` (host-native).
+
+`PYRET_ROOT` makes the binary runnable from **any working directory** (program/
+outfile resolved absolute; per-project cache in `./​.pyret`; chdir into the tree
+for disk mode; skipped when the tree is absent and everything comes from
+embed). The friendly CLI's output is byte-identical to `pyret-sea`'s for the
+same effective arguments — it differs only when *you* pass different paths (an
+absolute program path lands in the compiled srcloc URIs) or a different cache.
 
 ## Building on another platform (e.g. macOS)
 

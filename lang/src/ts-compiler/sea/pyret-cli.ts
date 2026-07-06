@@ -36,6 +36,7 @@ import * as fs from 'fs';
 import { spawnSync } from 'child_process';
 import pkg from '../package.json' with { type: 'json' };
 import { registerEmbeddedAssets } from './embedded-assets';
+import { installEmbeddedFs } from './embedded-fs';
 
 const VERSION: string = (pkg as any).version ?? '0.0.0';
 
@@ -178,12 +179,17 @@ async function run(): Promise<number> {
   process.env.PYRET_TS_NO_RESPAWN = '1';
   process.argv[1] = path.join(tsHome, 'pyret.js');
   registerEmbeddedAssets();
+  // Serve embedded compiler-fixed sources when absent on disk (disk wins if
+  // present), so compilation needs no asset tree.
+  installEmbeddedFs();
 
   // Compile from the asset root so the require-config's cwd-relative raw-js
   // paths (build/phaseA/js/*, lib/jglr/*) and the handalone template resolve
   // there. With PYRET_ROOT set this makes `pyret` runnable from any directory
-  // against an installed tree; with it unset, root == origCwd (a no-op).
-  process.chdir(root);
+  // against an installed tree; with it unset, root == origCwd (a no-op). Skip
+  // if root doesn't exist on disk — then we're running purely off embedded
+  // sources and cwd is irrelevant (embedded lookup is suffix-based).
+  if (fs.existsSync(root)) { process.chdir(root); }
 
   const pyret = await import('../src/pyret');
   let exitCode: number;

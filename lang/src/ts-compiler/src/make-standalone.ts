@@ -14,6 +14,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as FF from './interop/fixed-fs';
 
 const READ_OPTIONS = { encoding: 'utf8' as const };
 
@@ -83,7 +84,7 @@ export function makeStandalone(
   // TODO(joe): make sure this gets embedded correctly in the built version; can't
   // necessarily rely on this path
   const config = JSON.parse(configJSON);
-  const handalone = fs.readFileSync(standaloneFile, READ_OPTIONS);
+  const handalone = FF.readFixed(standaloneFile, 'utf8');
   const depsArr = [...deps];
   depsArr.push("pyret-base/js/runtime");
   const depsStrs = depsArr.map(function (d) { return '"' + d + '"'; });
@@ -105,7 +106,7 @@ export function makeStandalone(
   // Now either write the file containing all dependencies or the file which
   // just defines() the dependencies.
 
-  const dependencyCode = fs.readFileSync(depsFile, READ_OPTIONS);
+  const dependencyCode = FF.readFixed(depsFile, 'utf8');
   fs.writeSync(outFile, dependencyCode);
 
   const filesToFetch = config["raw-js"];
@@ -121,7 +122,7 @@ export function makeStandalone(
       filename = filesToFetch[f];
     }
 
-    const contents = fs.readFileSync(filename, { encoding: 'utf8' });
+    const contents = FF.readFixed(filename, 'utf8');
     fs.writeSync(outFile, contents);
   });
   fs.writeSync(outFile, "define(\"program\", " + depsLine + ", function() {\nreturn ");

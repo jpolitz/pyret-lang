@@ -75,3 +75,4 @@ compiled/
 build/ts-compiler
 tests/ts-compiled/
 compiled-ts/
+src/ts-compiler/sea/embedded-fs.generated.ts

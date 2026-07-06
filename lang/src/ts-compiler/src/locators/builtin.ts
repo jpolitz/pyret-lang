@@ -15,6 +15,7 @@
 
 import * as fs from 'fs';
 import * as P from 'path';
+import * as FF from '../interop/fixed-fs';
 import * as B from '../builtin-modules';
 import * as PP from '../parse-pyret';
 import * as CL from '../compile-lib';
@@ -63,7 +64,7 @@ export function makeBuiltinJsLocator(basedir: string, builtinName: string): CL.L
     needsCompile(_provides: Map<string, CM.Provides>): boolean { return false; },
     getUncached(): CL.Locator | undefined { return undefined; },
     getModifiedTime(): number {
-      return fs.statSync(P.join(basedir, builtinName + ".js")).mtimeMs;
+      return FF.mtimeFixed(P.join(basedir, builtinName + ".js"));
     },
     getOptions(options: CM.CompileOptions): CM.CompileOptions {
       return { ...options, checkMode: false, typeCheck: false };
@@ -109,7 +110,7 @@ export function makeBuiltinArrLocator(basedir: string, builtinName: string): CL.
   let ast: CL.PyretCode | undefined = undefined;
   return {
     getModifiedTime(): number {
-      return fs.statSync(path).mtimeMs;
+      return FF.mtimeFixed(path);
     },
     getUncached(): CL.Locator | undefined { return undefined; },
     getOptions(this: any, options: CM.CompileOptions): CM.CompileOptions {
@@ -118,10 +119,10 @@ export function makeBuiltinArrLocator(basedir: string, builtinName: string): CL.
     },
     getModule(this: any): CL.PyretCode {
       if (ast === undefined) {
-        if (!fs.existsSync(path)) {
+        if (!FF.existsFixed(path)) {
           raise("File " + path + " does not exist");
         }
-        ast = new CL.PyretAst(PP.surfaceParse(fs.readFileSync(path, 'utf8'), this.uri()));
+        ast = new CL.PyretAst(PP.surfaceParse(FF.readFixed(path, 'utf8'), this.uri()));
       }
       return ast;
     },
@@ -144,7 +145,7 @@ export function makeBuiltinArrLocator(basedir: string, builtinName: string): CL.
       // does not handle provides from dependencies currently
       // NOTE(joe): Until we serialize provides correctly, just return false here
       const cpath = path + ".js";
-      if (fs.existsSync(path) && fs.existsSync(cpath)) {
+      if (FF.existsFixed(path) && fs.existsSync(cpath)) {
         const stimes = fs.statSync(path);
         const ctimes = fs.statSync(cpath);
         return ctimes.mtimeMs <= stimes.mtimeMs;
@@ -154,7 +155,7 @@ export function makeBuiltinArrLocator(basedir: string, builtinName: string): CL.
     },
     getCompiled(this: any): CM.Loadable | undefined {
       const cpath = path + ".js";
-      if (fs.existsSync(path) && fs.existsSync(cpath)) {
+      if (FF.existsFixed(path) && fs.existsSync(cpath)) {
         // NOTE(joe):
         // Since we're not explicitly acquiring locks on files, there is a race
         // condition in the next few lines – a user could potentially delete or
@@ -193,14 +194,14 @@ export function maybeMakeBuiltinLocator(builtinName: string): CL.Locator | undef
   const matchingArrFiles: string[] = [];
   for (const p of builtinArrDirs) {
     const fullPath = P.join(p, builtinName + ".arr");
-    if (fs.existsSync(fullPath)) {
+    if (FF.existsFixed(fullPath)) {
       matchingArrFiles.push(fullPath);
     }
   }
   const matchingJsFiles: string[] = [];
   for (const p of builtinJsDirs) {
     const fullPath = P.join(p, builtinName + ".js");
-    if (fs.existsSync(fullPath)) {
+    if (FF.existsFixed(fullPath)) {
       matchingJsFiles.push(fullPath);
     }
   }

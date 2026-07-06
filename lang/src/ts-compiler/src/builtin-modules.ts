@@ -26,6 +26,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vm from 'vm';
 import { amdRequire } from './interop/amd';
+import * as FF from './interop/fixed-fs';
 
 let typeUtilMod: any = undefined;
 function typeUtil(): any {
@@ -205,7 +206,7 @@ export function builtinRawLocator(p: string): RawBuiltinLocator {
   }
   try {
     const fullPath = path.resolve(p + ".js");
-    const content = fs.readFileSync(fullPath, 'utf8');
+    const content = FF.readFixed(fullPath, 'utf8');
     return builtinRawLocatorFromStr(content);
   } catch (e) {
     console.error("Error in builtin locator: ", e);

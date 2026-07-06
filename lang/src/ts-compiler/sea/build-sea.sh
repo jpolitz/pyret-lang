@@ -21,6 +21,11 @@ if [ ! -f build/ts-compiler/js/pyret-parser.js ]; then
   exit 1
 fi
 
+# Generate the embedded-filesystem manifest (trove sources, runtime JS, config,
+# deps bundle) so the binaries are self-contained compilers. Reads build/phaseA
+# and build/ts-compiler, so it needs `make ts-compiler` (+ build/phaseA/js).
+node "$here/gen-embedded-fs.mjs"
+
 # Optional cross-compile: PYRET_SEA_TARGET=bun-darwin-arm64 (or bun-darwin-x64,
 # bun-linux-x64, bun-windows-x64, ...) builds a binary for that platform. The
 # embedded assets and on-disk assets are plain platform-independent JS/text, so
