@@ -166,6 +166,24 @@ test('error-display: renders text and locs', () => {
   const s = RED.displayToString(e, String, []);
   assert.strictEqual(s, '\nThe function`f`is bad');
 });
+// The reactor "Valid options" error lists the option names. reactorFields is a
+// Map (insertion order) here and a StringDict (hash order) in the .arr original,
+// so the two compilers diverged; both now sort() for a canonical, byte-identical
+// order (port review cross-cutting #1). This asserts the sorted order, which is
+// what well-formed.arr also produces after its matching keys-list().sort().
+test('well-formed: reactor Valid-options message is sorted', () => {
+  const prog = P.surfaceParse('r = reactor:\n  init: 0,\n  not-a-real-option: 5\nend\nprint(r)\n', 'file://test');
+  const res = WF.checkWellFormed(AU.appendNothingIfNecessary(prog));
+  assert.strictEqual(res.$name, 'err');
+  const problem = res.problems.find((p) => typeof p.renderReason === 'function');
+  const rendered = RED.displayToString(problem.renderReason(), String, []);
+  assert.ok(rendered.includes('Valid options for reactors are'),
+    'expected the reactor Valid-options error');
+  assert.ok(rendered.includes(
+    '`close-when-stop`, `init`, `last-image`, `on-key`, `on-mouse`, `on-raw-key`, '
+    + '`on-tick`, `seconds-per-tick`, `stop-when`, `title`, or `to-draw`'),
+    'reactor options must be listed in sorted order');
+});
 
 // ---------- typechecker: record-type identity ----------
 // A record type is a *set* of (name :: type) fields; field order is not part

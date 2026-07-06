@@ -939,7 +939,7 @@ well-formed-visitor = A.default-iter-visitor.{
       for each(f from fields) block:
         when not(ok-fields.has-key(f.name)):
           wf-error([list: ED.text("Valid options for reactors are "),
-              ED.h-sequence-sep(ok-fields.keys-list().map({(ok): ED.code(ED.text(ok))}), ", ", ", or "),
+              ED.h-sequence-sep(ok-fields.keys-list().sort().map({(ok): ED.code(ED.text(ok))}), ", ", ", or "),
               ED.text(", but found one named "),
               ED.code(ED.text(f.name)), ED.text(" ")], f.l)
         end

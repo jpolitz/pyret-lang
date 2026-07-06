@@ -935,7 +935,11 @@ class WellFormedVisitor extends DefaultIterVisitor {
       for (const f of node.fields) {
         if (!okFields.has(f.name)) {
           wfError([ED.text('Valid options for reactors are '),
-            ED.hSequenceSep([...okFields.keys()].map((ok) => ED.code(ED.text(ok))), ', ', ', or '),
+            // Canonicalize with sort() so the message is deterministic and
+            // byte-identical across compilers -- okFields is a Map (insertion
+            // order) here and a StringDict (hash order) in the .arr original;
+            // well-formed.arr sorts the same keys-list for this message.
+            ED.hSequenceSep([...okFields.keys()].sort().map((ok) => ED.code(ED.text(ok))), ', ', ', or '),
             ED.text(', but found one named '),
             ED.code(ED.text(f.name)), ED.text(' ')], f.l);
         }
