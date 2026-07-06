@@ -276,6 +276,13 @@ export interface CLIContext {
   cacheBaseDir: string;
   compiledReadOnlyDirs: string[];
   urlFileMode: CS.UrlFileMode;
+  // Per-build cache of already-located url locators, keyed by full url. The
+  // async finder fetches at construction, and the chase calls the finder once
+  // per dependency *edge*, so without this a diamond-shaped url import graph
+  // would fetch the same url twice. Shared by reference across the spread
+  // copies of the context threaded through the chase. Absent => no caching
+  // (only matters for url imports; local files are cheap to relocate).
+  urlCache?: Map<string, CL.Locator>;
 }
 
 export function getRealPath(currentLoadPath: string, thisPath: string): string {
@@ -306,7 +313,19 @@ export function locateFile(ctxt: CLIContext, relPath: string): CL.Located<CLICon
   }
 }
 
-export function moduleFinder(ctxt: CLIContext, dep: CS.AnyDependency): CL.Located<CLIContext> {
+// Locate (fetching up front) a url locator, memoized per build on ctxt.urlCache
+// so a url reachable by multiple import edges is fetched once.
+async function locateUrl(ctxt: CLIContext, url: string): Promise<CL.Located<CLIContext>> {
+  const cached = ctxt.urlCache?.get(url);
+  if (cached !== undefined) {
+    return new CL.Located(cached, ctxt);
+  }
+  const locator = await UL.urlLocator(url, CS.standardGlobals);
+  ctxt.urlCache?.set(url, locator);
+  return new CL.Located(locator, ctxt);
+}
+
+export async function moduleFinder(ctxt: CLIContext, dep: CS.AnyDependency): Promise<CL.Located<CLIContext>> {
   if (CS.isDependency(dep)) {
     const protocol = dep.protocol;
     const args = dep.arguments;
@@ -318,12 +337,12 @@ export function moduleFinder(ctxt: CLIContext, dep: CS.AnyDependency): CL.Locate
         return raise("Cannot find import " + toRepr(dep));
       }
     } else if (protocol === "url") {
-      return new CL.Located(UL.urlLocator(dep.arguments[0], CS.standardGlobals), ctxt);
+      return locateUrl(ctxt, dep.arguments[0]);
     } else if (protocol === "url-file") {
       const base = maybeAddSlash(args[0]);
       const fullUrl = new URL(args[1], base).href;
       if (CS.isAllRemote(ctxt.urlFileMode)) {
-        return new CL.Located(UL.urlLocator(fullUrl, CS.standardGlobals), ctxt);
+        return locateUrl(ctxt, fullUrl);
       } else if (CS.isAllLocal(ctxt.urlFileMode)) {
         const located = locateFile(ctxt, args[1]);
         if (located !== undefined) {
@@ -338,7 +357,7 @@ export function moduleFinder(ctxt: CLIContext, dep: CS.AnyDependency): CL.Locate
           const locatorWithUri = { ...located.locator, uri(): string { return fullUrl; } };
           return new CL.Located(locatorWithUri, located.context);
         } else {
-          return new CL.Located(UL.urlLocator(fullUrl, CS.standardGlobals), ctxt);
+          return locateUrl(ctxt, fullUrl);
         }
       } else {
         return raise("Unknown url-file-mode");
@@ -400,11 +419,12 @@ export const defaultTestContext: CLIContext = {
 
 export async function compile(path: string, options: CS.CompileOptions): Promise<{ loadables: Loadable[]; modules: Map<string, Loadable> }> {
   const baseModule = new CS.Dependency("file", [path]);
-  const base = moduleFinder({
+  const base = await moduleFinder({
     currentLoadPath: P.resolve(options.baseDir),
     cacheBaseDir: options.compiledCache,
     compiledReadOnlyDirs: options.compiledReadOnly.map((d) => P.resolve(d)),
-    urlFileMode: options.urlFileMode
+    urlFileMode: options.urlFileMode,
+    urlCache: new Map()
   }, baseModule);
   const wl = await CL.compileWorklist(moduleFinder, base.locator, base.context);
   const compiled = CL.compileProgram(wl, options);
@@ -486,11 +506,12 @@ export async function buildProgram(
   };
   printProgress(str);
   const baseModule = new CS.Dependency("file", [path]);
-  const base = moduleFinder({
+  const base = await moduleFinder({
     currentLoadPath: P.resolve(options.baseDir),
     cacheBaseDir: options.compiledCache,
     compiledReadOnlyDirs: options.compiledReadOnly.map((d) => P.resolve(d)),
-    urlFileMode: options.urlFileMode
+    urlFileMode: options.urlFileMode,
+    urlCache: new Map()
   }, baseModule);
   clearAndPrint("Compiling worklist...");
   let wl: ToCompile[] = await CL.compileWorklist(moduleFinder, base.locator, base.context);
