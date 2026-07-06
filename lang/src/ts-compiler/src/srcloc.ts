@@ -6,13 +6,6 @@
   (the rest of the compiler refers to it as `type Loc = S.Srcloc`).
 */
 
-// Pyret's torepr-style quoting for string fields in tostring() of data
-// values. JSON.stringify matches Pyret's escaping for the characters that
-// occur in source names.
-function stringRepr(s: string): string {
-  return JSON.stringify(s);
-}
-
 export abstract class SrclocBase {
   abstract get $name(): string;
   abstract format(showFile: boolean): string;
@@ -53,7 +46,7 @@ export class Builtin extends SrclocBase {
     return isBuiltin(other) && (other.moduleName === this.moduleName);
   }
   toString(): string {
-    return 'builtin(' + stringRepr(this.moduleName) + ')';
+    return 'builtin(' + this.moduleName + ')';
   }
 }
 
@@ -161,7 +154,12 @@ export class Srcloc extends SrclocBase {
       && (this.endChar === other.endChar);
   }
   toString(): string {
-    return 'srcloc(' + stringRepr(this.source)
+    // Pyret `tostring` of a srcloc: the source is printed bare (unquoted),
+    // like the .arr default tostring. render-error-display's cmcode case and
+    // other String(loc) sites are tostring contexts, not torepr, so do not
+    // quote the source (an earlier port used JSON.stringify -- torepr shape --
+    // which diverged from the .arr, e.g. the reactor well-formedness message).
+    return 'srcloc(' + this.source
       + ', ' + String(this.startLine)
       + ', ' + String(this.startColumn)
       + ', ' + String(this.startChar)
