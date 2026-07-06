@@ -40,6 +40,36 @@ make ts-sea-parity-test   # byte-for-byte parity vs the node build
 make ts-sea-bench         # startup + compile benchmarks
 ```
 
+## Is the binary shippable? What it needs at runtime
+
+The compiled binary is a genuine self-contained *executable*: `ldd` shows only
+stock system libraries (libc/libm/libpthread) — the bun runtime is statically
+embedded. Its **location is irrelevant** (copy it anywhere), and `--help` /
+`--version` work with no assets at all.
+
+It is **not** a self-contained *application*, though — it is a compiler that
+operates on a checkout. To compile/run a program it reads, from an asset tree:
+
+- the builtin trove **sources** it compiles (`src/js/trove`, `src/arr/trove`),
+- `src/js/base/handalone.js` (the standalone template),
+- `src/scripts/standalone-configA.json` and the runtime files its `raw-js`
+  concatenates (`build/phaseA/js/*`, `lib/jglr/*`),
+- `build/ts-compiler/{bundled-node-deps.js,config.json}`,
+- `node_modules` — to *run* the produced `.jarr` (it shells out to `node`; the
+  `.jarr` require()s ~79 runtime packages).
+
+Point **`PYRET_ROOT`** at that tree and the binary runs from **any working
+directory** — the friendly CLI resolves your program/outfile to absolute paths,
+puts the per-project cache in `./​.pyret` where you invoke, and chdirs into the
+tree so the config's cwd-relative paths resolve. (With `PYRET_ROOT` unset it
+uses the cwd, i.e. run-from-checkout.) So the shippable unit is
+**binary + asset tree**, installed once and usable anywhere via `PYRET_ROOT`.
+
+The friendly CLI's output is byte-identical to `pyret-sea`'s given the same
+effective arguments (verified with a fixed absolute program path + fresh
+cache); it only differs when *you* hand it different paths (an absolute program
+path lands in the compiled srcloc URIs) or a different cache warmth.
+
 ## Building on another platform (e.g. macOS)
 
 `bun build --compile` targets the host by default, so on a Mac the same steps

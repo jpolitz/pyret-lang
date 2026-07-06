@@ -121,16 +121,21 @@ function parseArgs(argv: string[]): Parsed {
 }
 
 // ---- translate to the underlying pyret.ts (build-runnable) invocation --------
-function compilerArgs(p: Parsed, outfile: string): string[] {
+// All paths absolute (or under `root`), so compilation does not depend on the
+// process cwd — the run step chdirs to `root` for the config's cwd-relative
+// raw-js paths, and the user's program/outfile/cache are passed absolute.
+function compilerArgs(p: Parsed, programAbs: string, outfileAbs: string, compiledDir: string): string[] {
   const args = [
-    '--build-runnable', p.program!,
-    '--outfile', outfile,
+    '--build-runnable', programAbs,
+    '--outfile', outfileAbs,
     '--builtin-js-dir', path.join(root, 'src', 'js', 'trove') + path.sep,
     '--builtin-arr-dir', path.join(root, 'src', 'arr', 'trove') + path.sep,
     '--require-config', path.join(root, 'src', 'scripts', 'standalone-configA.json'),
+    // Absolute so the standalone template resolves under root, not cwd.
+    '--standalone-file', path.join(root, 'src', 'js', 'base', 'handalone.js'),
     // Runtime deps bundle, so the produced standalone actually runs.
     '--deps-file', path.join(tsHome, 'bundled-node-deps.js'),
-    '--compiled-dir', path.join(process.cwd(), '.pyret', 'compiled'),
+    '--compiled-dir', compiledDir,
   ];
   if (p.quiet) { args.push('-no-display-progress'); }
   if (p.typeCheck) { args.push('-type-check'); }
@@ -153,8 +158,16 @@ async function run(): Promise<number> {
     p.program.endsWith('.arr') ? p.program.slice(0, -4) + '.jarr' : p.program + '.jarr'
   );
 
-  // Ensure the module cache dir exists (the compiler mkdir()s only one level).
-  fs.mkdirSync(path.join(process.cwd(), '.pyret', 'compiled'), { recursive: true });
+  // Resolve everything the user named against the *caller's* cwd up front, so
+  // we can chdir to the asset root without moving these targets. The compiled
+  // cache and node compile-cache live next to where the user runs (a per-project
+  // ./.pyret, like the npm CLI), not inside the shared install tree.
+  const origCwd = process.cwd();
+  const programAbs = path.resolve(origCwd, p.program);
+  const outfileAbs = path.resolve(origCwd, outfile);
+  const compiledDir = path.resolve(origCwd, '.pyret', 'compiled');
+  const nodeCompileCache = path.resolve(origCwd, '.pyret', 'node-compile-cache');
+  fs.mkdirSync(compiledDir, { recursive: true });
 
   // Set up to import the compiler as a library (guarded by PYRET_TS_LIBRARY so
   // importing pyret.ts does not auto-run or respawn); repoint argv[1] at the
@@ -166,10 +179,16 @@ async function run(): Promise<number> {
   process.argv[1] = path.join(tsHome, 'pyret.js');
   registerEmbeddedAssets();
 
+  // Compile from the asset root so the require-config's cwd-relative raw-js
+  // paths (build/phaseA/js/*, lib/jglr/*) and the handalone template resolve
+  // there. With PYRET_ROOT set this makes `pyret` runnable from any directory
+  // against an installed tree; with it unset, root == origCwd (a no-op).
+  process.chdir(root);
+
   const pyret = await import('../src/pyret');
   let exitCode: number;
   try {
-    exitCode = await pyret.main(compilerArgs(p, outfile));
+    exitCode = await pyret.main(compilerArgs(p, programAbs, outfileAbs, compiledDir));
   } catch (e: any) {
     // build-runnable throws on compile errors; mirror pyret.ts's message.
     process.stderr.write('The run ended in error:\n\n' +
@@ -194,12 +213,11 @@ async function run(): Promise<number> {
     // Cache V8 bytecode for the standalone's stable bulk (runtime + bundled
     // deps, ~8 MB), so repeated runs skip re-compiling it. Safe: keyed by
     // file content, so a changed program still recompiles its own module.
-    NODE_COMPILE_CACHE: process.env.NODE_COMPILE_CACHE
-      ?? path.join(process.cwd(), '.pyret', 'node-compile-cache'),
+    NODE_COMPILE_CACHE: process.env.NODE_COMPILE_CACHE ?? nodeCompileCache,
   };
   const res = runner === 'self'
-    ? spawnSync(process.execPath, ['--__exec', outfile], { stdio: 'inherit', env })
-    : spawnSync(runner, [outfile], { stdio: 'inherit', env });
+    ? spawnSync(process.execPath, ['--__exec', outfileAbs], { stdio: 'inherit', env })
+    : spawnSync(runner, [outfileAbs], { stdio: 'inherit', env });
   return res.status === null ? 1 : res.status;
 }
 
