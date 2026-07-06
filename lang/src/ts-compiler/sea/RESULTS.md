@@ -58,10 +58,39 @@ Prereqs: `bun`, `node` (≥ 22.12), and `make`. Running a compiled `.jarr` uses
 `node` + the checkout's `node_modules` (as the npm CLI does), so `npm install`
 in `lang/` must have run (the normal build does this).
 
-To cross-compile from this box instead of building on the Mac:
-`PYRET_SEA_TARGET=bun-darwin-arm64 make ts-compiler-sea` (or `bun-darwin-x64`).
-The cross-built binary still needs the checkout on the Mac for its on-disk
-assets, so building on the Mac is usually simpler.
+### Cross-compiling and copying to another machine
+
+`bun build --compile --target=...` cross-compiles. From this Linux box:
+
+```
+PYRET_SEA_TARGET=bun-darwin-arm64 bash src/ts-compiler/sea/build-sea.sh \
+  build/ts-compiler/pyret-sea-darwin-arm64 build/ts-compiler/pyret-darwin-arm64
+```
+
+produces valid Mach-O arm64 binaries (~66 MB each; verified with `file`).
+
+**But you can't copy just the binary.** It embeds the *compiler*, yet at
+runtime reads from the checkout: the builtin trove *sources* it compiles
+(`src/js/trove`, `src/arr/trove`), `src/js/base`, `standalone-configA.json`,
+`build/ts-compiler/{bundled-node-deps.js,config.json}`, the runtime files the
+config concatenates (`build/phaseA/js/*`), `lib/jglr/*`, and `node_modules` to
+*run* the produced `.jarr`. A minimal tree of those (binary + assets ≈ 99 MB,
+plus `node_modules` ≈ 134 MB) runs the friendly CLI end-to-end with
+`PYRET_ROOT` pointed at it — verified in an isolated dir.
+
+Two snags make "copy the folder to the Mac" the wrong move:
+- `node_modules` contains **native** binaries (`canvas.node` is a Linux ELF;
+  vega/charts pull it in), which won't run on macOS. Simple programs don't load
+  canvas so they'd work, but anything using charts/images would break.
+- The rest of the checkout is needed anyway.
+
+So the clean path on the M1 Mac is to **clone the branch and
+`make ts-compiler`** there — that runs `npm install` (Mac-native
+`node_modules`) and builds all the on-disk assets. Then either build a native
+binary with `make ts-compiler-sea` (needs `bun`), **or** drop in the
+cross-built `pyret-darwin-arm64` from this box (no `bun` needed on the Mac —
+that's the cross-compile's real payoff). Both are identical binaries running
+against the identical assets.
 
 The `sea-parity.sh` and `bench.sh` scripts are POSIX/bash-3.2-safe (no
 `date +%N`, no GNU `time -v`), so they run on macOS as-is.

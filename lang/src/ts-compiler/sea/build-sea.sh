@@ -36,9 +36,7 @@ bun build --compile --minify "${target_arg[@]}" "$here/pyret-sea.ts" --outfile "
 echo "built: $out"
 
 # 2) Friendly single-command compile+run CLI (`pyret ahoy-world.arr`).
-if [ -z "${1:-}" ]; then
-  bun build --compile --minify "${target_arg[@]}" "$here/pyret-cli.ts" --outfile "$cli_out"
-  echo "built: $cli_out"
-fi
+bun build --compile --minify "${target_arg[@]}" "$here/pyret-cli.ts" --outfile "$cli_out"
+echo "built: $cli_out"
 
-ls -la "$out" ${1:-} 2>/dev/null || ls -la "$out"
+ls -la "$out" "$cli_out"
