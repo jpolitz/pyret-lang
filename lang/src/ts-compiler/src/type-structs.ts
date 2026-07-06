@@ -466,7 +466,13 @@ export abstract class TypeBase {
       case 't-bot':
         return 'Bot';
       case 't-record':
-        return '{' + [...self.fields.keys()].map((key) => key + ' :: ' + mapGetValue(self.fields, key).key()).join(', ') + '}';
+        // A record type's identity is a field *set*; field order is not part of
+        // it (equals() at typeMembersEquals is order-independent). Pyret iterates
+        // a StringDict here in content-deterministic hash order, so equal records
+        // built in different field orders get the same key(). A JS Map iterates in
+        // insertion order, which would break that invariant and let a key()-keyed
+        // TypeSet hold duplicates; sort so key() stays a function of contents.
+        return '{' + [...self.fields.keys()].sort().map((key) => key + ' :: ' + mapGetValue(self.fields, key).key()).join(', ') + '}';
       case 't-tuple':
         return '{'
           + self.elts.map((elt) => elt.key()).join('; ')

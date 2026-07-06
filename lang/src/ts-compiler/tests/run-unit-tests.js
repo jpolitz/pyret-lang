@@ -167,6 +167,50 @@ test('error-display: renders text and locs', () => {
   assert.strictEqual(s, '\nThe function`f`is bad');
 });
 
+// ---------- typechecker: record-type identity ----------
+// A record type is a *set* of (name :: type) fields; field order is not part
+// of its identity. The typechecker keys its Set<Type> (TypeSet) off type.key(),
+// and Pyret's tree-set of types is ordered by `<`, which is likewise defined
+// via key(). In Pyret key() iterates a StringDict in content-deterministic hash
+// order, so two structurally-equal records built in different field orders get
+// the SAME key() and collapse to one TypeSet entry. The port must preserve that
+// invariant: key() has to agree with equals(), which is field-order-independent.
+const TS = load('type-structs.js');
+const TCS = load('type-check-structs.js');
+test('typecheck: record key() is field-order independent (agrees with equals)', () => {
+  const anyT = () => new TS.TTop(SL.dummyLoc, false);
+  const botT = () => new TS.TBot(SL.dummyLoc, false);
+  const record = (pairs) => {
+    const m = new Map();
+    for (const [n, t] of pairs) { m.set(n, t); }
+    return new TS.TRecord(m, SL.dummyLoc, false);
+  };
+  // Same name->type mapping, inserted in two different orders.
+  const recAB = record([['a', anyT()], ['b', botT()]]);
+  const recBA = record([['b', botT()], ['a', anyT()]]);
+
+  // Premise: the two records ARE the same type (equals is order-independent).
+  assert.ok(recAB.equals(recBA), 'structurally-equal records must compare equal');
+  // key() is the identity notion the typechecker actually uses; it must agree.
+  assert.strictEqual(recAB.key(), recBA.key(),
+    'key() must be field-order independent to agree with equals()');
+});
+test('typecheck: listToTypeSet collapses structurally-equal records', () => {
+  const anyT = () => new TS.TTop(SL.dummyLoc, false);
+  const botT = () => new TS.TBot(SL.dummyLoc, false);
+  const record = (pairs) => {
+    const m = new Map();
+    for (const [n, t] of pairs) { m.set(n, t); }
+    return new TS.TRecord(m, SL.dummyLoc, false);
+  };
+  const recAB = record([['a', anyT()], ['b', botT()]]);
+  const recBA = record([['b', botT()], ['a', anyT()]]);
+  // A Set<Type> of two equal types has one element (Pyret tree-set semantics).
+  const set = TCS.listToTypeSet([recAB, recBA]);
+  assert.strictEqual(set.size, 1,
+    'a TypeSet of two structurally-equal records must hold a single entry');
+});
+
 console.log('');
 console.log(`unit tests: ${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
