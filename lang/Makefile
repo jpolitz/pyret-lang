@@ -361,6 +361,34 @@ $(TS_COMP_OUT)/config.json: src/scripts/node_modules-config.json
 .PHONY : ts-compiler
 ts-compiler: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
 
+# Single-executable build of the TS compiler (bun --compile). Produces two
+# per-platform binaries in $(TS_COMP_OUT): `pyret-sea` (a drop-in for
+# `node $(TS_COMP_OUT)/pyret.js` with byte-identical output) and `pyret` (the
+# friendly single-command `pyret ahoy-world.arr` compile+run frontend). Both
+# embed the compiler + its AMD support modules; runtime assets (trove dirs,
+# config/deps/handalone, node_modules for running) are still read from disk.
+# Requires `bun` on PATH. See src/ts-compiler/sea/.
+$(TS_COMP_OUT)/pyret-sea $(TS_COMP_OUT)/pyret &: \
+                          $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS) \
+                          $(TS_COMP_DIR)/sea/pyret-sea.ts \
+                          $(TS_COMP_DIR)/sea/pyret-cli.ts \
+                          $(TS_COMP_DIR)/sea/embedded-assets.ts $(TS_COMP_SRC)
+	bash $(TS_COMP_DIR)/sea/build-sea.sh
+
+.PHONY : ts-compiler-sea
+ts-compiler-sea: $(TS_COMP_OUT)/pyret-sea $(TS_COMP_OUT)/pyret
+
+# Parity: the single executable vs the node build, byte-for-byte, over the
+# parity program set (compiled .jarr + compile output + run output).
+.PHONY : ts-sea-parity-test
+ts-sea-parity-test: ts-compiler-sea
+	bash $(TS_COMP_DIR)/sea/sea-parity.sh
+
+# Startup + warm-compile + batch benchmarks (SEA vs node build).
+.PHONY : ts-sea-bench
+ts-sea-bench: ts-compiler-sea
+	bash $(TS_COMP_DIR)/sea/bench.sh
+
 # Precompiled builtins for the TS compiler's --serve mode, mirroring libA:
 # the serve handler resolves lib-compiled/ next to its own pyret.js (see
 # src/ts-compiler/src/server.ts), the way the Pyret-hosted server uses
@@ -433,6 +461,8 @@ ts-test: ts-unit-test ts-parity-test ts-repl-test ts-pyret-test ts-type-check-te
 
 .PHONY : ts-clean
 ts-clean:
+	$(call RM,$(TS_COMP_OUT)/pyret-sea)
+	$(call RM,$(TS_COMP_OUT)/pyret)
 	$(call RMDIR,$(TS_COMP_OUT))
 	$(call RMDIR,tests/ts-compiled)
 	$(call RM,tests/pyret/main2-ts.jarr)

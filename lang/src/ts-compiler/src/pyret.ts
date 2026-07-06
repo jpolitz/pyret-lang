@@ -249,35 +249,41 @@ export async function main(args: string[]): Promise<number> {
   }
 }
 
-// The Pyret-hosted compiler runs on the runtime's segmented stack, so deep
-// recursion over large modules is free there; this port recurses on the JS
-// stack and large trove modules (lists.arr etc.) exceed node's default
-// stack. Re-exec once with a bigger stack unless the caller already set one.
-const hasStackSize = process.execArgv.some((a) => a.startsWith('--stack-size'));
-if (!hasStackSize && !process.env.PYRET_TS_NO_RESPAWN) {
-  const { spawnSync } = require('child_process');
-  if (process.argv.includes('-serve')) {
-    // Ctrl+C reaches both processes; the server child shuts down cleanly
-    // (socket cleanup, exit 0 — see server.ts) and this wrapper must
-    // survive the signal to report that status, like the Pyret original.
-    process.on('SIGINT', () => { /* child handles it */ });
+// Guarded so pyret.ts can be imported as a library (e.g. the friendly CLI in
+// sea/pyret-cli.ts calls `main()` in-process) without triggering the respawn
+// or the top-level run. Set PYRET_TS_LIBRARY=1 to suppress; unset (the normal
+// CLI and the SEA entry) runs as before.
+if (!process.env.PYRET_TS_LIBRARY) {
+  // The Pyret-hosted compiler runs on the runtime's segmented stack, so deep
+  // recursion over large modules is free there; this port recurses on the JS
+  // stack and large trove modules (lists.arr etc.) exceed node's default
+  // stack. Re-exec once with a bigger stack unless the caller already set one.
+  const hasStackSize = process.execArgv.some((a) => a.startsWith('--stack-size'));
+  if (!hasStackSize && !process.env.PYRET_TS_NO_RESPAWN) {
+    const { spawnSync } = require('child_process');
+    if (process.argv.includes('-serve')) {
+      // Ctrl+C reaches both processes; the server child shuts down cleanly
+      // (socket cleanup, exit 0 — see server.ts) and this wrapper must
+      // survive the signal to report that status, like the Pyret original.
+      process.on('SIGINT', () => { /* child handles it */ });
+    }
+    const res = spawnSync(process.execPath,
+      ['--stack-size=8192', ...process.execArgv, process.argv[1], ...process.argv.slice(2)],
+      { stdio: 'inherit', env: { ...process.env, PYRET_TS_NO_RESPAWN: '1' } });
+    process.exit(res.status === null ? failureCode : res.status);
   }
-  const res = spawnSync(process.execPath,
-    ['--stack-size=8192', ...process.execArgv, process.argv[1], ...process.argv.slice(2)],
-    { stdio: 'inherit', env: { ...process.env, PYRET_TS_NO_RESPAWN: '1' } });
-  process.exit(res.status === null ? failureCode : res.status);
-}
 
-main(C.otherArgs).then((exitCode) => {
-  if (!startedServer || exitCode !== successCode) {
-    process.exit(exitCode);
-  }
-}, (e: any) => {
-  // When main raises (e.g. "There were compilation errors" out of
-  // build-runnable-standalone), the Pyret runtime prints
-  // "The run ended in error:" followed by the message and a Pyret stack
-  // before exiting 1. Mirror the message portion.
-  printError('The run ended in error:\n\n' +
-    (e && e.message !== undefined ? e.message : String(e)) + '\n');
-  process.exit(failureCode);
-});
+  main(C.otherArgs).then((exitCode) => {
+    if (!startedServer || exitCode !== successCode) {
+      process.exit(exitCode);
+    }
+  }, (e: any) => {
+    // When main raises (e.g. "There were compilation errors" out of
+    // build-runnable-standalone), the Pyret runtime prints
+    // "The run ended in error:" followed by the message and a Pyret stack
+    // before exiting 1. Mirror the message portion.
+    printError('The run ended in error:\n\n' +
+      (e && e.message !== undefined ? e.message : String(e)) + '\n');
+    process.exit(failureCode);
+  });
+}

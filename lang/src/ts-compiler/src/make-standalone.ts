@@ -17,6 +17,17 @@ import * as path from 'path';
 
 const READ_OPTIONS = { encoding: 'utf8' as const };
 
+// Single-executable seam: when the compiler runs as a bundled binary there is
+// no on-disk `thisPyretDir/js/amd_loader.js` to read (thisPyretDir points at a
+// virtual path inside the executable). The SEA entry (sea/pyret-sea.ts) embeds
+// that file's text at build time and registers it here, so standalone assembly
+// stays byte-identical to the node build — same bytes, from memory instead of
+// disk. Left undefined on the normal node path, which reads from disk as before.
+let amdLoaderOverride: string | undefined = undefined;
+export function setAmdLoaderSource(src: string): void {
+  amdLoaderOverride = src;
+}
+
 // TODO(joe): figure our where web-standalone-template should go
 // (In the JS original this is declared inside makeStandalone, which makes
 // makeHtmlFile's reference to it a scoping bug; hoisted here so that
@@ -88,7 +99,7 @@ export function makeStandalone(
   const outFile = fs.openSync(realOut, "w");
 
   // Write the amd loader first
-  const loaderContents = fs.readFileSync(AMD_LOADER, READ_OPTIONS);
+  const loaderContents = amdLoaderOverride ?? fs.readFileSync(AMD_LOADER, READ_OPTIONS);
   fs.writeSync(outFile, loaderContents);
 
   // Now either write the file containing all dependencies or the file which
