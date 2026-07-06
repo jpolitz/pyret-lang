@@ -50,6 +50,29 @@ First, make sure you've installed [Node >= 6](http://nodejs.org).  Then run:
 
 It'll build the Pyret compiler and run the tests.
 
+### Low-run-gas regression pass
+
+The runtime trampolines on a "run-gas" counter: when it hits zero, an
+in-progress computation is captured as a *continuation* and resumed later. JS
+code that calls into Pyret (`.app(...)`) must be wrapped so a captured
+continuation is pumped to completion rather than mistaken for the real return
+value. Bugs of that shape only bite when run-gas runs out at the call site,
+which almost never happens at the default gas — but does on code.pyret.org,
+which runs at very low gas.
+
+To surface them, the regression suite can be re-run with a tiny run-gas so
+continuations are captured aggressively:
+
+    $ make regression-test-lowgas          # phaseA backend
+    $ make ts-regression-test-lowgas       # TS backend
+
+This sets `PYRET_INITIAL_RUNGAS` (honored by `src/js/base/handalone.js`) to
+`REGRESSION_RUNGAS` (default `2`; override with `make regression-test-lowgas
+REGRESSION_RUNGAS=5`). The regression suite has no runtime compilation, so the
+overhead is negligible and it runs in CI. Do **not** apply this to
+compiler-in-the-loop suites (e.g. `main2`): every compilation step then bounces
+through the event loop, making it pathologically slow.
+
 Running Pyret
 -------------
 

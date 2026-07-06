@@ -29,3 +29,11 @@ jobs:
     - name: run tests
       run: make all-pyret-test
 
+    # Re-run the regression suite with a very low trampoline run-gas so
+    # continuations are captured aggressively. This surfaces JS<->Pyret call
+    # sites that mishandle a captured continuation (see make-check-context).
+    # Regression has no runtime compilation, so the cost is negligible; the
+    # value lives in the REGRESSION_RUNGAS Makefile variable.
+    - name: run regression tests at low run-gas
+      run: make regression-test-lowgas
+

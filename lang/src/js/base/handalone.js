@@ -192,8 +192,20 @@ requirejs(["pyret-base/js/runtime", "pyret-base/js/post-load-hooks", "pyret-base
     }
   }
 
+  // Stress-testing knob (opt-in via env var; unset in normal runs). Lowering
+  // the trampoline's run-gas makes it capture continuations far more often,
+  // which surfaces JS<->Pyret call sites that mishandle a captured continuation
+  // (e.g. storing it in a param instead of the real value). RUNGAS is both the
+  // trigger and the sole cost driver, so we leave GAS alone. Used by the
+  // `regression-test-lowgas` Makefile target; do NOT apply to compiler-in-the-
+  // loop suites (main2), where it is pathologically slow.
+  var runOptions = {};
+  if (process.env.PYRET_INITIAL_RUNGAS) {
+    runOptions.initialRunGas = Number(process.env.PYRET_INITIAL_RUNGAS);
+  }
+
   return runtime.runThunk(function() {
     runtime.modules = realm.instantiated;
     return runtime.runStandalone(staticModules, realm, depMap, toLoad, postLoadHooks);
-  }, onComplete);
+  }, onComplete, runOptions);
 });

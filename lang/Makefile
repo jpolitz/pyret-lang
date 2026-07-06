@@ -286,6 +286,19 @@ tests/pyret/regression.jarr: $(PYRET_TEST_PREREQ) $(REG_TEST_FILES) tests/pyret/
 	$(TEST_BUILD) \
 		--build-runnable tests/pyret/regression.arr --outfile tests/pyret/regression.jarr
 
+# Run-gas for the low-run-gas regression stress pass (see PYRET_INITIAL_RUNGAS in
+# src/js/base/handalone.js). Small values make the trampoline capture
+# continuations aggressively, surfacing JS<->Pyret call sites that mishandle a
+# captured continuation (the class of bug fixed for make-check-context). The
+# regression suite has no runtime compilation, so this costs ~nothing. Do NOT
+# apply it to compiler-in-the-loop suites (main2): it is pathologically slow
+# there. 1 is degenerate (avoid); 2 catches with margin.
+REGRESSION_RUNGAS ?= 2
+
+.PHONY : regression-test-lowgas
+regression-test-lowgas: tests/pyret/regression.jarr
+	PYRET_INITIAL_RUNGAS=$(REGRESSION_RUNGAS) $(NODE) tests/pyret/regression.jarr
+
 .PHONY : type-check-test
 type-check-test: phaseA tests/type-check/main.jarr
 	$(NODE) tests/type-check/main.jarr
@@ -460,6 +473,12 @@ tests/pyret/regression-ts.jarr: ts-compiler tests/pyret/regression.arr $(REG_TES
 .PHONY : ts-regression-test
 ts-regression-test: tests/pyret/regression-ts.jarr
 	$(NODE) tests/pyret/regression-ts.jarr
+
+# Low-run-gas stress pass on the TS-backend regression build. See
+# REGRESSION_RUNGAS / regression-test-lowgas above for rationale.
+.PHONY : ts-regression-test-lowgas
+ts-regression-test-lowgas: tests/pyret/regression-ts.jarr
+	PYRET_INITIAL_RUNGAS=$(REGRESSION_RUNGAS) $(NODE) tests/pyret/regression-ts.jarr
 
 tests/type-check/main-ts.jarr: ts-compiler tests/type-check/main.arr $(TYPE_TEST_FILES)
 	$(TS_TEST_BUILD) \
