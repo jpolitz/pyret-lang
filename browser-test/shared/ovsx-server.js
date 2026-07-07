@@ -30,7 +30,6 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { makeSelfContained } = require("../../vscode/src/self-contained-webview");
 
 const TYPES = {
   ".js": "application/javascript",
@@ -56,24 +55,6 @@ function contentType(p) {
   return TYPES[path.extname(p).toLowerCase()] || "application/octet-stream";
 }
 
-/*
- * Mirror the extension's getHtmlForWebview: mustache-render editor.html with the
- * five vars the extension supplies; every other {{...}} tag renders to "" (what
- * mustache does with an unknown key -- which is exactly why the real webview has
- * `apiKey = ""`, `POSTMESSAGE_ORIGIN = ""`, etc). We support {{VAR}}, {{ VAR }},
- * {{&VAR}} and {{{VAR}}}.
- */
-function renderEditorHtml(template, vars) {
-  let out = template;
-  for (const [k, v] of Object.entries(vars)) {
-    const re = new RegExp("\\{\\{\\{?\\s*&?\\s*" + k + "\\s*\\}?\\}\\}", "g");
-    out = out.replace(re, v);
-  }
-  // Blank any remaining mustache tags (unknown key -> empty string).
-  out = out.replace(/\{\{\{?[^{}]*\}?\}\}/g, "");
-  return out;
-}
-
 const EDITOR_PATH = "/__editor__";
 
 /*
@@ -88,7 +69,9 @@ async function startOvsxServer(opts) {
   const hostile = opts.hostile !== false;
   const capBytes = opts.capBytes || 15 * 1024 * 1024;
 
-  const templatePath = path.join(assetRoot, "views", "editor.html");
+  // The self-contained template (shell already inlined by the CPO build); this
+  // is what the extension ships and renders.
+  const templatePath = path.join(assetRoot, "views", "editor.selfcontained.html");
   if (!fs.existsSync(templatePath)) {
     throw new Error(
       "ovsx-server: editor.html template not found at " + templatePath +
@@ -144,21 +127,15 @@ async function startOvsxServer(opts) {
   const port = server.address().port;
   const origin = "http://127.0.0.1:" + port;
 
-  const rendered = renderEditorHtml(template, {
-    BASE_URL: origin, // getHtmlForWebview: asWebviewUri(dist/web/build/web)
-    PYRET: origin + "/js/cpo-main.jarr.js",
-    HASH_OPTIONS: "", // let editor.html fall back to document.location.hash (set by the env)
-    URL_FILE_MODE: "",
-    IMAGE_PROXY_BYPASS: "true",
-  });
-  // Apply the same self-contained transform the fixed extension applies, so this
-  // env tests the actual fix. readAsset reads the real bytes off disk (like the
-  // extension host does at generation time) -- only the WEBVIEW's later fetches
-  // go through the hostile server.
-  editorHtml = makeSelfContained(rendered, {
-    baseUrl: origin,
-    readAsset: (rel) => fs.readFileSync(path.join(assetRoot, rel), "utf8"),
-  });
+  // Fill the self-contained template's literal placeholders exactly as the
+  // extension's getHtmlForWebview does (plain string replace). The shell is
+  // already inlined; only the webview's later fetch of the .gz goes through the
+  // hostile server. HASH is left "" so editor.html falls back to
+  // document.location.hash, which the env sets (with initialState).
+  editorHtml = template
+    .split("__PYRET_WEBVIEW_BASE_URL__").join(origin)
+    .split("__PYRET_WEBVIEW_HASH__").join("")
+    .split("__PYRET_WEBVIEW_URL_FILE_MODE__").join("");
 
   return {
     origin,
@@ -167,4 +144,4 @@ async function startOvsxServer(opts) {
   };
 }
 
-module.exports = { startOvsxServer, renderEditorHtml };
+module.exports = { startOvsxServer };

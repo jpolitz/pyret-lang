@@ -2,24 +2,22 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { URI, Utils } from 'vscode-uri';
 import { Buffer } from 'buffer';
-import { render } from 'mustache';
-const code = require('../build/web/views/editor.html');
-const { makeSelfContained } = require('./self-contained-webview');
+// The self-contained editor template (produced by code.pyret.org's build; see
+// src/scripts/inline-selfcontained.js) has the shell scripts/styles already
+// inlined, so the webview boots even where Open VSX / the GitLab Web IDE serves
+// its resources without an executable MIME type (issue #21). The runtime bundle
+// isn't inlined -- window.PYRET points at cpo-main.jarr.gz.js and PYRET_GZIPPED
+// is baked true, so beforePyret fetches + inflates it in-page (DecompressionStream).
+const code = require('../build/web/views/editor.selfcontained.html');
 
-// The self-contained webview transform (see self-contained-webview.js) inlines
-// the CPO editor's shell scripts/styles into the injected HTML, so the webview
-// never depends on Open VSX serving them with an executable MIME type (issue
-// #21). This require.context bundles exactly those shell files as source strings
-// -- NOT the 37MB cpo-main.jarr.js runtime, which is fetched + inflated in-page.
-const shellAssetCtx = (require as any).context(
-  '../build/web',
-  true,
-  /^\.\/(css\/.*\.css|js\/(vega\.min|vega-tooltip\.min|localSettings|es6-shim|jquery\.min|jquery-ui\.min|editor-misc\.min)\.js)$/
-);
-function readWebviewAsset(rel: string): string {
-  const mod = shellAssetCtx('./' + rel);
-  return (mod && mod.default !== undefined) ? mod.default : mod;
-}
+// Literal placeholders the build left for the three values only known here at
+// runtime. We fill them with plain string replacement -- NOT a template engine:
+// the template has the shell's minified JS inlined, and that JS is full of
+// `{{`/`}}` (object braces) that mustache would greedily corrupt. These MUST
+// match code.pyret.org/src/scripts/inline-selfcontained.js.
+const WEBVIEW_BASE_URL = '__PYRET_WEBVIEW_BASE_URL__';
+const WEBVIEW_HASH = '__PYRET_WEBVIEW_HASH__';
+const WEBVIEW_URL_FILE_MODE = '__PYRET_WEBVIEW_URL_FILE_MODE__';
 
 // import * as fs from 'fs';
 // import * as path from 'path';
@@ -128,32 +126,17 @@ function getTheme(vscodeTheme: vscode.ColorThemeKind): string {
 export function getHtmlForWebview(context: vscode.ExtensionContext, webview: vscode.Webview, showDefinitions = true): string {
   const config = vscode.workspace.getConfiguration('pyret-parley');
   const theme = getTheme(vscode.window.activeColorTheme.kind);
-  let urlFileMode = config.get('urlFileMode');
-  const baseURI = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'web', 'build', 'web'));
-  let view = "";
-  if (showDefinitions === false) {
-    view = "hideDefinitions=true&headerStyle=hide";
-  }
-  else {
-    view = "hideInteractions=true";
-  }
-  const templated = 
-    render((code as string), {
-      BASE_URL: baseURI.toString(),
-      PYRET: webview.asWebviewUri(vscode.Uri.joinPath(baseURI, 'js', 'cpo-main.jarr.js')).toString(),
-      HASH_OPTIONS: `#footerStyle=hide&${view}&theme=${theme}`,
-      URL_FILE_MODE: urlFileMode,
-      IMAGE_PROXY_BYPASS: "true"
-    });
-  // Make the page self-contained: inline the shell scripts/styles and fetch +
-  // inflate the gzipped runtime in-page, so it boots even where the webview's
-  // resources are served with a non-executable MIME type / size cap (Open VSX /
-  // GitLab Web IDE, issue #21). This is a no-op-equivalent on correctly-serving
-  // origins (desktop, vscode.dev) -- same editor, just inlined.
-  return makeSelfContained(templated, {
-    baseUrl: baseURI.toString(),
-    readAsset: readWebviewAsset,
-  });
+  const urlFileMode = config.get('urlFileMode');
+  const baseURI = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'web', 'build', 'web')).toString();
+  const view = showDefinitions === false ? "hideDefinitions=true&headerStyle=hide" : "hideInteractions=true";
+  const hashOptions = `#footerStyle=hide&${view}&theme=${theme}`;
+  // Plain string replacement of the build's literal placeholders (see the note
+  // by their definitions above). split/join, not String.replace, so a `$` in a
+  // filled value can't be read as a replacement pattern.
+  return (code as string)
+    .split(WEBVIEW_BASE_URL).join(baseURI)
+    .split(WEBVIEW_HASH).join(hashOptions)
+    .split(WEBVIEW_URL_FILE_MODE).join(String(urlFileMode ?? ""));
 }
 
 
