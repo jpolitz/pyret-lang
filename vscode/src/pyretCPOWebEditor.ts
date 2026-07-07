@@ -4,6 +4,22 @@ import { URI, Utils } from 'vscode-uri';
 import { Buffer } from 'buffer';
 import { render } from 'mustache';
 const code = require('../build/web/views/editor.html');
+const { makeSelfContained } = require('./self-contained-webview');
+
+// The self-contained webview transform (see self-contained-webview.js) inlines
+// the CPO editor's shell scripts/styles into the injected HTML, so the webview
+// never depends on Open VSX serving them with an executable MIME type (issue
+// #21). This require.context bundles exactly those shell files as source strings
+// -- NOT the 37MB cpo-main.jarr.js runtime, which is fetched + inflated in-page.
+const shellAssetCtx = (require as any).context(
+  '../build/web',
+  true,
+  /^\.\/(css\/.*\.css|js\/(vega\.min|vega-tooltip\.min|localSettings|es6-shim|jquery\.min|jquery-ui\.min|editor-misc\.min)\.js)$/
+);
+function readWebviewAsset(rel: string): string {
+  const mod = shellAssetCtx('./' + rel);
+  return (mod && mod.default !== undefined) ? mod.default : mod;
+}
 
 // import * as fs from 'fs';
 // import * as path from 'path';
@@ -129,8 +145,15 @@ export function getHtmlForWebview(context: vscode.ExtensionContext, webview: vsc
       URL_FILE_MODE: urlFileMode,
       IMAGE_PROXY_BYPASS: "true"
     });
-  console.log("Templated: ", templated);
-  return templated;
+  // Make the page self-contained: inline the shell scripts/styles and fetch +
+  // inflate the gzipped runtime in-page, so it boots even where the webview's
+  // resources are served with a non-executable MIME type / size cap (Open VSX /
+  // GitLab Web IDE, issue #21). This is a no-op-equivalent on correctly-serving
+  // origins (desktop, vscode.dev) -- same editor, just inlined.
+  return makeSelfContained(templated, {
+    baseUrl: baseURI.toString(),
+    readAsset: readWebviewAsset,
+  });
 }
 
 

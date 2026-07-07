@@ -5,7 +5,7 @@ suite against the three places the Pyret editor renders. It's a **`node:test`**
 suite (no extra test-framework dependency) driven through **one runner**:
 
 ```
-node run.js --env=cpo|embed|vscode [--grep=<regex>] [--suites=all|check-blocks,errors,...]
+node run.js --env=cpo|embed|vscode|vscode-ovsx [--grep=<regex>] [--suites=all|check-blocks,errors,...]
 ```
 
 | `--env` | What it drives |
@@ -13,6 +13,40 @@ node run.js --env=cpo|embed|vscode [--grep=<regex>] [--suites=all|check-blocks,e
 | `cpo` | the reference — `code.pyret.org`'s `/editor` page (reproduces upstream's outcomes) |
 | `embed` | the embed API's embedded instance (`<iframe>` in `/embed/embed1.html`) |
 | `vscode` | the `pyret-parley.cpo` webview, in headless VS Code for the Web |
+| `vscode-ovsx` | the same webview, but with its assets served the way **Open VSX** serves them to the **GitLab Web IDE** — reproduces issue #21 |
+
+### `vscode-ovsx` — the GitLab Web IDE / Open VSX reproduction
+
+`--env=vscode` serves the webview assets from a local static server with correct
+MIME types and no size limit (that's how `@vscode/test-web` works), so it can't
+see the way the extension breaks in the GitLab Web IDE. There, GitLab resolves
+the webview's resources to Open VSX (`open-vsx.org/vscode/unpkg/...`), which
+serves **every** file as `Content-Type: text/plain` + `X-Content-Type-Options:
+nosniff` (so `<script src>`/`<link>` are refused execution) and **503s** files
+over a ~15 MB cap (so the 37 MB `cpo-main.jarr.js` never loads). That's
+[issue #21](https://github.com/jpolitz/pyret-parley-vscode/issues/21).
+
+`vscode-ovsx` reproduces exactly that. `shared/ovsx-server.js` serves the built
+`dist/web/build/web` with those hostile semantics; the editor HTML is rendered
+the same way `getHtmlForWebview` does, with `BASE_URL`/`PYRET` pointed at it. It
+does not boot VS Code — it injects a no-op `acquireVsCodeApi` (so beforePyret
+takes the real `window.PYRET_IN_VSCODE` branch, the exact path the fix touches)
+and passes `initialState` in the URL hash (so `events.js` self-resets the editor
+and gains control locally, giving `editorReady` its non-empty CodeMirror).
+
+It is **RED** until the gzip+inline fix lands. To prove the harness plumbing
+itself is sound, run it in **faithful** mode (correct MIME, no cap) — that should
+boot and pass just like `vscode.dev`:
+
+```bash
+node run.js --env=vscode-ovsx                 # hostile (default): reproduces #21, RED
+OVSX_FAITHFUL=1 node run.js --env=vscode-ovsx  # correct MIME/no cap: GREEN (plumbing check)
+```
+
+Env vars: `OVSX_FAITHFUL=1` (correct serving), `OVSX_ASSET_ROOT=<dir>` (override
+the served build; defaults to `vscode/dist/web/build/web`), `OVSX_CAP_MB=<n>`
+(hostile size cap, default 15). A standalone one-shot check that skips the full
+spec suite lives in `smoke-ovsx.js`.
 
 It is **strictly additive**: nothing under `code.pyret.org/` or `vscode/` is
 modified; the upstream test files are read as-is.
@@ -75,7 +109,9 @@ envs/
   cpo.js                launch chromium, goto /editor
   embed.js              goto /embed/embed1.html, sendReset, find the iframe
   vscode.js             boot @vscode/test-web, open the custom editor, find the webview
+  vscode-ovsx.js        serve the webview via a simulated Open VSX (issue #21 repro)
 shared/
+  ovsx-server.js        static server that mimics Open VSX serving (text/plain+nosniff, size cap)
   load-cpo-specs.js     extract exact specs from code.pyret.org/test/*.js (no copying)
   page-assertions.js    in-page DOM port of util.js predicates (window.PA)
   cpo-assertions.js     node:assert assertions mirroring util.js, per content check

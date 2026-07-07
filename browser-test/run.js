@@ -30,8 +30,8 @@ function arg(name) {
 }
 
 const env = arg("env");
-if (!env || !["cpo", "embed", "vscode"].includes(env)) {
-  console.error("usage: node run.js --env=cpo|embed|vscode [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]");
+if (!env || !["cpo", "embed", "vscode", "vscode-ovsx"].includes(env)) {
+  console.error("usage: node run.js --env=cpo|embed|vscode|vscode-ovsx [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]");
   process.exit(2);
 }
 const grep = arg("grep");

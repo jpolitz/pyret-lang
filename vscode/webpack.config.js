@@ -51,6 +51,21 @@ const webExtensionConfig = {
 		{
 			test: /\.html/,
 			type: 'asset/source'
+		},
+		{
+			// The self-contained webview (src/self-contained-webview.js) inlines
+			// the CPO editor's shell scripts/styles into the injected HTML so the
+			// webview never depends on Open VSX serving them with an executable
+			// MIME type (see pyret-parley issue #21). Expose exactly those files
+			// (NOT the 37MB cpo-main.jarr.js runtime, which is fetched + inflated
+			// in-page) to `require` as source strings rather than parsed modules.
+			// Matched by basename: `build` is a symlink, so webpack resolves these
+			// to their real path (no stable `build/web/` prefix to key on). The
+			// require.context in pyretCPOWebEditor.ts is what scopes WHICH files
+			// are pulled in; this rule only sets their type. The extension has no
+			// other .css, and these .js basenames are unique to the CPO shell.
+			test: /([\\/](vega\.min|vega-tooltip\.min|localSettings|es6-shim|jquery\.min|jquery-ui\.min|editor-misc\.min)\.js|\.css)$/,
+			type: 'asset/source'
 		}
 		]
 	},
@@ -67,7 +82,20 @@ const webExtensionConfig = {
 					from: path.resolve(__dirname, "build"),
 					to: "./build",
 					globOptions: {
-						ignore: ["**/snap/**", "**/*.gz*"],
+						// Ship the gzipped runtime (cpo-main.jarr.gz.js, ~5.6MB) and
+						// DROP the uncompressed 37MB cpo-main.jarr.js: the webview
+						// fetches the .gz and inflates it in-page with
+						// DecompressionStream (issue #21). This also keeps the vsix
+						// small and under Open VSX's ~15MB per-file cap.
+						// Only cpo-main.jarr.gz.js is fetched (and inflated in-page);
+						// drop the uncompressed 37MB bundle and the CPO build's big
+						// intermediates (cpo-main.jarr, .jarr.js, .jarr.min).
+						ignore: [
+							"**/snap/**",
+							"**/js/cpo-main.jarr",
+							"**/js/cpo-main.jarr.js",
+							"**/js/cpo-main.jarr.min",
+						],
 					},
 					// Terser skip this file for minification
 					info: { minimized: true },
