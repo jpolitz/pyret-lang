@@ -21,9 +21,28 @@ if [ ! -f build/ts-compiler/js/pyret-parser.js ]; then
   exit 1
 fi
 
+# Precompile the `global` closure into a read-only cache the binary embeds, so
+# first runs skip recompiling the trove ("no Compiling N/M"). Uses the node
+# build (always present after `make ts-compiler`). A seed program pulls in the
+# closure; its own cache entry is dropped (the generator also skips *.arr-*).
+precompiled="build/ts-compiler/lib-precompiled"
+seed="build/ts-compiler/.sea-seed.arr"
+rm -rf "$precompiled"
+printf 'import global as G\nprint("")\n' > "$seed"
+node build/ts-compiler/pyret.js --build-runnable "$seed" \
+  --outfile build/ts-compiler/.sea-seed.jarr \
+  --builtin-js-dir src/js/trove/ --builtin-arr-dir src/arr/trove/ \
+  --compiled-dir "$precompiled/" \
+  --deps-file build/ts-compiler/bundled-node-compile-deps.js \
+  -no-check-mode -no-display-progress \
+  --require-config src/scripts/standalone-configA.json >/dev/null 2>&1
+rm -f "$seed" build/ts-compiler/.sea-seed.jarr "$precompiled"/.sea-seed.arr-*
+echo "precompiled builtins: $(ls "$precompiled"/*-static.js 2>/dev/null | wc -l) modules"
+
 # Generate the embedded-filesystem manifest (trove sources, runtime JS, config,
-# deps bundle) so the binaries are self-contained compilers. Reads build/phaseA
-# and build/ts-compiler, so it needs `make ts-compiler` (+ build/phaseA/js).
+# deps bundle, + the precompiled builtins above) so the binaries are
+# self-contained compilers. Reads build/phaseA and build/ts-compiler, so it
+# needs `make ts-compiler` (+ build/phaseA/js).
 node "$here/gen-embedded-fs.mjs"
 
 # Optional cross-compile: PYRET_SEA_TARGET=bun-darwin-arm64 (or bun-darwin-x64,

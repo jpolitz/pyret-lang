@@ -132,6 +132,10 @@ function compilerArgs(p: Parsed, programAbs: string, outfileAbs: string, compile
     '--builtin-js-dir', path.join(root, 'src', 'js', 'trove') + path.sep,
     '--builtin-arr-dir', path.join(root, 'src', 'arr', 'trove') + path.sep,
     '--require-config', path.join(root, 'src', 'scripts', 'standalone-configA.json'),
+    // Precompiled builtins shipped in the binary (embedded read-only cache), so
+    // first runs skip recompiling the trove. Served from embed when absent on
+    // disk; a real dir here would win.
+    '--compiled-read-only-dir', path.join(root, 'build', 'ts-compiler', 'lib-precompiled'),
     // Absolute so the standalone template resolves under root, not cwd.
     '--standalone-file', path.join(root, 'src', 'js', 'base', 'handalone.js'),
     // Runtime deps bundle, so the produced standalone actually runs.

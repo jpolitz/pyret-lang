@@ -65,6 +65,35 @@ a present checkout always wins (so byte-exactness is automatic and a user's own
 `ENOENT`. With no provider registered (the node build) it's exactly plain `fs`,
 so the parity harness is still 16/16 byte-identical.
 
+### Precompiled builtins: no "Compiling N/M" on first run
+
+Embedding the trove *source* means the binary recompiles the whole trove the
+first time it runs on a machine (the "Compiling 1/30 … 30/30" pass). So the
+binary also embeds a **precompiled read-only cache** of the `global` closure
+(the ~29 modules every program loads): at build time `build-sea.sh` compiles a
+seed program with the node build into `build/ts-compiler/lib-precompiled/`, and
+the generator bakes those `<name>-<sha>-static.js`/`-module.js` files in
+(+6.8 MB raw; binary 102 → 109 MB). The friendly `pyret` passes that dir as
+`--compiled-read-only-dir`; `cachedAvailable` finds the modules there (the sea
+provider reports mtime > 0 for these keys, sources 0), so they are never
+recompiled. Heavier troves a program doesn't use (`charts`, `ast`, `matrices`)
+are intentionally *not* precompiled — they fall back to on-demand source
+compilation.
+
+Effect on a cold first run (isolated dir, no asset tree, empty cache):
+
+| | before (source only) | with precompiled |
+|---|---|---|
+| first-run output | `Compiling 1/30 … 30/30` | `Compiling 1/1: your-prog.arr` |
+| cold compile-only | ~4.3 s | **~0.43 s** |
+| cold compile + run | ~4.6 s | **~0.86 s** |
+
+The precompiled path is deterministic and the output byte-identical whether the
+cache comes from embed or disk; it differs from a cold source compile only in
+module concat order (deviation #3 — functionally identical, verified running).
+`pyret-sea` deliberately does *not* use it (stays a faithful, byte-exact drop-in
+for the node build); only the friendly `pyret` opts in.
+
 ### What still needs disk: only *running* the output
 
 Compilation is self-contained; **running** the produced `.jarr` still needs a

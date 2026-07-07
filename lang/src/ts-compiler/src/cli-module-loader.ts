@@ -87,11 +87,13 @@ export function isSingleFile(x: any): x is SingleFile { return x instanceof Sing
 export function cachedAvailable(basedir: string, uri: string, name: string, modifiedTime: number): CachedType | undefined {
   const savedPath = P.join(basedir, uriToPath(uri, name));
 
-  if (fs.existsSync(savedPath + "-static.js") &&
-      (fs.statSync(savedPath + "-static.js").mtimeMs > modifiedTime)) {
+  // existsFixed/mtimeFixed so an embedded precompiled read-only cache (shipped
+  // in the single-executable) is found just like an on-disk one.
+  if (FF.existsFixed(savedPath + "-static.js") &&
+      (FF.mtimeFixed(savedPath + "-static.js") > modifiedTime)) {
     return split;
-  } else if (fs.existsSync(savedPath + ".js") &&
-      (fs.statSync(savedPath + ".js").mtimeMs > modifiedTime)) {
+  } else if (FF.existsFixed(savedPath + ".js") &&
+      (FF.mtimeFixed(savedPath + ".js") > modifiedTime)) {
     return singleFile;
   } else {
     return undefined;

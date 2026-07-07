@@ -17,6 +17,10 @@ import * as fs from 'fs';
 export interface FixedFsProvider {
   // Returns the embedded contents for `path`, or undefined if not embedded.
   read(path: string): string | undefined;
+  // Embedded mtimeMs for `path`. Sources report 0 ("always happy with the
+  // compiled version"); precompiled cache entries report > 0 so
+  // cachedAvailable accepts them. Defaults to 0 when omitted.
+  mtime?(path: string): number;
 }
 
 let provider: FixedFsProvider | undefined;
@@ -49,9 +53,13 @@ export function mtimeFixed(path: string): number {
   try {
     return fs.statSync(path).mtimeMs;
   } catch (e) {
-    // Embedded builtins report mtime 0 — the "always happy with the compiled
-    // version" convention documented at cli-module-loader.cachedAvailable.
-    if (isMissing(e) && embedded(path) !== undefined) return 0;
+    // Embedded sources report mtime 0 (the "always happy with the compiled
+    // version" convention at cli-module-loader.cachedAvailable); embedded
+    // precompiled cache entries report the provider's mtime (> 0) so they are
+    // accepted as available.
+    if (isMissing(e) && embedded(path) !== undefined) {
+      return provider && provider.mtime ? provider.mtime(path) : 0;
+    }
     throw e;
   }
 }

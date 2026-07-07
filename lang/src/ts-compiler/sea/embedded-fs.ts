@@ -36,11 +36,20 @@ function lookup(p: string): string | undefined {
   return undefined;
 }
 
+// Precompiled read-only cache entries live under this prefix; they must report
+// a positive mtime so cli-module-loader.cachedAvailable accepts them (sources
+// report 0 — the "always happy with the compiled version" convention).
+const PRECOMPILED_PREFIX = 'build/ts-compiler/lib-precompiled/';
+
 export function installEmbeddedFs(): void {
   setFixedFsProvider({
     read(path: string): string | undefined {
       const key = lookup(path);
       return key === undefined ? undefined : EMBEDDED_FS[key];
+    },
+    mtime(path: string): number {
+      const key = lookup(path);
+      return key !== undefined && key.startsWith(PRECOMPILED_PREFIX) ? 1 : 0;
     },
   });
 }

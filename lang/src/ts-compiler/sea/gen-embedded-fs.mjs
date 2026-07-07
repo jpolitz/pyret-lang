@@ -41,6 +41,21 @@ const keys = [];
 collect('src/arr/trove', '.arr', keys);
 collect('src/js/trove', '.js', keys);
 
+// Precompiled builtins (the `global` closure), if present: a read-only compile
+// cache shipped in the binary so first runs skip recompiling the trove ("no
+// Compiling N/M"). Keyed under build/ts-compiler/lib-precompiled/, which the
+// friendly CLI passes as --compiled-read-only-dir; the sea provider reports a
+// positive mtime for these keys so cachedAvailable accepts them. Excludes any
+// seed-program cache entry (names containing ".arr-").
+const precompiledDir = 'build/ts-compiler/lib-precompiled';
+if (fs.existsSync(path.join(lang, precompiledDir))) {
+  for (const name of fs.readdirSync(path.join(lang, precompiledDir)).sort()) {
+    if (name.endsWith('.js') && !name.includes('.arr-')) {
+      keys.push(path.posix.join(precompiledDir, name));
+    }
+  }
+}
+
 // Individually-named fixed files (config raw-js targets + templates + bundle).
 const rawJs = [
   'codePoint', 'exn-stack-parser', 'js-numbers', 'namespace', 'pyret-parser',
