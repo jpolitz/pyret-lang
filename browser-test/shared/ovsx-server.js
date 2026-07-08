@@ -24,8 +24,10 @@
  * regardless of mode: in a real webview that HTML is INJECTED by the extension
  * host (via `pane.webview.html`), not fetched from Open VSX, so only its
  * sub-resources are subject to Open VSX. We mirror `getHtmlForWebview`
- * (pyretCPOWebEditor.ts) by mustache-rendering the same built `editor.html`
- * template with BASE_URL/PYRET pointed at this server.
+ * (pyretCPOWebEditor.ts) exactly: take the same built
+ * `editor.selfcontained.html` the extension ships and fill its literal
+ * `__PYRET_WEBVIEW_*__` placeholders with plain string replacement, with the
+ * base URL pointed at this server.
  */
 const http = require("http");
 const fs = require("fs");
