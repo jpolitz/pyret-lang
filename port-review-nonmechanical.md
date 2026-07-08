@@ -171,8 +171,8 @@ only deliberate `MutableStringDict` mirror mutates in place; `==` on compounds a
 Verified: `newExistential` call order preserved at every checked site; foldr direction
 preserved via reverse-index loops; type-logger shim byte-equivalent.
 - [~] ts:362-374 `_checking` s-module — ~50 lines of dead-but-present Pyret (arity-broken `foldr-fold-result` call) replaced by a documented throw.
-- [~] ts:1636-1647 `trackBranches` — Set-of-variants → array with name-based removal; `remaining-branches` **order** feeds the `non-exhaustive-pattern` error (ts:1537), so variant order in that message can differ.
-- [i] `cant-typecheck` messages render anns via JSON-ish `toRepr` instead of Pyret `tostring` at ts:2512, 2521, 2534, 2562, 2592 (+ internal raises ts:197, 206, 299; ts:136 uses `toString` where arr used `to-repr`).
+- [~] ts:1636-1647 `trackBranches` — Set-of-variants → array with name-based removal; `remaining-branches` **order** feeds the `non-exhaustive-pattern` error (ts:1537), so variant order in that message can differ. [✔ verified identical — both list declaration order.]
+- [i] `cant-typecheck` messages render anns via JSON-ish `toRepr` instead of Pyret `tostring` at ts:2512, 2521, 2534, 2562, 2592 (+ internal raises ts:197, 206, 299; ts:136 uses `toString` where arr used `to-repr`). [⏭️ unreachable from source — a blank ann in a type is written `_` and errors in well-formed before here.]
 - [!] ⏭️ ts:157, 165, 178, 223, 226 — `(… as C.VVar).t` silent-undefined casts. [See TS-impl-choice above.]
 - [~] ts:2110-2111, 2130-2131 `synthesisUpdate` — **faithfully preserves** the original's accumulator bug (spreads `fields` not `_newFields`, arr:1950/1971); don't fix one side only.
 - [i] ts:2464 — DataType stored via `as unknown as Type`; ts:2633-2635 reifies Pyret's implicit `stmts.last()` error with the exact message; ts:2144 carries the *wrong* TODO(MATT) comment (belongs to synthesis-instantiation, arr:2048; the real check-fun TODO arr:1986 was dropped).
@@ -184,7 +184,7 @@ iter-vs-map `sBind` asymmetry preserved (ts:294 vs 340).
 - [~] Documented fixes (NOTEd): ts:638 `badAssignments` rebuilds the stale 3-arg `bad-assignment` call as `new CS.BadAssignment(new A.SAssign(...), b.loc)`; ts:349 `DefaultEnvMapVisitor.sMethod` 8-args-for-10-fields arity fix; ts:375 `sProgram` `self.option.visit` fix; ts:162 `bindExp` s-dot key fix; ts:1282 `memberToTMember` missing loc supplied; ts:1745 `getTypedProvides` Name-as-dict-key fix (keeps the name/asName asymmetry — double-check intent).
 - [!] ⏭️ **Silent** fixes: ts:475-490 `DefaultEnvIterVisitor.sMethod`, ts:443-448 `sCasesElse` (latent arity), ts:84-85 `countApps` (non-Boolean `and`). [⏭️ latent, not reproducible. Visitor methods return booleans by contract, so the non-Boolean `&&` / arity paths are only reachable via a misdefined visitor or a malformed AST — not from user input.]
 - [~] ts:1660-1664 `getTypedProvides(typed: any)` — TCS dependency accessed structurally with casts (NOTEd).
-- [i] ts:501-515 `bindingHandlers.sHeader` — `as any` casts to long-gone s-import-complete fields (legacy dead code kept). ts:187, 1133 — `String(e)` ⇒ `[object Object]` where Pyret printed a structural repr. ts:1245-1259, 1329-1336 — in-place mutation of *fresh* Maps (verified safe, but breaks the file's copy-on-write pattern).
+- [i] ts:501-515 `bindingHandlers.sHeader` — `as any` casts to long-gone s-import-complete fields (legacy dead code kept). ts:187, 1133 — `String(e)` ⇒ `[object Object]` where Pyret printed a structural repr [⏭️ the `toRepr`/`String` object-coerce sites are all `InternalCompilerError` paths — not user-reachable]. ts:1245-1259, 1329-1336 — in-place mutation of *fresh* Maps (verified safe, but breaks the file's copy-on-write pattern).
 
 ### anf.ts / ast-anf.ts
 Verified: continuation closures direct (no trampoline); gensym order preserved
@@ -251,7 +251,7 @@ error-display exactly; persistent-dict discipline respected.
   the type parameter names getting reported confusingly, but there's no actual semantic issue
   I could easily write a test for.]
 - [i] Two different repr helpers (compile-structs.ts:27-34 JSON vs compile-errors.ts:51-68 structural); ts:940-942 added isProvides guard + new error; `CompileOptions` reconciles the .arr's two disagreeing definitions and adds `pipeline`/`compileModule` fields (ts:993-1029); ts:1055-1067 default log via process.stdout — verify newline behavior against runtime `print`; `compile-errors.ts:1320` ShadowId loc `==` → `key()` comparison.
-- [~] Bug-for-bug renderReason mirrors, all NOTEd: compile-errors.ts:163-173, 475-481, 969-992, 1075-1080, 1766-1776, 2610-2672 (the load-table trio passes JS arrays where Pyret passed Lists to `text` — rendering may differ *between* the mirrors if executed).
+- [~] Bug-for-bug renderReason mirrors, all NOTEd: compile-errors.ts:163-173, 475-481, 969-992, 1075-1080, 1766-1776, 2610-2672 (the load-table trio passes JS arrays where Pyret passed Lists to `text` — rendering may differ *between* the mirrors if executed). [✅ load-table trio: not "may differ" — both **crashed** the fancy renderer (list→`text`); fixed both, `982ffde0b`.]
 
 ### compile-lib.ts / cli-module-loader.ts / repl.ts / pyret.ts / server.ts / make-standalone.ts
 Verified parity: on-disk module format `({theMap, theModule?, nativeRequires,
