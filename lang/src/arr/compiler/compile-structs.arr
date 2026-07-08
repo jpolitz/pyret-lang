@@ -2461,7 +2461,7 @@ data CompileError:
           ED.text(". However, the branch pattern binds "),
           ED.highlight(ed-fields(self.branch.args.length()), self.branch.args.map(_.l), 1),
           ED.text(" and the variant is declared as having "),
-          ED.highlight(ed-fields(self.variant.fields.count()), [list: A.dummy-loc], 3)]]
+          ED.highlight(ed-fields(self.variant.fields.length()), [list: A.dummy-loc], 3)]]
     end,
     method render-reason(self):
       fun ed-fields(n):

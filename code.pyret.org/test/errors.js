@@ -237,6 +237,15 @@ describe("Rendering errors", function() {
     ["raises-violates-because-fail5",  "check: 3 raises-violates print because raise('hi') end", [[["test predicate", "must return a boolean", "explanation", "\"hi\""]]]],
     ["raises-violates-because-fail6",  "check: 3 raises-violates num-modulo because raise('hi') end", [[["1-argument function that returns a boolean", "num-modulo"]]]],
     ["raises-violates-because-fail7",  "check: 3 raises-violates print because raise(true) end", [[["The test was inconsistent", "predicate", "explanation", "true"]]]],
+
+    // Type-check error whose render-fancy-reason calls `self.variant.fields.count()`
+    // on a List (compile-structs.arr:2464) -- List has no `count`, so the .arr
+    // compiler's fancy renderer crashes. The editor renders compile errors fancy
+    // (error-ui.js getFancyRenderer else-branch), so this exercises that path.
+    ["incorrect-number-of-bindings",
+     "data D:\n  | d(a :: Number, b :: Number)\nend\nfun f(x :: D) -> Number:\n  cases(D) x:\n    | d(a) => 1\n  end\nend",
+     "same number of field bindings",
+     {typeCheck: true}],
   ];
     
   tests.forEach(function(t) {
