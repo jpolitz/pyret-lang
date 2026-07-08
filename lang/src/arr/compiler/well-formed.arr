@@ -933,7 +933,7 @@ well-formed-visitor = A.default-iter-visitor.{
       fields-dict = SD.make-mutable-string-dict()
       ok-fields = C.reactor-fields
       when has-field("on-key") and has-field("on-raw-key"):
-        wf-error([list: ED.text("A reactor can only specify one of on-key and on-raw-key")])
+        wf-error([list: ED.text("A reactor can only specify one of on-key and on-raw-key")], l)
       end
 
       for each(f from fields) block:

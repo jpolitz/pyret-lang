@@ -927,9 +927,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
       const fieldsDict = new Map<string, Loc>();
       const okFields = C.reactorFields;
       if (hasField('on-key') && hasField('on-raw-key')) {
-        // NOTE: the Pyret original calls wf-error without a loc here (an
-        // arity bug that would raise if ever reached); we pass undefined.
-        wfError([ED.text('A reactor can only specify one of on-key and on-raw-key')], undefined as unknown as Loc);
+        wfError([ED.text('A reactor can only specify one of on-key and on-raw-key')], node.l);
       }
 
       for (const f of node.fields) {
