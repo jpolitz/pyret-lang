@@ -36,6 +36,19 @@ function start(config, onServerReady) {
       POSTMESSAGE_ORIGIN: process.env.POSTMESSAGE_ORIGIN,
       APP_NAME:   APP_NAME,
       APP_DOMAIN: APP_DOMAIN,
+      // The server serves the plain (non-gzipped-in-JS) runtime, so the
+      // preload line is always emitted; the self-contained webview build sets
+      // this to "" instead (see src/scripts/inline-selfcontained.js).
+      PYRET_GZIPPED: "",
+      PYRET_PRELOAD: substVars.pyretPreloadTag(process.env.PYRET, ""),
+      // Blank ON PURPOSE when served by this server (mustache used to blank
+      // these implicitly as unknown keys; substitute-vars requires every
+      // variable's fate to be explicit):
+      HASH_OPTIONS: "",        // "" -> editor.html falls back to document.location.hash
+      URL_FILE_MODE: "",       // vscode-webview-only concept
+      IMAGE_PROXY_BYPASS: "",  // "" -> use the server's image proxy
+      CURRENT_PYRET_DOCS: "",  // docs links point at pyret.org/docs/
+      ASSET_BASE_URL: "",      // assets are served relative to this server
     };
   var express = require('express');
   var cookieSession = require('cookie-session');
@@ -45,7 +58,7 @@ function start(config, onServerReady) {
   var googleAuth = require('./google-auth.js');
   var request = require('request');
   var requestFilteringAgent = require('request-filtering-agent');
-  var mustache = require('mustache-express');
+  var substVars = require('./substitute-vars.js');
   var url = require('url');
   var fs = require('fs');
 
@@ -113,9 +126,12 @@ function start(config, onServerReady) {
   var db = config.db;
 
   app.set('views', __dirname + '/../build/web/views');
-  app.engine('html', mustache());
-  app.engine('js', mustache());
-  app.set('view engine', ['html', 'js']);
+  // Dictionary-driven literal substitution (see src/substitute-vars.js); a
+  // template variable absent from the render dict is a render error, not a
+  // silent blank. (The old mustache() '.js' engine registration was
+  // vestigial: no route renders a .js view.)
+  app.engine('html', substVars.expressEngine);
+  app.set('view engine', 'html');
   app.set('view cache', process.env.NODE_ENV !== 'development');
 
   app.get("/current-version", function(req, res) {
@@ -619,7 +635,10 @@ function start(config, onServerReady) {
   app.get(/\/ide(\/.*)?$/, function(req, res) {
     res.render(
       path.resolve(__dirname, "web", "ide.html"),
-      {ASSET_BASE_URL: process.env.ASSET_BASE_URL || ''}
+      // APP_NAME was silently blanked by mustache (this route never passed
+      // it); kept explicitly blank for byte-identical output. Passing the
+      // real APP_NAME (a title improvement) is queued as a follow-up.
+      {ASSET_BASE_URL: process.env.ASSET_BASE_URL || '', APP_NAME: ''}
     );
   });
 

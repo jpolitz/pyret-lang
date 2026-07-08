@@ -2,7 +2,7 @@
  * Unit tests for inline-selfcontained.js
  * (run: node --test src/scripts/inline-selfcontained.test.js).
  * These pin the sharp edges: HTML script-data escaping, `$`-safe replacement,
- * mustache-vs-inlined-braces ordering, css url() rebasing, and the fail-loud
+ * inertness of `{{` in inlined JS, css url() rebasing, and the fail-loud
  * checks (missing asset, un-inlined reference, sentinel contract).
  */
 const test = require("node:test");
@@ -11,7 +11,6 @@ const {
   escapeForScript, escapeForStyle, absolutizeCssUrls, buildSelfContained,
   BASE, HASH, URL_FILE_MODE,
 } = require("./inline-selfcontained.js");
-const Mustache = require("mustache");
 
 test("escapeForScript escapes the bare </script prefix, any case, even unclosed", () => {
   assert.strictEqual(
@@ -45,7 +44,7 @@ test("absolutizeCssUrls rebases relative urls, leaves data:/http(s):/rooted/#fra
 const TEMPLATE = [
   '<html><head>',
   '<script>window.PYRET = "{{&PYRET}}"; window.PYRET_GZIPPED = "{{ PYRET_GZIPPED }}" === "true";</script>',
-  '{{^PYRET_GZIPPED}}<link rel="preload" href="{{&PYRET}}" as="script">{{/PYRET_GZIPPED}}',
+  '{{ &PYRET_PRELOAD }}',
   '<link rel="stylesheet" href="{{ &BASE_URL }}/css/editor.css" />',
   '<link rel="icon" href="{{ &BASE_URL }}/img/icon.png" />',
   '<script src="{{ &BASE_URL }}/js/shell.js"></script>',
@@ -58,7 +57,7 @@ const TEMPLATE = [
 
 const ASSETS = {
   // `$&` would echo the matched tag under a string-replacement; `{{`/`}}`
-  // would be eaten if mustache ran after inlining; `</script x>` must escape.
+  // must be inert (mustache would have eaten them); `</script x>` must escape.
   "js/shell.js": 'var brace = {{}}; var cash = "$& $1 $`"; var s = "</script x>";',
   "css/editor.css": '.a { background: url(../img/p.gif); } .b { background: url(data:image/gif;base64,AA==); }',
 };
@@ -68,14 +67,14 @@ const readAsset = (rel) => {
 };
 
 test("buildSelfContained: end to end on a miniature editor.html", () => {
-  const html = buildSelfContained(TEMPLATE, readAsset, Mustache);
+  const html = buildSelfContained(TEMPLATE, readAsset);
   // shell inlined verbatim-modulo-escape; braces and $ intact; tag gone
   assert.ok(html.includes('var brace = {{}}; var cash = "$& $1 $`"; var s = "<\\/script x>";'));
   assert.ok(!html.includes('src="' + BASE + '/js/shell.js"'));
   // css inlined with rebased relative url, untouched data: url
   assert.ok(html.includes("url(" + BASE + "/css/../img/p.gif)"));
   assert.ok(html.includes("url(data:image/gif;base64,AA==)"));
-  // gzip flag baked true; the non-gzip preload section dropped
+  // gzip flag baked true; PYRET_PRELOAD is blank (no plain-bundle preload)
   assert.ok(html.includes('window.PYRET = "' + BASE + '/js/cpo-main.jarr.gz.js"'));
   assert.ok(!html.includes("preload"));
   // runtime sentinels survive for the extension's split/join, exactly once
@@ -87,7 +86,7 @@ test("buildSelfContained: end to end on a miniature editor.html", () => {
 
 test("buildSelfContained: missing asset is a build error, not a fallback", () => {
   const t = TEMPLATE.replace("js/shell.js", "js/nope.js");
-  assert.throws(() => buildSelfContained(t, readAsset, Mustache), /missing asset: js\/nope\.js/);
+  assert.throws(() => buildSelfContained(t, readAsset), /missing asset: js\/nope\.js/);
 });
 
 test("buildSelfContained: a BASE script the pattern can't inline is a build error", () => {
@@ -96,12 +95,12 @@ test("buildSelfContained: a BASE script the pattern can't inline is a build erro
   const t = TEMPLATE.replace(
     '<script src="{{ &BASE_URL }}/js/shell.js"></script>',
     "<script src='{{ &BASE_URL }}/js/shell.js'></script>");
-  assert.throws(() => buildSelfContained(t, readAsset, Mustache), /survived inlining/);
+  assert.throws(() => buildSelfContained(t, readAsset), /survived inlining/);
 });
 
 test("buildSelfContained: losing a runtime sentinel is a build error", () => {
   const t = TEMPLATE.replace('{{ &HASH_OPTIONS }}', '');
-  assert.throws(() => buildSelfContained(t, readAsset, Mustache), /sentinel contract/);
+  assert.throws(() => buildSelfContained(t, readAsset), /sentinel contract/);
 });
 
 // The same asset files are also served UN-inlined by the normal server, where
@@ -110,7 +109,7 @@ test("buildSelfContained: losing a runtime sentinel is a build error", () => {
 test("buildSelfContained: an asset containing a webview sentinel is a build error", () => {
   const assets = { ...ASSETS, "js/shell.js": 'var u = "__PYRET_WEBVIEW_HASH__";' };
   assert.throws(
-    () => buildSelfContained(TEMPLATE, (rel) => assets[rel], Mustache),
+    () => buildSelfContained(TEMPLATE, (rel) => assets[rel]),
     /js\/shell\.js contains the sentinel prefix/);
 });
 

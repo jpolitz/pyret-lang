@@ -29,18 +29,22 @@
  * residue of clear `__PYRET_` variables to be filled in later. That means the
  * instantiation looks like:
  *
- * 1. Replace build-time-fixed mustache variables using a hardcoded dictionary
- *    in this script (a subset of the things in .env for the server use case).
- *    The runtime-dynamic values are replaced with special __PYRET_ variables.
+ * 1. Replace build-time-fixed template variables using a hardcoded dictionary
+ *    in this script -- the complete manifest of editor.html's variables (see
+ *    substitute-vars.js and TEMPLATE_VARS below). The runtime-dynamic values
+ *    are replaced with special __PYRET_ variables.
  * 2. Locate JS/CSS import tags and inline the corresponding JS and CSS files
  *
- * The order matters (mustache can trip on JS-isms like {{ and }}), so we must
- * inline after substituting. Later steps (right now, just the webview) do not
- * use or rely on the {{ }} syntax, and just do a bare string replace on the
- * special residue __PYRET_ variables.
+ * We still substitute before inlining, but only so the closed-world checks in
+ * substitute-vars (missing key, leftover tag) see clean template text, never
+ * inlined JS. (Historically this order was load-bearing: mustache's scanner
+ * would eat JS-isms like {{ and }}; substitute-vars only matches our narrow
+ * {{SCREAMING_SNAKE}} spellings.) Later steps (right now, just the webview) do
+ * not use or rely on the {{ }} syntax, and just do a bare string replace on
+ * the special residue __PYRET_ variables.
  *
- * We try to fail loudly here, so missing files, provably bad markup, etc are
- * build errors.
+ * We try to fail loudly here, so missing files, missing or unsubstituted
+ * variables, provably bad markup, etc are build errors.
  *
  * Cross-file dependencies:
  * - pyretCPOWebEditor.ts: refers to the __PYRET_ sentinels, and fills them in at runtime
@@ -48,25 +52,44 @@
  */
 const fs = require("fs");
 const path = require("path");
+const { substituteVars } = require("../substitute-vars.js");
 
 const BASE = "__PYRET_WEBVIEW_BASE_URL__";
 const HASH = "__PYRET_WEBVIEW_HASH__";
 const URL_FILE_MODE = "__PYRET_WEBVIEW_URL_FILE_MODE__";
 const SENTINEL_PREFIX = "__PYRET_WEBVIEW_";
 
-// The complete render dictionary for the self-contained template:
-// runtime-dynamic values -> literal sentinels; the self-contained constants
-// are baked; every other (server-only) var renders to "" as usual.
-// TODO(joe): set things up so this can be a *comprehensive* hardcoded list, or
-// come from a .env.selfcontained or similar. Right now this script is a bit
-// bespoke so having it inline here makes sense.
+// The complete render dictionary for the self-contained template -- the full
+// manifest of editor.html's variables, each with its self-contained fate
+// (baked constant, literal sentinel, or deliberately blank). substitute-vars
+// errors on any referenced variable this doesn't cover, so adding a template
+// variable forces a decision here.
 const TEMPLATE_VARS = {
+  // Baked self-contained constants: the runtime bundle is fetched gzipped
+  // and inflated in-page (so no preload of the plain bundle), images skip
+  // the server's proxy.
   BASE_URL: BASE,
   PYRET: BASE + "/js/cpo-main.jarr.gz.js",
   PYRET_GZIPPED: "true",
+  PYRET_PRELOAD: "",
+  IMAGE_PROXY_BYPASS: "true",
+  // Literal sentinels the extension fills at webview startup.
   HASH_OPTIONS: HASH,
   URL_FILE_MODE: URL_FILE_MODE,
-  IMAGE_PROXY_BYPASS: "true",
+  // Server-only concepts, deliberately blank in a webview (same values
+  // mustache used to blank implicitly as unknown keys).
+  APP_NAME: "",
+  APP_DOMAIN: "",
+  LOG_URL: "",
+  LOG_USER: "",
+  LOG_PASSWORD: "",
+  GIT_REV: "",
+  GIT_BRANCH: "",
+  GOOGLE_API_KEY: "",
+  GOOGLE_APP_ID: "",
+  CSRF_TOKEN: "",
+  CURRENT_PYRET_DOCS: "",
+  POSTMESSAGE_ORIGIN: "",
 };
 
 /*
@@ -134,14 +157,16 @@ function countOccurrences(haystack, needle) {
 }
 
 /*
- * The whole transform, on strings: mustache-render the clean template, then
- * inline every BASE-sentinel js/css reference via readAsset(rel), then check
- * the result. Separated from main() so it can be unit-tested.
+ * The whole transform, on strings: substitute the variable manifest into the
+ * clean template, then inline every BASE-sentinel js/css reference via
+ * readAsset(rel), then check the result. Separated from main() so it can be
+ * unit-tested.
  */
-function buildSelfContained(template, readAsset, Mustache) {
-  // 1. Render TEMPLATE_VARS on the CLEAN template (mustache sees only its
-  //    intended input). The {{^PYRET_GZIPPED}} preload section drops out here.
-  let html = Mustache.render(template, TEMPLATE_VARS);
+function buildSelfContained(template, readAsset) {
+  // 1. Fill the template variables on the CLEAN template (see TEMPLATE_VARS).
+  //    The old {{^PYRET_GZIPPED}} preload section is now the PYRET_PRELOAD
+  //    variable, deliberately blank here.
+  let html = substituteVars(template, TEMPLATE_VARS);
 
   // 2. Inline the JS files (their src now starts with the BASE sentinel).
   //    Function replacers -- the library code is full of `$`, which a string
@@ -218,8 +243,7 @@ function main() {
       );
     }
   };
-  const html = buildSelfContained(
-    fs.readFileSync(editorPath, "utf8"), readAsset, require("mustache"));
+  const html = buildSelfContained(fs.readFileSync(editorPath, "utf8"), readAsset);
   fs.writeFileSync(outPath, html);
   console.log("wrote self-contained editor template: " + outPath);
 }
