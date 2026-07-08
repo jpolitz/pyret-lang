@@ -120,7 +120,7 @@ Coverage verified: all 52 + 85 visitor methods present, bodies diffed; reserved-
 list, error ordering, and load-bearing trailing spaces match.
 - [~] ts:929-933 `sReactor` — Pyret's `wf-error` no-loc arity bug becomes a reported error with `undefined` loc (crash → loc-less user error; downstream loc rendering may break).
 - [~] ts:1365-1369 `TopLevelVisitor.sVariantMember`, ts:466-473 `sSpecialImport` — Pyret returns `nothing` into an `and` (runtime error); port returns `false` (clean short-circuit).
-- [!!] ts:938 — reactor "Valid options" message order = Map insertion order (user-visible; see cross-cutting #1).
+- [!!] ✅ ts:938 — reactor "Valid options" message order = Map insertion order (user-visible; see cross-cutting #1). [`f28667e0a`: a missed canonicalization — sort() the option keys in *both* compilers. The byte-parity test `err-reactor-options.arr` lands in the next commit `289d52db2` (with a well-formed unit test guarding this commit): it can see quote-wrapped vs non-quote-wrapped strings in errors in a new way, which surfaces the separate srcloc divergence below, fixed there.]
 - [!] ts:442 `sUse` — `(node.n as A.SName).l` silently `undefined` for non-SName (Pyret: field-not-found).
 - [i] ts:312-315 `rejectStandaloneExprs` — empty-list edge no longer errors (unreachable); ts:122-133 `ensureUniqueCases` — two identical arms collapsed, no default-throw (inconsistent with file's own convention); ts:65-67/1414-1418 — push+slice replaces prepend+reverse (verified order-equivalent).
 
@@ -276,7 +276,7 @@ Verified: all srcloc methods ported incl. before/contains quirks; edNth preserve
 `3 → 'ⁿᵈ'` quirk; pprint stack-loop `format` traced case-by-case equivalent;
 `joinStrLast` matches lists.arr.
 - [!] `render-error-display.ts:19-22` `exnUnwrap` — duck-typed (`'exn' in val`) vs `isPyretException`; ts:37-51 — embed catch swallows *all* JS errors (Pyret run-task caught only Pyret raises) — genuine renderReason bugs now masked as embeds.
-- [i] `srcloc.ts:12-14` `stringRepr` = JSON.stringify (escaping approximation, documented); added `equals`/`toString`/`dummyLoc` support members. `error-display.ts:138-145` — `[sequence: ...]` construction objects → variadic functions (array-taking `make` form gone). `pprint.ts:214` `number()` widened, relies on boxed toString (verified for the tower).
+- [i] ✅ `srcloc.ts:12-14` `stringRepr` = JSON.stringify — caused the trailing `cmcode(loc)` in error messages to be `srcloc("file:///..")` instead of `srcloc(file:///..)`. I deeply don't care which we print (I have a faint preference for the former) but this fix [`289d52db2`] makes them align with Pyret-of-today, which is the right visible behavior to keep having. added `equals`/`toString`/`dummyLoc` support members. `error-display.ts:138-145` — `[sequence: ...]` construction objects → variadic functions (array-taking `make` form gone). `pprint.ts:214` `number()` widened, relies on boxed toString (verified for the tower).
 
 ---
 
