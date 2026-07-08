@@ -112,7 +112,7 @@ parseFloat anywhere); string escaping shared via the common tokenizer; argument 
 of every spot-checked node construction matches.
 - [~] ts:1230 `'tuple-get'` — index coerced `jsnums.toFixnum` (AST field is `number`); representation change vs JS original.
 - [~] ts:1090-1098, 1202-1206 — dead grammar productions (`sql-expr`, `do-expr`, `for-then`, `else`) replaced by explanatory throws (verified absent from pyret-grammar.bnf) — plain `Error`, not `TODOError`.
-- [!] ts:71-182 — new `PyretParseError` hierarchy with **invented message strings**; `makeNumberFromString` failure is now a ParseError kind, changing the error taxonomy `parseDataRaw` (ts:1598-1604) dispatches on. Verify consumers of `maybe-surface-parse` don't dispatch on the error variant.
+- [!] ⏭️ ts:71-182 — new `PyretParseError` hierarchy with **invented message strings**; `makeNumberFromString` failure is now a ParseError kind, changing the error taxonomy `parseDataRaw` (ts:1598-1604) dispatches on. Verify consumers of `maybe-surface-parse` don't dispatch on the error variant. [⏭️ latent, not reproducible. The lexer pre-validates number tokens, so `jsnums.fromString` never returns `false` for lexable input — tested directly on rationals/decimals/bignums/`1/0`, all parse — so the taxonomy change only manifests on a lexer↔jsnums mismatch that does not occur for real numerals.]
 - [i] ts:819, 829, 855, 1596 — `throw "<string>"` → `throw new Error(...)` (same text); duplicate `'comma-binops'` key deduped; RUNTIME arity/type checks dropped.
 
 ### well-formed.ts
@@ -176,7 +176,7 @@ Verified: `wrapExtraImports` reversed-pair order preserved; letrec-visitor copy
 discipline via `new Map`/`mapSet`; `collectSharedFields` uses real `.equals`;
 iter-vs-map `sBind` asymmetry preserved (ts:294 vs 340).
 - [~] Documented fixes (NOTEd): ts:638 `badAssignments` rebuilds the stale 3-arg `bad-assignment` call as `new CS.BadAssignment(new A.SAssign(...), b.loc)`; ts:349 `DefaultEnvMapVisitor.sMethod` 8-args-for-10-fields arity fix; ts:375 `sProgram` `self.option.visit` fix; ts:162 `bindExp` s-dot key fix; ts:1282 `memberToTMember` missing loc supplied; ts:1745 `getTypedProvides` Name-as-dict-key fix (keeps the name/asName asymmetry — double-check intent).
-- [!] **Silent** fixes: ts:475-490 `DefaultEnvIterVisitor.sMethod`, ts:443-448 `sCasesElse` (latent arity), ts:84-85 `countApps` (non-Boolean `and`).
+- [!] ⏭️ **Silent** fixes: ts:475-490 `DefaultEnvIterVisitor.sMethod`, ts:443-448 `sCasesElse` (latent arity), ts:84-85 `countApps` (non-Boolean `and`). [⏭️ latent, not reproducible. Visitor methods return booleans by contract, so the non-Boolean `&&` / arity paths are only reachable via a misdefined visitor or a malformed AST — not from user input.]
 - [~] ts:1660-1664 `getTypedProvides(typed: any)` — TCS dependency accessed structurally with casts (NOTEd).
 - [i] ts:501-515 `bindingHandlers.sHeader` — `as any` casts to long-gone s-import-complete fields (legacy dead code kept). ts:187, 1133 — `String(e)` ⇒ `[object Object]` where Pyret printed a structural repr. ts:1245-1259, 1329-1336 — in-place mutation of *fresh* Maps (verified safe, but breaks the file's copy-on-write pattern).
 
@@ -219,7 +219,7 @@ Verified: no `===`-on-compound violations; dead bindings `void`ed for counter pa
 reverse-encounter-order of equal elements.
 - [~] ts:1048-2020 — generator + `runChain` rewrite of the whole spine (cross-cutting #5); yield points verified at former recursion sites.
 - [~] ts:695-744 `compileFunBody` arg-used-in-lambda detector — LIFO queue + early exit + doesn't visit binds (pure query; observationally equivalent, genuine rewrite).
-- [!] ts:50-53, 806, 865 — `shouldProfile` loosened to truthiness (Pyret raises on non-Boolean; documented).
+- [!] ⏭️ ts:50-53, 806, 865 — `shouldProfile` loosened to truthiness (Pyret raises on non-Boolean; documented). [⏭️ latent, not reproducible. `shouldProfile` derives from the `-profile` flag (a Boolean); a non-Boolean only arises from malformed `options`, not reachable from user programs.]
 - [~] ts:846-852 — dead show-stack-trace branch keeps Pyret's expression-in-statement-list bug via cast (NOTEd). ts:1206 `getAssignments` — per-element `is-j-assign` refinement dropped (head-only check).
 - [i] ts:2519, 801, 825 — `String(typ)`/`String(l)` for `tostring` (byte-parity rests on toString fidelity); ts:1378 — options extended by spread while everything else uses prototype-preserving `ext()` (ts:408-412); ts:1453 — `instanceof CL.ConcatEmpty` for structural `== cl-empty` (safe here, not equivalence-preserving in general); ts:37 unused jsnums import; `timeNow` phase-log formatting may differ.
 
@@ -227,7 +227,7 @@ reverse-encounter-order of equal elements.
 Verified: runtime-provides values (197 entries), aliases, standardImports,
 reactorOptionalFields all key-for-key and order-identical; ED helpers match
 error-display exactly; persistent-dict discipline respected.
-- [!] `compile-errors.ts:2146` — **silent** `fields.count()` → `.length` fix (Pyret crashed on that fancy-reason path; TS renders).
+- [!] ⏭️ `compile-errors.ts:2146` — **silent** `fields.count()` → `.length` fix (Pyret crashed on that fancy-reason path; TS renders). [⏭️ latent, confirmed unreachable. `variant.fields` is a `List` (type-structs.arr:104) with no `.count()` — verified `[list:…].count()` raises "no field `count`" — so the .arr `render-fancy-reason` (compile-structs.arr:2464) would crash. But nothing invokes it: the CLI renders via `render-reason`/`.length()` (cli-module-loader.arr:429), and CPO renders via the TS `renderFancyReason` (already `.length`, ts-compiler-lib.js:151). A real latent .arr bug the port silently corrected, on a dead path; not fixing the .arr (out of scope, rabbit hole).]
 - [!] `compile-structs.ts:475-481, 491-497, 559-565, 575-581` — `.and-then(_.value)` Option-flattening → plain undefined propagation: when origin exists but lookup misses, Pyret raised, TS returns undefined.
 - [~] ts:749-760 `valueExportFromRaw` — NOTE claims mirroring, but the Pyret arity errors (`v-fun` 3-for-4, `v-just-type` 1-for-2) are *constructed as malformed objects* instead of throwing. Also silently corrects the tyvarEnv type annotation.
 - [~] ts:1294-1298 — `identical3`/`runtimeProvides` store the `T.TTop` class / Types cast to ValueExport maps, mirroring the .arr's unchecked dicts (different failure mode on misuse).
