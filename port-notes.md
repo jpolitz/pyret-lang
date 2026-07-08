@@ -12,6 +12,16 @@ Search generated code for as-casts to check for bad typing
 Search generated code for any-types to check for bad typing
 
 
+Testing coverage:
+
+`make bootstrap-converge` proves phaseB == phaseB-ts byte-for-byte, but a
+successful self-compile renders NO errors, so the whole error/diagnostic-rendering
+surface is untested by it -- that coverage lives only in ts-parity-test / ts-pyret-test.
+Worth a convergence-style check that compiles KNOWN-BAD programs with both compilers
+and byte-diffs the rendered error output (parity-test.sh already diffs error text for
+the failing case; could tighten to byte-identical and fold into CI).
+
+
 cli-module-loader:
 
 Check if toRepr's else case (JSON.stringify) is reachable in cli-module-loader

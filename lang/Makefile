@@ -486,3 +486,133 @@ all-ts-pyret-test: tests/pyret/all-ts.jarr $(TS_SUITE_CACHE_WARM)
 .PHONY : ts-repl-test
 ts-repl-test: ts-compiler
 	$(NODE) src/ts-compiler/tests/repl-test.js
+
+# ============================================================
+# Bootstrap convergence: byte-identical, self-fixpointing compilers
+# from BOTH the Pyret-hosted (.arr) path and the TypeScript path.
+#
+# The existing .arr chain is phase0 -> phaseA -> phaseB -> phaseC, with
+# `no-diff-standalone` asserting phaseB == phaseC (the .arr self-fixpoint).
+#
+# Here we add a TS-seeded chain that mirrors phaseB/phaseC exactly but
+# swaps the driving compiler for build/ts-compiler/pyret.js:
+#   phaseB-ts = ts-compiler compiles src/arr/compiler/pyret.arr
+#   phaseC-ts = phaseB-ts    compiles src/arr/compiler/pyret.arr
+# Each stage uses the SAME CLI options as its .arr counterpart (same
+# --require-config content, same --deps-file content, same flags); only
+# the output/compiled dirs and the driving compiler differ.  Because
+# $PYRET (this-pyret-dir) resolves to the *running* compiler's own dir
+# and only the resolved file *contents* are bundled -- identical across
+# all phase dirs -- any byte difference is a real codegen difference, not
+# path noise.  (The existing phaseB-vs-phaseC diff already relies on this
+# same path-independence.)
+# ============================================================
+
+PHASEBTS         = build/phaseB-ts
+PHASECTS         = build/phaseC-ts
+
+PHASEBTS_ALL_DEPS := $(patsubst src/%,$(PHASEBTS)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(PHASEBTS)/js/%.js,$(COPY_LIB)) $(PHASEBTS)/bundled-node-compile-deps.js $(PHASEBTS)/bundled-node-deps.js $(PHASEBTS)/config.json
+PHASECTS_ALL_DEPS := $(patsubst src/%,$(PHASECTS)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(PHASECTS)/js/%.js,$(COPY_LIB)) $(PHASECTS)/bundled-node-compile-deps.js $(PHASECTS)/bundled-node-deps.js $(PHASECTS)/config.json
+
+PHASEBTS_DIRS    := $(sort $(dir $(PHASEBTS_ALL_DEPS)))
+PHASECTS_DIRS    := $(sort $(dir $(PHASECTS_ALL_DEPS)))
+
+.PHONY : phaseB-ts
+phaseB-ts: $(PHASEBTS)/pyret.jarr
+
+# phaseB-ts: the TS compiler compiles the compiler source.  Mirrors the
+# phaseB rule (own build/phaseB-ts/{config,deps}); driver is $(TS_PYRET).
+$(PHASEBTS)/pyret.jarr: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS) $(PHASEBTS_ALL_DEPS) $(patsubst src/%,$(PHASEBTS)/%,$(PARSERS))
+	$(TS_PYRET) --outfile $(PHASEBTS)/pyret.jarr \
+                      --build-runnable src/arr/compiler/pyret.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir $(PHASEBTS)/compiled/ \
+                      --deps-file $(PHASEBTS)/bundled-node-compile-deps.js \
+                      -no-check-mode $(EF) \
+                      --require-config $(PHASEBTS)/config.json
+
+.PHONY : phaseC-ts
+phaseC-ts: $(PHASECTS)/pyret.jarr
+
+# phaseC-ts: phaseB-ts compiles the compiler source (TS-seeded self-build).
+# Mirrors the phaseC rule (reuses phaseB-ts's config/deps); driver is the
+# freshly built phaseB-ts standalone.
+$(PHASECTS)/pyret.jarr: $(PHASEBTS)/pyret.jarr $(PHASECTS_ALL_DEPS) $(patsubst src/%,$(PHASECTS)/%,$(PARSERS))
+	$(NODE) $(PHASEBTS)/pyret.jarr --outfile $(PHASECTS)/pyret.jarr \
+                      --build-runnable src/arr/compiler/pyret.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir $(PHASECTS)/compiled/ \
+                      --deps-file $(PHASEBTS)/bundled-node-compile-deps.js \
+                      -no-check-mode $(EF) \
+                      --require-config $(PHASEBTS)/config.json
+
+# --- Support-file plumbing for the two TS-seeded phase dirs (mirrors the
+# --- phaseA/B/C plumbing near the top of this Makefile) ---
+$(PHASEBTS_ALL_DEPS): | $(PHASEBTS)
+$(PHASECTS_ALL_DEPS): | $(PHASECTS) phaseB-ts
+
+$(PHASEBTS):
+	@$(call MKDIR,$(PHASEBTS_DIRS))
+$(PHASECTS):
+	@$(call MKDIR,$(PHASECTS_DIRS))
+
+$(PHASEBTS)/$(JS)/%-parser.js: src/$(JSBASE)/%-grammar.bnf src/$(JSBASE)/%-tokenizer.js $(wildcard lib/jglr/*.js)
+	$(NODE) lib/jglr/parser-generator.js src/$(JSBASE)/$*-grammar.bnf $(PHASEBTS)/$(JS)/$*-grammar.js "../../../lib/jglr" "jglr/jglr" "pyret-base/js/$*-parser"
+	$(NODE) $(PHASEBTS)/$(JS)/$*-grammar.js $(PHASEBTS)/$(JS)/$*-parser.js
+$(PHASECTS)/$(JS)/%-parser.js: src/$(JSBASE)/%-grammar.bnf src/$(JSBASE)/%-tokenizer.js $(wildcard lib/jglr/*.js)
+	$(NODE) lib/jglr/parser-generator.js src/$(JSBASE)/$*-grammar.bnf $(PHASECTS)/$(JS)/$*-grammar.js "../../../lib/jglr" "jglr/jglr" "pyret-base/js/$*-parser"
+	$(NODE) $(PHASECTS)/$(JS)/$*-grammar.js $(PHASECTS)/$(JS)/$*-parser.js
+
+$(PHASEBTS)/$(JS)/%.js : src/$(JSBASE)/%.js
+	cp $< $@
+$(PHASEBTS)/$(JS)/%.js : lib/jglr/%.js
+	cp $< $@
+$(PHASECTS)/$(JS)/%.js : src/$(JSBASE)/%.js
+	cp $< $@
+$(PHASECTS)/$(JS)/%.js : lib/jglr/%.js
+	cp $< $@
+
+$(PHASEBTS)/bundled-node-compile-deps.js: src/js/trove/require-node-compile-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-compile-dependencies.js -o $@
+$(PHASEBTS)/bundled-node-deps.js: src/js/trove/require-node-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-dependencies.js -o $@
+$(PHASECTS)/bundled-node-compile-deps.js: src/js/trove/require-node-compile-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-compile-dependencies.js -o $@
+$(PHASECTS)/bundled-node-deps.js: src/js/trove/require-node-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-dependencies.js -o $@
+
+$(PHASEBTS)/config.json: src/scripts/node_modules-config.json
+	cp $< $@
+$(PHASECTS)/config.json: src/scripts/node_modules-config.json
+	cp $< $@
+
+# TS-seeded self-fixpoint: phaseB-ts must equal phaseC-ts.
+.PHONY : no-diff-ts
+no-diff-ts: phaseB-ts phaseC-ts
+	diff $(PHASEBTS)/pyret.jarr $(PHASECTS)/pyret.jarr
+
+# The grand convergence check.  Builds both chains and asserts that all
+# four standalones are one byte-identical fixpoint reached from two
+# independent seeds (the committed phase0 chain and the TS compiler):
+#   * phaseB    == phaseC     (.arr self-fixpoint; == existing no-diff-standalone)
+#   * phaseB-ts == phaseC-ts  (TS  self-fixpoint)
+#   * phaseB    == phaseB-ts  (headline: TS compiler is a byte-exact drop-in)
+# Prints sha256 of all four and a PASS/FAIL line per invariant; exits
+# nonzero if any invariant fails.
+.PHONY : bootstrap-converge
+bootstrap-converge: phaseB phaseC phaseB-ts phaseC-ts
+	@B=$(PHASEB)/pyret.jarr; C=$(PHASEC)/pyret.jarr; \
+	 BT=$(PHASEBTS)/pyret.jarr; CT=$(PHASECTS)/pyret.jarr; \
+	 echo "=== bootstrap convergence ==="; \
+	 sha256sum $$B $$C $$BT $$CT; \
+	 echo "---"; \
+	 fail=0; \
+	 if cmp -s $$B  $$C;  then echo "PASS  .arr fixpoint       phaseB    == phaseC";    else echo "FAIL  .arr fixpoint       phaseB    != phaseC";    fail=1; fi; \
+	 if cmp -s $$BT $$CT; then echo "PASS  ts   fixpoint       phaseB-ts == phaseC-ts"; else echo "FAIL  ts   fixpoint       phaseB-ts != phaseC-ts"; fail=1; fi; \
+	 if cmp -s $$B  $$BT; then echo "PASS  cross (headline)    phaseB    == phaseB-ts"; else echo "FAIL  cross (headline)    phaseB    != phaseB-ts"; fail=1; fi; \
+	 echo "---"; \
+	 if [ $$fail -eq 0 ]; then echo "CONVERGED: all four standalones are byte-identical"; \
+	 else echo "NOT CONVERGED: see FAILs above (diff the named .jarr files to diagnose)"; fi; \
+	 exit $$fail
