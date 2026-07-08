@@ -18,9 +18,17 @@ import * as PP from './pprint';
 const clEmpty = CL.clEmpty;
 const clCons = CL.clCons;
 
-// Note: in the Pyret original (cl-map-sd over a string-dict) field order
-// follows Pyret's hash ordering; here we use Map insertion order. The
-// object field order in emitted files is not semantically significant.
+// Note: the Pyret original iterates a StringDict via cl-map-sd; here we use a
+// Map (insertion order). This preserves byte-parity: the only dict passed here
+// is the top-level module object, which has exactly 5 fixed keys (requires,
+// provides, nativeRequires, theModule, theMap). A StringDict of <=8 keys is an
+// insertion-ordered ArrayMapNode (it only reaches hash order past
+// MAX_ARRAY_MAP_SIZE=8; string-dict.js:138,428), and both compilers set those
+// keys in the same order, so cl-map-sd and this Map emit identical field order.
+// Verified: every compiled module of a sample program is byte-identical across
+// the two compilers. (JS object field order is also not semantically
+// significant at runtime; the anf-loop-compiler.ts cl-map-sd copy, which does
+// take large user/provides dicts, is separately canonicalized by co-sorts.)
 function clMapSd<T>(f: (key: string) => T, sd: Map<string, J.JExprT>): CL.ConcatList<T> {
   let acc: CL.ConcatList<T> = clEmpty as any;
   for (const key of sd.keys()) {
