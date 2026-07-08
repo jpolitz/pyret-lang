@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 // Divergence probes for the Pyret -> TypeScript compiler port.
 //
-// Both probes target the same class of latent divergence: the Pyret original
-// iterated a StringDict in *hash order*, but the TS port iterates a JS Map in
-// *insertion order*. Where the emitted/derived order is observable, the two
-// compilers can disagree byte-for-byte on serialized output.
+// Both probes concern the same mechanism: the Pyret original iterated a
+// StringDict, but the TS port iterates a JS Map (insertion order). Where the
+// derived order is both (a) past the StringDict's hash-order threshold and
+// (b) observable, the two compilers can disagree byte-for-byte on serialized
+// output. Probe A (forall/data type params) turns out to be LATENT -- it needs
+// 9+ params to even differ and was not found to reach observable output; Probe
+// B (CCPDict module fields) routinely crosses the threshold and diverges.
 //
 // Run from lang/ (after `make ts-compiler`, i.e. build/ts-compiler exists):
 //   node src/ts-compiler/tests/divergence/serialization-order.js
@@ -30,28 +33,48 @@ function line() { console.log('-'.repeat(72)); }
 //   compile-structs.ts:805-808 (forall) and 857-860 (data)
 // ===========================================================================
 //
-// FINDING (as filed): t-forall / t-data param lists are built by iterating a
-// Map, so param order supposedly follows "JSON key insertion order".
+// FINDING (as filed): forall/data type-param lists are built by iterating a
+// Map (TS) vs a StringDict (Pyret), so param order can diverge.
 //
-// WHAT THE RAW ENCODING ACTUALLY IS (verified in src/js/base/type-util.js:9-19
-// and the codegen in anf-loop-compiler.arr:2129-2134):
+// WIRE ENCODING (type-util.js:9-19, anf-loop-compiler.arr:2129-2134):
+//     { tag: "forall", args: ["a","b"], onto: <type> }   // POSITIONAL ARRAY
+// The params arrive as an ordered array of tyvar names, not a dict, so there is
+// no wire dict key order to flip. Both compilers seed an intermediate name env
+// from the array and read the params back OUT of it:
+//   Pyret (compile-structs.arr:480-482,524-526): for SD.map-keys(k from env)
+//   TS    (compile-structs.ts:805-808,857-860):  for (const k of env.keys())
 //
-//     { tag: "forall", args: ["a", "b"], onto: <type> }
+// THE THRESHOLD (this is the key correction to the original probe). The TS Map
+// always iterates in INSERTION order (= the wire array order). Pyret's
+// StringDict iterates in insertion order ONLY while it is small: it is a HAMT
+// whose ArrayMapNode preserves insertion order until it exceeds
+// MAX_ARRAY_MAP_SIZE = SIZE/4 = 8 entries (string-dict.js:138,385-403,428),
+// after which it becomes a hash-ordered trie. Verified with a StringDict built
+// reverse-alphabetically and read via keys-list()/map-keys():
+//     8 keys  ->  insertion order preserved   (h,g,f,e,d,c,b,a)
+//     9 keys  ->  hash order                   (a,b,c,d,e,f,g,h,i)
+// So the Pyret<->TS param-order divergence exists ONLY for a forall/data type
+// with 9+ combined type parameters (the env holds the enclosing tyvars plus
+// this binder's args). Below 9, BOTH compilers emit insertion order and the
+// param lists are byte-identical. The originally filed "observable with 2+
+// params" claim therefore does NOT hold -- a 2-entry env (incl. the inherited
+// {z} example) is an insertion-ordered ArrayMapNode in Pyret too. Nine+ type
+// params on a single forall/data essentially never occurs in real Pyret;
+// contrast Probe B's CCPDict, whose module-object routinely has 9+ fields.
 //
-// i.e. the type parameters arrive as a POSITIONAL ARRAY of tyvar-name strings,
-// NOT as a dict. So the literal "reorder the JSON dict keys" probe is not
-// applicable -- there is no dict on the wire whose key order could vary.
+// SURFACE OBSERVABILITY: not independently reachable. A polymorphic type driven
+// into a type error DOES print differently between the compilers, but that is a
+// SEPARATE divergence -- existential NUMBERING direction -- reproducible with a
+// purely local data type (no import, so datatypeFromRaw never runs):
+//     TS: (?-1, ?-2 -> Box2<?-1, ?-2>)     PA: (?-2, ?-1 -> Box2<?-2, ?-1>)
+// even at 2 params. That is the type-check-structs existential-id finding, not
+// this one; both compilers still render the params themselves in source order.
 //
-// The REAL Pyret->TS divergence is still present, one level in. Both compilers
-// funnel the array through an intermediate name-dict and then read the params
-// back OUT of that dict:
-//   Pyret  (compile-structs.arr:480-482):  params = for SD.map-keys(k from new-env) ...  // HASH order
-//   TS     (compile-structs.ts:805-808):   for (const k of newEnv.keys()) ...            // INSERTION order
-// For the same wire input, Pyret reshuffles params into string-dict hash
-// order; the TS port preserves array/insertion order. These generally differ
-// for 2+ params. This probe demonstrates the TS side's behaviour concretely.
+// This probe therefore only demonstrates the TS side: params track insertion
+// (= wire array) order at every size, including past the 9-entry threshold
+// where Pyret would reshuffle.
 
-console.log('\nPROBE A: typeFromRaw forall/data type-parameter ordering');
+console.log('\nPROBE A: typeFromRaw forall type-parameter ordering');
 line();
 
 function forallParamNames(rawArgs) {
@@ -62,46 +85,38 @@ function forallParamNames(rawArgs) {
   return t.introduces.map((tv) => tv.id.toname());
 }
 
+// Small case (<= 8 entries): TS insertion order; Pyret's ArrayMapNode gives the
+// SAME order, so there is no divergence here.
 const ab = forallParamNames(['a', 'b']);
 const ba = forallParamNames(['b', 'a']);
-console.log('  raw args ["a","b"]  ->  t-forall params ' + JSON.stringify(ab));
-console.log('  raw args ["b","a"]  ->  t-forall params ' + JSON.stringify(ba));
-
-// The TS port faithfully mirrors the positional array order (via Map insertion
-// order). Reordering the ARRAY reorders the output; there is no dict to
-// reorder independently.
+console.log('  raw args ["a","b"]  ->  params ' + JSON.stringify(ab) + '   (Pyret: identical, insertion order)');
+console.log('  raw args ["b","a"]  ->  params ' + JSON.stringify(ba) + '   (Pyret: identical, insertion order)');
 assert.deepStrictEqual(ab, ['a', 'b']);
 assert.deepStrictEqual(ba, ['b', 'a']);
-const trackedArrayOrder =
-  JSON.stringify(ab) === JSON.stringify(['a', 'b']) &&
-  JSON.stringify(ba) === JSON.stringify(['b', 'a']);
 
-// Supporting evidence for the genuine divergence surface: the intermediate
-// dict (newEnv) is seeded from the ENCLOSING tyvar env, and TS reads params
-// out of it in insertion order -- so an inherited outer tyvar is PREPENDED in
-// insertion order. This is precisely the spot where Pyret's SD.map-keys would
-// instead reshuffle everything into hash order.
-const outer = A.globalNames.makeAtom('z');
-const inheritedEnv = new Map([['z', outer]]);
-const rawInner = { tag: 'forall', args: ['a'], onto: { tag: 'any' } };
-const inner = CS.typeFromRaw('builtin://probe', rawInner, inheritedEnv);
-const innerNames = inner.introduces.map((tv) => tv.id.toname());
-console.log('  inherited env {z}, raw args ["a"]  ->  params ' +
-  JSON.stringify(innerNames) + '   (outer tyvar prepended in insertion order)');
-assert.deepStrictEqual(innerNames, ['z', 'a']);
+// Threshold case (9 entries): TS still tracks insertion/array order; Pyret's
+// StringDict is now a HAMT and reshuffles into hash order -> the lists diverge.
+const nineIn = ['Z', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+const nineOut = forallParamNames(nineIn);
+const pyretHashOrder = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'Z']; // Z: 90&31=26 sorts last
+console.log('  raw args ' + JSON.stringify(nineIn) + '  (9 entries)');
+console.log('    TS    -> ' + JSON.stringify(nineOut) + '   (insertion/array order)');
+console.log('    Pyret -> ' + JSON.stringify(pyretHashOrder) + '   (hash order; verified via SD.map-keys on 9 keys)');
+assert.deepStrictEqual(nineOut, nineIn); // TS preserves insertion/array order
+const divergesAtNine = JSON.stringify(nineOut) !== JSON.stringify(pyretHashOrder);
 
 console.log('');
-if (trackedArrayOrder) {
-  console.log('VERDICT A: NOT APPLICABLE as a JSON-dict-reorder probe -- the wire');
-  console.log('  encoding of forall/data type params is a POSITIONAL ARRAY');
-  console.log('  (type-util.js:9-19), not a dict, so there is no dict key order to');
-  console.log('  flip. The underlying Pyret->TS divergence is nonetheless REAL and');
-  console.log('  structurally confirmed: Pyret reads params via SD.map-keys (hash');
-  console.log('  order, compile-structs.arr:480-482,524-526) while the TS port reads');
-  console.log('  via Map.keys() (insertion order, compile-structs.ts:805-808,857-860).');
-  console.log('  Shown above: TS preserves array/insertion order and prepends');
-  console.log('  inherited tyvars by insertion -- exactly what Pyret hash order would');
-  console.log('  reshuffle, so re-serialized param order can diverge for 2+ params.');
+if (JSON.stringify(ab) === '["a","b"]' && divergesAtNine) {
+  console.log('VERDICT A: DIVERGENCE IS LATENT AND THRESHOLDED. The forall/data param');
+  console.log('  list differs between compilers ONLY at 9+ combined type parameters,');
+  console.log('  where Pyret\'s StringDict switches from an insertion-ordered ArrayMapNode');
+  console.log('  to a hash-ordered HAMT (MAX_ARRAY_MAP_SIZE=8, string-dict.js:138,428).');
+  console.log('  Below 9 both compilers emit insertion order and are byte-identical, so');
+  console.log('  the filed "2+ params" observation does not hold. 9+ type params on one');
+  console.log('  type essentially never occur, and no program was found where this list');
+  console.log('  order changes observable output independently of the separate');
+  console.log('  existential-id divergence (which reproduces with a local data type). TS');
+  console.log('  preserves the wire/array order -- arguably the more faithful order.');
 } else {
   console.log('VERDICT A: unexpected -- TS did not track array order; investigate.');
 }
@@ -116,7 +131,9 @@ if (trackedArrayOrder) {
 //   Pyret (js-of-pyret.arr:19-23): SD.fold-keys  -> HASH order (then reversed)
 //   TS    (js-of-pyret.ts:24-30):  Map.keys()    -> INSERTION order (then reversed)
 // So the top-level shape of every compiled file has its fields ordered by Map
-// insertion order in the TS port, vs string-dict hash order in Pyret.
+// insertion order in the TS port, vs string-dict hash order in Pyret. (Unlike
+// Probe A, the module object routinely holds 9+ fields, so it is past the
+// StringDict's 8-entry insertion-order threshold and genuinely diverges.)
 
 console.log('\nPROBE B: CCPDict emitted module field order');
 line();
