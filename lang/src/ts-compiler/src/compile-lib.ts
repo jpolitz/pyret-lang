@@ -380,7 +380,11 @@ export function unique<A2>(lst: A2[]): A2[] {
       out.push(x);
     }
   }
-  return out;
+  // Pyret's `sets.list-to-list-set(lst).to-list()` keeps the first occurrence of
+  // each element but returns them in REVERSED first-occurrence order; match that
+  // so multi-error output (e.g. several unbound names) is byte-identical to the
+  // .arr compiler rather than the exact reverse.
+  return out.reverse();
 }
 
 class SpyStripVisitor extends DefaultMapVisitor {
