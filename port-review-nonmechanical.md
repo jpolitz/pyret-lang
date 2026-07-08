@@ -231,7 +231,7 @@ error-display exactly; persistent-dict discipline respected.
 - [!] `compile-structs.ts:475-481, 491-497, 559-565, 575-581` — `.and-then(_.value)` Option-flattening → plain undefined propagation: when origin exists but lookup misses, Pyret raised, TS returns undefined.
 - [~] ts:749-760 `valueExportFromRaw` — NOTE claims mirroring, but the Pyret arity errors (`v-fun` 3-for-4, `v-just-type` 1-for-2) are *constructed as malformed objects* instead of throwing. Also silently corrects the tyvarEnv type annotation.
 - [~] ts:1294-1298 — `identical3`/`runtimeProvides` store the `T.TTop` class / Types cast to ValueExport maps, mirroring the .arr's unchecked dicts (different failure mode on misuse).
-- [!!] ts:805-808, 857-860 — typeFromRaw/datatypeFromRaw param order (cross-cutting #1).
+- [!!] ⏭️ ts:805-808, 857-860 — typeFromRaw/datatypeFromRaw param order (cross-cutting #1).
   Probe refinement (`tests/divergence/serialization-order.js`): the wire encoding is a
   positional array (`{tag:"forall", args:[...]}`, type-util.js:9-19), so raw JSON key
   order is NOT the lever; the divergence is one level in — both compilers read params
@@ -239,6 +239,11 @@ error-display exactly; persistent-dict discipline respected.
   TS `Map.keys()` insertion order), observable with 2+ params or an inherited outer
   tyvar env (demonstrated: inherited `{z}` + args `["a"]` → `["z","a"]` in TS). Note
   `tvariantFromRaw` foldr order *was* carefully preserved (ts:822-828).
+  [`9970d15bc`: The serialized encoding is positional, to be clear (`{tag: "forall", args:[...]}`),
+  and is always right. The divergence ends up only being in when they get read in, and we are
+  gensym-ing unique names for them. So, if there is a very long parameter list, I can imagine
+  the type parameter names getting reported confusingly, but there's no actual semantic issue
+  I could easily write a test for.]
 - [i] Two different repr helpers (compile-structs.ts:27-34 JSON vs compile-errors.ts:51-68 structural); ts:940-942 added isProvides guard + new error; `CompileOptions` reconciles the .arr's two disagreeing definitions and adds `pipeline`/`compileModule` fields (ts:993-1029); ts:1055-1067 default log via process.stdout — verify newline behavior against runtime `print`; `compile-errors.ts:1320` ShadowId loc `==` → `key()` comparison.
 - [~] Bug-for-bug renderReason mirrors, all NOTEd: compile-errors.ts:163-173, 475-481, 969-992, 1075-1080, 1766-1776, 2610-2672 (the load-table trio passes JS arrays where Pyret passed Lists to `text` — rendering may differ *between* the mirrors if executed).
 
