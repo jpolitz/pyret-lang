@@ -20,6 +20,8 @@ var SHAREURL_PROXY_MAX_BYTES  = 1 * 1024 * 1024;  // 1 MB
 var SHAREURL_PROXY_TIMEOUT_MS = 10 * 1000;        // 10 s
 
 function start(config, onServerReady) {
+  // Required before defaultOpts below, which uses it at construction time.
+  var substVars = require('./substitute-vars.js');
   var APP_NAME   = process.env.APP_NAME   || "code.pyret.org";
   var APP_DOMAIN = process.env.APP_DOMAIN || "code.pyret.org";
 
