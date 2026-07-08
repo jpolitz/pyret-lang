@@ -242,6 +242,13 @@ describe("Rendering errors", function() {
     // on a List (compile-structs.arr:2464) -- List has no `count`, so the .arr
     // compiler's fancy renderer crashes. The editor renders compile errors fancy
     // (error-ui.js getFancyRenderer else-branch), so this exercises that path.
+    // load-table duplicate-sanitizer: fancy reason renders the offending clause's
+    // pretty source (was passing a list to `text`, crashing the fancy renderer in
+    // both compilers). Asserting the pretty source appears proves it renders now.
+    ["load-table-dup-sanitizer",
+     "load-table: h1, h2\n  source: src1\n  sanitize h1 using s1\n  sanitize h2 using s2\n  sanitize h1 using s1\nend",
+     "is already sanitized by the sanitizer sanitize h1 using s1"],
+
     ["incorrect-number-of-bindings",
      "data D:\n  | d(a :: Number, b :: Number)\nend\nfun f(x :: D) -> Number:\n  cases(D) x:\n    | d(a) => 1\n  end\nend",
      "same number of field bindings",

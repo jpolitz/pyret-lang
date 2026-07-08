@@ -2608,13 +2608,12 @@ export class LoadTableBadNumberSrcs extends CompileErrorBase {
   get $name(): 'load-table-bad-number-srcs' { return 'load-table-bad-number-srcs'; }
   constructor(public lte: A.Expr, public numFound: number) { super(); }
   renderFancyReason(): ED.ErrorDisplay {
-    // NOTE: ED.text(load-table-expr) in the source passes a list of strings
-    // to text; ported faithfully.
-    const loadTableExpr = (this.lte as any).tosource().pretty(80);
+    // pretty(80) is a list of lines; join to a single string for `text`.
+    const loadTableExpr = (this.lte as any).tosource().pretty(80).join("");
     return error([
       para([
         text("The table loader "),
-        highlight(text(loadTableExpr as any), [(this.lte as any).l], 0),
+        highlight(text(loadTableExpr), [(this.lte as any).l], 0),
         text(" specifies "
             + String(this.numFound)
             + " sources, but it should only specify one.")])]);
@@ -2634,16 +2633,14 @@ export class LoadTableDuplicateSanitizer extends CompileErrorBase {
   get $name(): 'load-table-duplicate-sanitizer' { return 'load-table-duplicate-sanitizer'; }
   constructor(public original: A.LoadTableSpec, public colName: string, public duplicateExp: A.LoadTableSpec) { super(); }
   renderFancyReason(): ED.ErrorDisplay {
-    // NOTE: ED.text(orig-pretty) in the source passes a list of strings to
-    // text; ported faithfully.
-    const origPretty = (this.original as any).tosource().pretty(80);
-    const dupPretty = (this.duplicateExp as any).tosource().pretty(80);
+    // pretty(80) is a list of lines; join to a single string for `text`.
+    const origPretty = (this.original as any).tosource().pretty(80).join("");
     return error([
       para([
         text("The column "),
         highlight(text(this.colName), [(this.duplicateExp as any).l], 0),
         text(" is already sanitized by the sanitizer "),
-        highlight(text(origPretty as any), [(this.original as any).l], 1),
+        highlight(text(origPretty), [(this.original as any).l], 1),
         text(".")])]);
   }
   renderReason(): ED.ErrorDisplay {
@@ -2661,13 +2658,12 @@ export class LoadTableNoBody extends CompileErrorBase {
   get $name(): 'load-table-no-body' { return 'load-table-no-body'; }
   constructor(public loadTableExp: A.Expr) { super(); }
   renderFancyReason(): ED.ErrorDisplay {
-    // NOTE: ED.text(pretty) in the source passes a list of strings to text;
-    // ported faithfully.
-    const pretty = (this.loadTableExp as any).tosource().pretty(80);
+    // pretty(80) is a list of lines; join to a single string for `text`.
+    const pretty = (this.loadTableExp as any).tosource().pretty(80).join("");
     return error([
       para([
         text("The table loader "),
-        highlight(text(pretty as any), [(this.loadTableExp as any).l], 0),
+        highlight(text(pretty), [(this.loadTableExp as any).l], 0),
         text(" has no information about how to load the table. "
             + "It should at least contain a source.")])]);
   }
