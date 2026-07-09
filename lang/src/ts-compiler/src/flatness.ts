@@ -26,27 +26,12 @@
 import * as A from './ast';
 import * as AA from './ast-anf';
 import * as C from './compile-structs';
-import { InternalCompilerError, mapGetValue, raise } from './shared';
+import { InternalCompilerError, mapGetValue, raise, toRepr as torepr } from './shared';
 
 export type Flatness = number | undefined;
 export type FEnv = Map<string, Flatness>;
 // The { sd; ad } tuple returned by make-prog-flatness-env
 export type FlatnessEnv = [FEnv, FEnv];
-
-// Where Pyret used torepr in internal error messages; best-effort
-// structural rendering (same approach as anf.ts / compile-errors.ts).
-function torepr(v: any): string {
-  if (typeof v === 'string') return JSON.stringify(v);
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (v === undefined) return 'none';
-  if (Array.isArray(v)) return '[list: ' + v.map(torepr).join(', ') + ']';
-  if (v !== null && typeof v === 'object' && typeof v.$name === 'string') {
-    const fields = Object.keys(v).map((kk) => torepr(v[kk]));
-    return fields.length === 0 ? v.$name : v.$name + '(' + fields.join(', ') + ')';
-  }
-  return String(v);
-}
 
 export function flatnessMax(a: Flatness, b: Flatness): Flatness {
   // read the docs, maybe there's a quicker way to write this

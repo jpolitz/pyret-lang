@@ -17,21 +17,11 @@ import * as ED from './error-display';
 import * as T from './type-structs';
 import * as J from './js-ast';
 import * as CL from './concat-lists';
-import { InternalCompilerError, mapGetValue } from './shared';
+import { InternalCompilerError, mapGetValue, toRepr } from './shared';
 import type { CompileError } from './compile-errors';
 
 export type URI = string;
 export type Loc = SL.Loc;
-
-// Where Pyret used to-repr in internal error messages; best-effort rendering.
-function toRepr(x: any): string {
-  try {
-    const s = JSON.stringify(x);
-    return s === undefined ? String(x) : s;
-  } catch {
-    return String(x);
-  }
-}
 
 // ---------- Local type-construction shorthands (compile-structs.arr lines 16-35) ----------
 // All of these fix the location to A.dummyLoc, as in the Pyret original.

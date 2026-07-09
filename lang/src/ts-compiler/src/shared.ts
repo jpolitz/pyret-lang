@@ -133,3 +133,25 @@ export function stringSplitAll(s: string, sep: string): string[] {
 export function joinStr(xs: string[], sep: string): string {
   return xs.join(sep);
 }
+
+// Canonical best-effort structural repr for values embedded in *internal*
+// compiler error messages (InternalCompilerError / raise). Pyret used `torepr`
+// at these sites; the exact text is not parity-compared (internal strings are
+// best-effort — see CONVENTIONS.md fidelity rule 1). Renders Pyret AST nodes
+// structurally (`s-name("x")`, `[list: ...]`, `none`) and falls back to JSON for
+// plain objects (more useful than "[object Object]"). NOT for user-facing output
+// — cli-module-loader keeps its own domain-specific renderer for the
+// error-display path.
+export function toRepr(v: any): string {
+  if (typeof v === 'string') return JSON.stringify(v);
+  if (typeof v === 'number') return String(v);
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (v === undefined) return 'none';
+  if (Array.isArray(v)) return '[list: ' + v.map(toRepr).join(', ') + ']';
+  if (v !== null && typeof v === 'object' && typeof v.$name === 'string') {
+    const fields = Object.keys(v).map((k) => toRepr(v[k]));
+    return fields.length === 0 ? v.$name : v.$name + '(' + fields.join(', ') + ')';
+  }
+  try { const s = JSON.stringify(v); return s === undefined ? String(v) : s; }
+  catch { return String(v); }
+}

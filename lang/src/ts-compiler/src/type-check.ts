@@ -25,6 +25,7 @@ import {
   mapGetValue,
   mapSet,
   raise,
+  toRepr,
 } from './shared';
 
 type Type = TS.Type;
@@ -52,16 +53,6 @@ function log(name: string, payload: string): void {
   }
 }
 
-// Where Pyret used torepr/to-repr in internal raise messages; best-effort
-// rendering (same helper as in compile-structs.ts / resolve-scope.ts).
-function toRepr(x: any): string {
-  try {
-    const s = JSON.stringify(x);
-    return s === undefined ? String(x) : s;
-  } catch {
-    return String(x);
-  }
-}
 
 // Pyret `<option>.value`: raises when the option is none.
 function optValue<X>(o: X | undefined): X {

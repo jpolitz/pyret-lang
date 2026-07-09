@@ -12,27 +12,12 @@
 import * as A from './ast';
 import * as SL from './srcloc';
 import * as N from './ast-anf';
-import { InternalCompilerError, raise, map2 } from './shared';
+import { InternalCompilerError, raise, map2, toRepr as torepr } from './shared';
 import { jsnums, PyretNumber, throwingErrbacks } from './interop/js-numbers';
 
 export type Loc = SL.Srcloc;
 
 export type ANFCont = (lettable: N.ALettable) => N.AExpr;
-
-// Where Pyret used torepr in internal error messages; best-effort
-// structural rendering (same approach as compile-errors.ts).
-function torepr(v: any): string {
-  if (typeof v === 'string') return JSON.stringify(v);
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (v === undefined) return 'none';
-  if (Array.isArray(v)) return '[list: ' + v.map(torepr).join(', ') + ']';
-  if (v !== null && typeof v === 'object' && typeof v.$name === 'string') {
-    const fields = Object.keys(v).map((kk) => torepr(v[kk]));
-    return fields.length === 0 ? v.$name : v.$name + '(' + fields.join(', ') + ')';
-  }
-  return String(v);
-}
 
 export function getValue(o: any): A.Expr { return o.value; }
 

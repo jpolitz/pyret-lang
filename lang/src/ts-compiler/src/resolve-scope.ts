@@ -10,7 +10,7 @@ import type { CompileError } from './compile-errors';
 import * as U from './ast-util';
 import * as T from './type-structs';
 import { DefaultMapVisitor, DefaultIterVisitor } from './ast-visitors';
-import { InternalCompilerError, mapSet, mapGetValue } from './shared';
+import { InternalCompilerError, mapSet, mapGetValue, toRepr } from './shared';
 
 export type ValueBind = C.ValueBind;
 export type TypeBind = C.TypeBind;
@@ -19,16 +19,6 @@ export type NameResolution = C.NameResolution;
 export const mtd: Map<string, any> = new Map();
 
 export const names = A.globalNames;
-
-// Where Pyret used to-repr/torepr in internal error messages; best-effort rendering.
-function toRepr(x: any): string {
-  try {
-    const s = JSON.stringify(x);
-    return s === undefined ? String(x) : s;
-  } catch {
-    return String(x);
-  }
-}
 
 // lists.take-while: splits a list at the first element failing the predicate.
 function takeWhile<X>(pred: (x: X) => boolean, lst: X[]): [X[], X[]] {

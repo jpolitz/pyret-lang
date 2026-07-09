@@ -21,6 +21,7 @@ import { Loc, Srcloc, Builtin } from './srcloc';
 import * as A from './ast';
 import type * as T from './type-structs';
 import { drawAndHighlight, type BindOrigin } from './compile-structs';
+import { toRepr as torepr } from './shared';
 
 // ---------- local construction helpers mirroring error-display.arr's
 // [ED.error: ...], [ED.para: ...], etc. construct syntax ----------
@@ -44,21 +45,6 @@ function locPlus(a: Loc, b: Loc): Loc { return (a as any).plus(b); }
 // Pyret map_n
 function mapN<T, U>(f: (n: number, x: T) => U, start: number, xs: T[]): U[] {
   return xs.map((x, i) => f(start + i, x));
-}
-
-// Default structural repr, used for literal `tostring(...)` sites; see
-// the header comment for the decision.
-function torepr(v: any): string {
-  if (typeof v === 'string') return JSON.stringify(v);
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (v === undefined) return 'none';
-  if (Array.isArray(v)) return '[list: ' + v.map(torepr).join(', ') + ']';
-  if (v !== null && typeof v === 'object' && typeof v.$name === 'string') {
-    const fields = Object.keys(v).map((k) => torepr(v[k]));
-    return fields.length === 0 ? v.$name : v.$name + '(' + fields.join(', ') + ')';
-  }
-  return String(v);
 }
 
 export function stringify(v: any): string {
