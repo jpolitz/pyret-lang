@@ -484,8 +484,13 @@ all-ts-pyret-test: tests/pyret/all-ts.jarr $(TS_SUITE_CACHE_WARM)
 	$(NODE) tests/pyret/all-ts.jarr
 
 .PHONY : ts-repl-test
-ts-repl-test: ts-compiler
-	$(NODE) src/ts-compiler/tests/repl-test.js
+# The repl test now drives repl.ts against a REAL in-process load-lib runtime
+# (src/ts-compiler/tests/in-process-host.js), so it needs the warm builtin
+# cache in tests/ts-compiled/ that building main2-ts.jarr produces. Uses the
+# node:test runner because the in-process runtime pulls in requirejs, which
+# can't load inside a jest worker.
+ts-repl-test: ts-compiler tests/pyret/main2-ts.jarr
+	$(NODE) --test src/ts-compiler/tests/repl-test.js
 
 # ============================================================
 # Bootstrap convergence: byte-identical, self-fixpointing compilers
