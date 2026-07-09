@@ -89,7 +89,7 @@ selectively override.
 | Pyret numeric *literal values* (e.g. `s-num.n`) | opaque `PyretNumber` (js-numbers value; see `interop/js-numbers.ts`) |
 | `String` | `string` |
 | `raise(<string>)` | `throw new InternalCompilerError(msg)` (in `shared.ts`) |
-| `tostring(x)` | explicit: `String(...)`, `.toString()`, or `jsnums.toString` as appropriate |
+| `tostring(x)` | explicit `String(...)` or `.toString()` — **not** `jsnums.toString`, which does not exist (calling it silently yields `"[object Object]"`; see the NOTE in `interop/js-numbers.ts`) |
 
 **Persistent-dict discipline:** Pyret `StringDict` is persistent —
 `d.set(k, v)` returns a NEW dict. Where ported code extends a dict and
@@ -103,7 +103,10 @@ code, prefer the helper `mapSet(d, k, v)` from `shared.ts` which copies.
 `===` for compound values. Names compare with `a.key() === b.key()`,
 srclocs with `a.key() === b.key()` or dedicated methods (`.same(other)`),
 lists of names by element. When Pyret code uses values as `string-dict`
-keys via `tostring`/`.key()`, do the same.
+keys via `tostring`/`.key()`, do the same. **Locator identity** is the
+`uri()` string; Pyret's `Locator._equals` is not ported (and locators must be
+plain object literals, not classes — see the note at the `Locator` interface in
+`compile-lib.ts`).
 
 - Pyret string `+` on doc/pretty-printing → `.append()` for `PPrintDoc`,
   plain `+` for strings.
@@ -122,6 +125,47 @@ resettable counters; `compile-module` resets both before each module.
 Preserve exact call order so generated names match the Pyret compiler's
 output (`$underscore4`, `tail$5`, etc.) — byte-level parity of emitted JS
 is the goal wherever feasible.
+
+Byte-parity is **cutover scaffolding**, not a permanent law: it exists to prove
+the TS compiler reproduces the Pyret one so we can switch over. Once the Pyret
+compiler is retired, TS is the source of truth and the parity-specific
+constraints below (matching `StringDict` iteration order, the two-sided
+co-modification invariant) stop being live invariants. Until then, honor them.
+
+## Determinism and iteration order
+
+`Map` stands in for `StringDict`, and their iteration orders can differ — but
+less often than it first looks. A `StringDict` is **insertion-ordered exactly
+while it stays an `ArrayMapNode`**: it has never held more than
+`MAX_ARRAY_MAP_SIZE` = 8 entries (`SHIFT=5`, `SIZE=32`, `SIZE/4`), **and** no key
+was ever removed. Overwriting an existing key keeps its slot; but removal is a
+swap-with-last, which reorders, and growing past 8 converts the node to a
+hash-trie that iterates in **content-deterministic hash order** from then on.
+`Map` is always insertion order. So:
+
+- **A small, build-once, bounded dict (≤8 keys, no removals) needs no sorting** —
+  `Map` insertion order already matches `StringDict`. This is exactly what makes
+  the `clMapSd` exception below safe.
+- **A dict that can exceed 8 entries, or that ever removes a key, must be sorted
+  wherever its key order is observable** — where the order feeds
+  gensyms/existentials, a `.key()` identity (e.g. `TRecord.key()`), serialized
+  output, or a user-visible message. Insertion order is otherwise acceptable only
+  for pure lookups whose iteration never escapes. This substitution is the single
+  biggest semantic gap in the port; when unsure, sort.
+- When you add a canonicalizing sort for parity, it usually must be **mirrored
+  in the Pyret compiler too** (the reference output was produced by a sort added
+  on *both* sides). See the header of `anf-loop-compiler.ts` — it names every
+  co-located sort site in both compilers and says to keep them in lockstep.
+  Changing one side alone silently breaks byte-parity.
+
+**Sanctioned byte-parity exceptions.** Byte-parity of emitted JS is the goal,
+but a few places knowingly rely on insertion order because it is provably
+equivalent. These are the only blessed exceptions; each is justified at its
+site, and new ones need the same treatment:
+
+- `js-of-pyret.ts` `clMapSd` — the top-level module object has 5 fixed keys set
+  in the same order by both compilers (and a `StringDict` of ≤8 keys is itself
+  insertion-ordered), so `Map` order matches. See the comment there.
 
 ## Srcloc
 
@@ -150,13 +194,43 @@ loading — when in doubt, diff against output of `build/phaseA/pyret.jarr`.
 
 ## Fidelity rules
 
-1. Port logic line by line; do not "improve" algorithms, error messages, or
-   traversal order. Error message strings must match exactly (tests may
-   compare renderings).
+1. **Port logic line by line; do not "improve" algorithms or traversal order.**
+   Two carve-outs the port relies on hundreds of times:
+   - *User-facing strings exact; internal strings best-effort.* Every
+     render-reason / check-result string a user can see must match byte-for-byte
+     (parity tests compare renderings — verified in well-formed, compile-errors).
+     Internal `InternalCompilerError` / `TODOError` messages, `PyretParseError`
+     text, and local `torepr`/`tostring` used only inside raise messages are
+     best-effort; their drift is sanctioned.
+   - *Stack-safety rewrites are allowed, with a parity comment.* Linear
+     per-statement recursion may be converted to iteration / trampoline /
+     work-list (resolve-scope, anf hole-patching, anf-loop-compiler,
+     `computeLiveVars`, pprint) when the site carries a comment arguing
+     effect-order parity. What must **never** be silently converted: anything
+     that reorders gensym / `global-names` effects — generated names appear in
+     the output.
 2. Keep one TS function per Pyret function, same name (camelCased), same
    argument order.
-3. Comments from the Pyret source that explain *why* may be carried over;
-   do not add narration comments.
-4. Anything intentionally not ported yet must `throw new TODOError("...")`
-   (from `shared.ts`) — never silently return wrong values.
-5. `provide *` ⇒ export everything the Pyret module exported.
+3. **Comments: no narration in mechanical ports — but the runtime boundary is
+   the exception.** Carry over Pyret `why` comments; don't add narration to a
+   straight port. DO add architecture headers and `DEVIATION:` / parity-argument
+   comments at the runtime boundary (cli-module-loader, server, pyret, url,
+   builtin-modules, the interop layer). That is where the port's load-bearing
+   documentation is *supposed* to live.
+4. **Not-ported taxonomy — pick the right marker; silent omission is never
+   allowed.**
+   - `throw new TODOError("...")` (from `shared.ts`) — *intended to be ported,
+     not done yet.*
+   - explanatory `throw new InternalCompilerError("dead: ...")` — *dead by
+     construction*: a Pyret path the port's architecture deliberately replaces
+     (e.g. in-process `run` / `propagate-exit`, superseded by the child-process
+     standalone). Do **not** use `TODOError` for these — it invites a port that
+     will never come.
+   - Silently dropping a method or branch is **not allowed.** A dropped method
+     (`_equals`, `pyretToJsPretty`, …) must throw explicitly or carry a NOTE
+     explaining why it is unreachable.
+5. **Latent Pyret bugs.** Mirror non-crashing quirks bit-for-bit; fix a bug only
+   when it would crash the port (or the reference, but not both). Leave a
+   `// NOTE:` at the site either way. Never silently "fix" a quirk the reference
+   compiler still exhibits — that breaks parity.
+6. `provide *` ⇒ export everything the Pyret module exported.

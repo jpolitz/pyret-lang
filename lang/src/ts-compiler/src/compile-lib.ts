@@ -108,6 +108,13 @@ export type Provides = CS.Provides;
 
 // ---------- Locator ----------
 
+// IMPORTANT: implement locators as plain object literals, never class
+// instances. cli-module-loader extends locators by spread (`{ ...loc, uri() {
+// ... } }`, see getModuleForDep) and the repl aliases them the same way; spread
+// copies only own-enumerable properties, so a class instance's prototype
+// methods would be silently dropped. Pyret's Locator `_equals` is likewise not
+// ported — locator identity is the `uri()` string (see NOTE at the equality
+// discipline in CONVENTIONS.md).
 export interface Locator {
   needsCompile(provides: Map<string, CS.Provides>): boolean;
   getModifiedTime(): number;
