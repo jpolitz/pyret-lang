@@ -1,5 +1,7 @@
 # browser-test — code.pyret.org's editor assertions, on embed instances and vscode webviews
 
+NOTE(joe): Originally Claude-generated README here with only minor edits
+
 This directory runs the **same assertions** from `code.pyret.org`'s editor test
 suite against the three places the Pyret editor renders. It's a **`node:test`**
 suite (no extra test-framework dependency) driven through **one runner**:
@@ -30,17 +32,18 @@ over a ~15 MB cap (so the 37 MB `cpo-main.jarr.js` never loads). That's
 `dist/web/build/web` with those hostile semantics; the editor HTML is rendered
 the same way `getHtmlForWebview` does, with `BASE_URL`/`PYRET` pointed at it. It
 does not boot VS Code — it injects a no-op `acquireVsCodeApi` (so beforePyret
-takes the real `window.PYRET_IN_VSCODE` branch, the exact path the fix touches)
+takes the real `window.PYRET_IN_VSCODE` branch, the path issue #21 broke)
 and passes `initialState` in the URL hash (so `events.js` self-resets the editor
 and gains control locally, giving `editorReady` its non-empty CodeMirror).
 
-It is **RED** until the gzip+inline fix lands. To prove the harness plumbing
-itself is sound, run it in **faithful** mode (correct MIME, no cap) — that should
-boot and pass just like `vscode.dev`:
+Hostile mode is the regression test for #21: it fails if the self-contained
+template stops booting under nosniff serving. To separate a real regression
+from broken harness plumbing, run **faithful** mode (correct MIME, no cap) —
+that should boot and pass just like `vscode.dev`:
 
 ```bash
-node run.js --env=vscode-ovsx                 # hostile (default): reproduces #21, RED
-OVSX_FAITHFUL=1 node run.js --env=vscode-ovsx  # correct MIME/no cap: GREEN (plumbing check)
+node run.js --env=vscode-ovsx                 # hostile (default): the #21 regression test
+OVSX_FAITHFUL=1 node run.js --env=vscode-ovsx  # correct MIME/no cap: plumbing check
 ```
 
 Env vars: `OVSX_FAITHFUL=1` (correct serving), `OVSX_ASSET_ROOT=<dir>` (override

@@ -2,19 +2,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { URI, Utils } from 'vscode-uri';
 import { Buffer } from 'buffer';
-// The self-contained editor template (produced by code.pyret.org's build; see
-// src/scripts/inline-selfcontained.js) has the shell scripts/styles already
-// inlined, so the webview boots even where Open VSX / the GitLab Web IDE serves
-// its resources without an executable MIME type (issue #21). The runtime bundle
-// isn't inlined -- window.PYRET points at cpo-main.jarr.gz.js and PYRET_GZIPPED
-// is baked true, so beforePyret fetches + inflates it in-page (DecompressionStream).
+// See cross-file dependencies with code.pyret.org/src/scripts/inline-selfcontained.js
 const code = require('../build/web/views/editor.selfcontained.html');
 
-// Literal placeholders the build left for the three values only known here at
-// runtime. We fill them with plain string replacement -- NOT a template engine:
-// the template has the shell's minified JS inlined, and that JS is full of
-// `{{`/`}}` (object braces) that mustache would greedily corrupt. These MUST
-// match code.pyret.org/src/scripts/inline-selfcontained.js.
 const WEBVIEW_BASE_URL = '__PYRET_WEBVIEW_BASE_URL__';
 const WEBVIEW_HASH = '__PYRET_WEBVIEW_HASH__';
 const WEBVIEW_URL_FILE_MODE = '__PYRET_WEBVIEW_URL_FILE_MODE__';
@@ -130,9 +120,9 @@ export function getHtmlForWebview(context: vscode.ExtensionContext, webview: vsc
   const baseURI = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'web', 'build', 'web')).toString();
   const view = showDefinitions === false ? "hideDefinitions=true&headerStyle=hide" : "hideInteractions=true";
   const hashOptions = `#footerStyle=hide&${view}&theme=${theme}`;
-  // Plain string replacement of the build's literal placeholders (see the note
-  // by their definitions above). split/join, not String.replace, so a `$` in a
-  // filled value can't be read as a replacement pattern.
+  // Plain string replacement of the build's literal placeholders. split/join,
+  // not String.replace, so a `$` in a filled value can't be read as a
+  // replacement pattern.
   return (code as string)
     .split(WEBVIEW_BASE_URL).join(baseURI)
     .split(WEBVIEW_HASH).join(hashOptions)

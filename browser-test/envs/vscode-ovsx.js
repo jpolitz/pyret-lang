@@ -1,4 +1,7 @@
 /*
+ * NOTE(joe): Originally Claude-generated code + comments in this file with only
+ * minor edits
+ *
  * Environment adapter: the vscode webview served the way the GitLab Web IDE gets
  * it from Open VSX -- the reproduction for issue #21.
  *
@@ -11,16 +14,17 @@
  *
  * It does NOT boot VS Code. Instead it:
  *   - injects a no-op `acquireVsCodeApi`, so beforePyret takes the real vscode
- *     branch (`window.PYRET_IN_VSCODE = true`) -- the exact code path the fix
- *     will change -- rather than the embed/standalone branch; and
+ *     branch (`window.PYRET_IN_VSCODE = true`) -- the code path issue #21
+ *     broke -- rather than the embed/standalone branch; and
  *   - passes `initialState` in the URL hash, so events.js `makeEvents` self-
  *     resets the editor and calls gainControl locally (onLoad), giving non-empty
  *     CodeMirror content + an editable editor without a live host round-trip.
  *     (editorReady requires cmValue() !== "", so this is what gets us there.)
  *
  * Modes (env vars):
- *   default          hostile serving -> reproduces #21 (RED until the fix lands)
- *   OVSX_FAITHFUL=1  correct MIME, no cap -> should behave like vscode.dev (GREEN);
+ *   default          hostile serving -> the regression test for #21: fails if
+ *                    the self-contained template stops booting under it
+ *   OVSX_FAITHFUL=1  correct MIME, no cap -> should behave like vscode.dev;
  *                    validates the harness plumbing itself
  *   OVSX_ASSET_ROOT  override the served dir (default vscode/dist/web/build/web)
  *   OVSX_CAP_MB      hostile size cap in MB (default 15)
@@ -92,9 +96,10 @@ async function setup() {
   } catch (e) {
     if (HOSTILE) {
       throw new ProceduralError(
-        "editor scripts never executed (window.$ undefined) -- reproduces issue #21: " +
-          "Open VSX serves assets as text/plain+nosniff so the webview refuses to run them. " +
-          "This env is RED until the gzip+inline fix lands."
+        "editor scripts never executed (window.$ undefined) -- the issue #21 " +
+          "regression: under text/plain+nosniff serving, only inlined scripts can " +
+          "run, so the self-contained template has stopped booting (or " +
+          "OVSX_ASSET_ROOT points at a stale/unbuilt extension)."
       );
     }
     throw e; // faithful mode: an unexpected boot failure, surface it

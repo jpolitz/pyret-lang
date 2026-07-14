@@ -67,14 +67,10 @@ const webExtensionConfig = {
 					from: path.resolve(__dirname, "build"),
 					to: "./build",
 					globOptions: {
-						// Ship the gzipped runtime (cpo-main.jarr.gz.js, ~5.6MB) and
-						// DROP the uncompressed 37MB cpo-main.jarr.js: the webview
-						// fetches the .gz and inflates it in-page with
-						// DecompressionStream (issue #21). This also keeps the vsix
-						// small and under Open VSX's ~15MB per-file cap.
-						// Only cpo-main.jarr.gz.js is fetched (and inflated in-page);
-						// drop the uncompressed 37MB bundle and the CPO build's big
-						// intermediates (cpo-main.jarr, .jarr.js, .jarr.min).
+						// Only cpo-main.jarr.gz.js is fetched (and inflated in-page
+						// by beforePyret); drop the uncompressed 37MB bundle and the
+						// CPO build's big intermediates, which also keeps every
+						// shipped file under Open VSX's ~15MB cap.
 						ignore: [
 							"**/snap/**",
 							"**/js/cpo-main.jarr",
