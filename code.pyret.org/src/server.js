@@ -136,6 +136,31 @@ function start(config, onServerReady) {
   app.set('view engine', 'html');
   app.set('view cache', process.env.NODE_ENV !== 'development');
 
+  // Render every view this server serves, at boot, with (a representative
+  // version of) the dictionary its route supplies -- one entry per res.render
+  // in this file. substitute-vars' closed-world errors (missing key, leftover
+  // tag, unreadable view) then kill the deploy with a named variable/file,
+  // instead of 500ing the first visitor to that route after the deploy.
+  // Request-only values (CSRF_TOKEN, LEFT_LINK) are stand-ins: presence in
+  // the dictionary is what's checked, the value doesn't matter here.
+  var viewSelfCheck = {
+    "close.html": defaultOpts,
+    "faq.html": defaultOpts,
+    "index.html": { ...defaultOpts, LEFT_LINK: "" },
+    "editor.html": { ...defaultOpts, CSRF_TOKEN: "" },
+    "blocks.html": { ...defaultOpts, CSRF_TOKEN: "" },
+    [path.resolve(__dirname, "web", "ide.html")]:
+      { ASSET_BASE_URL: "", APP_NAME: "" },
+  };
+  Object.keys(viewSelfCheck).forEach(function(view) {
+    var p = path.isAbsolute(view) ? view : path.join(__dirname, '..', 'build', 'web', 'views', view);
+    try {
+      substVars.substituteVars(fs.readFileSync(p, "utf8"), viewSelfCheck[view]);
+    } catch (e) {
+      throw new Error("server view self-check failed for " + p + ": " + e.message);
+    }
+  });
+
   app.get("/current-version", function(req, res) {
     res.status(200);
     res.send(JSON.stringify({version: config.version}));
