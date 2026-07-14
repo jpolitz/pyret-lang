@@ -20,6 +20,8 @@ var SHAREURL_PROXY_MAX_BYTES  = 1 * 1024 * 1024;  // 1 MB
 var SHAREURL_PROXY_TIMEOUT_MS = 10 * 1000;        // 10 s
 
 function start(config, onServerReady) {
+  // Required before defaultOpts below, which uses it at construction time.
+  var substVars = require('./substitute-vars.js');
   var APP_NAME   = process.env.APP_NAME   || "code.pyret.org";
   var APP_DOMAIN = process.env.APP_DOMAIN || "code.pyret.org";
 
@@ -36,6 +38,19 @@ function start(config, onServerReady) {
       POSTMESSAGE_ORIGIN: process.env.POSTMESSAGE_ORIGIN,
       APP_NAME:   APP_NAME,
       APP_DOMAIN: APP_DOMAIN,
+      // The server serves the plain (non-gzipped-in-JS) runtime, so the
+      // preload line is always emitted; the self-contained webview build sets
+      // this to "" instead (see src/scripts/inline-selfcontained.js).
+      PYRET_GZIPPED: "",
+      PYRET_PRELOAD: substVars.pyretPreloadTag(process.env.PYRET, ""),
+      // Blank ON PURPOSE when served by this server (mustache used to blank
+      // these implicitly as unknown keys; substitute-vars requires every
+      // variable's fate to be explicit):
+      HASH_OPTIONS: "",        // "" -> editor.html falls back to document.location.hash
+      URL_FILE_MODE: "",       // vscode-webview-only concept
+      IMAGE_PROXY_BYPASS: "",  // "" -> use the server's image proxy
+      CURRENT_PYRET_DOCS: "",  // docs links point at pyret.org/docs/
+      ASSET_BASE_URL: "",      // assets are served relative to this server
     };
   var express = require('express');
   var cookieSession = require('cookie-session');
@@ -45,7 +60,7 @@ function start(config, onServerReady) {
   var googleAuth = require('./google-auth.js');
   var request = require('request');
   var requestFilteringAgent = require('request-filtering-agent');
-  var mustache = require('mustache-express');
+  var substVars = require('./substitute-vars.js');
   var url = require('url');
   var fs = require('fs');
 
@@ -113,10 +128,38 @@ function start(config, onServerReady) {
   var db = config.db;
 
   app.set('views', __dirname + '/../build/web/views');
-  app.engine('html', mustache());
-  app.engine('js', mustache());
-  app.set('view engine', ['html', 'js']);
+  // Dictionary-driven literal substitution (see src/substitute-vars.js); a
+  // template variable absent from the render dict is a render error, not a
+  // silent blank. (The old mustache() '.js' engine registration was
+  // vestigial: no route renders a .js view.)
+  app.engine('html', substVars.expressEngine);
+  app.set('view engine', 'html');
   app.set('view cache', process.env.NODE_ENV !== 'development');
+
+  // Render every view this server serves, at boot, with (a representative
+  // version of) the dictionary its route supplies -- one entry per res.render
+  // in this file. substitute-vars' closed-world errors (missing key, leftover
+  // tag, unreadable view) then kill the deploy with a named variable/file,
+  // instead of 500ing the first visitor to that route after the deploy.
+  // Request-only values (CSRF_TOKEN, LEFT_LINK) are stand-ins: presence in
+  // the dictionary is what's checked, the value doesn't matter here.
+  var viewSelfCheck = {
+    "close.html": defaultOpts,
+    "faq.html": defaultOpts,
+    "index.html": { ...defaultOpts, LEFT_LINK: "" },
+    "editor.html": { ...defaultOpts, CSRF_TOKEN: "" },
+    "blocks.html": { ...defaultOpts, CSRF_TOKEN: "" },
+    [path.resolve(__dirname, "web", "ide.html")]:
+      { ASSET_BASE_URL: "", APP_NAME: "" },
+  };
+  Object.keys(viewSelfCheck).forEach(function(view) {
+    var p = path.isAbsolute(view) ? view : path.join(__dirname, '..', 'build', 'web', 'views', view);
+    try {
+      substVars.substituteVars(fs.readFileSync(p, "utf8"), viewSelfCheck[view]);
+    } catch (e) {
+      throw new Error("server view self-check failed for " + p + ": " + e.message);
+    }
+  });
 
   app.get("/current-version", function(req, res) {
     res.status(200);
@@ -130,8 +173,10 @@ function start(config, onServerReady) {
 
   app.get("/close.html", function(_, res) { res.render("close.html", defaultOpts); });
   app.get("/faq.html", function(_, res) { res.render("faq.html", defaultOpts); });
-  app.get("/privacy.html", function(_, res) { res.render("privacy.html", defaultOpts); });
-  app.get("/privacy/", function(_, res) { res.render("privacy.html", defaultOpts); });
+
+  // NOTE(joe): On the mainline deploy code.pyret.org, this keep the old inbound links working.
+  // Other deploys may want to make a different choice here depending on their public-facing URLs
+  app.get(["/privacy.html", "/privacy/"], function(_, res) { res.redirect(301, "/faq/"); });
 
   app.get("/faq", function(_, res) { res.render("faq.html", defaultOpts); });
 
@@ -617,7 +662,10 @@ function start(config, onServerReady) {
   app.get(/\/ide(\/.*)?$/, function(req, res) {
     res.render(
       path.resolve(__dirname, "web", "ide.html"),
-      {ASSET_BASE_URL: process.env.ASSET_BASE_URL || ''}
+      // APP_NAME was silently blanked by mustache (this route never passed
+      // it); kept explicitly blank for byte-identical output. Passing the
+      // real APP_NAME (a title improvement) is queued as a follow-up.
+      {ASSET_BASE_URL: process.env.ASSET_BASE_URL || '', APP_NAME: ''}
     );
   });
 
