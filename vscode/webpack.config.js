@@ -67,7 +67,16 @@ const webExtensionConfig = {
 					from: path.resolve(__dirname, "build"),
 					to: "./build",
 					globOptions: {
-						ignore: ["**/snap/**", "**/*.gz*"],
+						// Only cpo-main.jarr.gz.js is fetched (and inflated in-page
+						// by beforePyret); drop the uncompressed 37MB bundle and the
+						// CPO build's big intermediates, which also keeps every
+						// shipped file under Open VSX's ~15MB cap.
+						ignore: [
+							"**/snap/**",
+							"**/js/cpo-main.jarr",
+							"**/js/cpo-main.jarr.js",
+							"**/js/cpo-main.jarr.min",
+						],
 					},
 					// Terser skip this file for minification
 					info: { minimized: true },
