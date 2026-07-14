@@ -1,12 +1,15 @@
 name: browser-test (embed + vscode webviews)
 
-# Runs code.pyret.org's editor assertions against three environments via the
+# Runs code.pyret.org's editor assertions against four environments via the
 # single Playwright runner in browser-test/:
-#   cpo    -- the reference (/editor)
-#   embed  -- the embed API's embedded instance
-#   vscode -- the pyret-parley.cpo webview (headless VS Code for the Web)
+#   cpo         -- the reference (/editor)
+#   embed       -- the embed API's embedded instance
+#   vscode      -- the pyret-parley.cpo webview (headless VS Code for the Web)
+#   vscode-ovsx -- the same webview, but with its assets served the way Open VSX
+#                  / the GitLab Web IDE serve them (text/plain + nosniff + size
+#                  cap) -- the reproduction of pyret-parley issue #21
 #
-# Shape: build code.pyret.org + the extension ONCE, then fan out the three
+# Shape: build code.pyret.org + the extension ONCE, then fan out the four
 # environments as a parallel matrix (each on its own runner, so chart rendering
 # doesn't contend for CPU).
 
@@ -66,7 +69,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [cpo, embed, vscode]
+        env: [cpo, embed, vscode, vscode-ovsx]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -75,13 +78,13 @@ jobs:
 
       # cpo + embed load /editor from the CPO server; vscode does not.
       - name: Restore cpo build
-        if: matrix.env != 'vscode'
+        if: ${{ !startsWith(matrix.env, 'vscode') }}
         uses: actions/download-artifact@v4
         with:
           name: cpo-build
           path: code.pyret.org/build
       - name: Restore vscode extension
-        if: matrix.env == 'vscode'
+        if: ${{ startsWith(matrix.env, 'vscode') }}
         uses: actions/download-artifact@v4
         with:
           name: vscode-dist
@@ -98,12 +101,12 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Install CPO server runtime deps
-        if: matrix.env != 'vscode'
+        if: ${{ !startsWith(matrix.env, 'vscode') }}
         working-directory: ./code.pyret.org
         run: npm ci --ignore-scripts
 
       - name: Start CPO server
-        if: matrix.env != 'vscode'
+        if: ${{ !startsWith(matrix.env, 'vscode') }}
         working-directory: ./code.pyret.org
         env:
           BASE_URL: http://localhost:4999

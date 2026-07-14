@@ -2,8 +2,12 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { URI, Utils } from 'vscode-uri';
 import { Buffer } from 'buffer';
-import { render } from 'mustache';
-const code = require('../build/web/views/editor.html');
+// See cross-file dependencies with code.pyret.org/src/scripts/inline-selfcontained.js
+const code = require('../build/web/views/editor.selfcontained.html');
+
+const WEBVIEW_BASE_URL = '__PYRET_WEBVIEW_BASE_URL__';
+const WEBVIEW_HASH = '__PYRET_WEBVIEW_HASH__';
+const WEBVIEW_URL_FILE_MODE = '__PYRET_WEBVIEW_URL_FILE_MODE__';
 
 // import * as fs from 'fs';
 // import * as path from 'path';
@@ -112,25 +116,17 @@ function getTheme(vscodeTheme: vscode.ColorThemeKind): string {
 export function getHtmlForWebview(context: vscode.ExtensionContext, webview: vscode.Webview, showDefinitions = true): string {
   const config = vscode.workspace.getConfiguration('pyret-parley');
   const theme = getTheme(vscode.window.activeColorTheme.kind);
-  let urlFileMode = config.get('urlFileMode');
-  const baseURI = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'web', 'build', 'web'));
-  let view = "";
-  if (showDefinitions === false) {
-    view = "hideDefinitions=true&headerStyle=hide";
-  }
-  else {
-    view = "hideInteractions=true";
-  }
-  const templated = 
-    render((code as string), {
-      BASE_URL: baseURI.toString(),
-      PYRET: webview.asWebviewUri(vscode.Uri.joinPath(baseURI, 'js', 'cpo-main.jarr.js')).toString(),
-      HASH_OPTIONS: `#footerStyle=hide&${view}&theme=${theme}`,
-      URL_FILE_MODE: urlFileMode,
-      IMAGE_PROXY_BYPASS: "true"
-    });
-  console.log("Templated: ", templated);
-  return templated;
+  const urlFileMode = config.get('urlFileMode');
+  const baseURI = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'web', 'build', 'web')).toString();
+  const view = showDefinitions === false ? "hideDefinitions=true&headerStyle=hide" : "hideInteractions=true";
+  const hashOptions = `#footerStyle=hide&${view}&theme=${theme}`;
+  // Plain string replacement of the build's literal placeholders. split/join,
+  // not String.replace, so a `$` in a filled value can't be read as a
+  // replacement pattern.
+  return (code as string)
+    .split(WEBVIEW_BASE_URL).join(baseURI)
+    .split(WEBVIEW_HASH).join(hashOptions)
+    .split(WEBVIEW_URL_FILE_MODE).join(String(urlFileMode ?? ""));
 }
 
 
