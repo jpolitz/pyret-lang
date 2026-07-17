@@ -59,9 +59,6 @@ end
 # HELPERS
 ################################################################################
 
-fun check-num(v :: Number) -> Nothing: nothing end
-fun check-string(v :: String) -> Nothing: nothing end
-fun check-image(v :: IM.Image) -> Nothing: nothing end
 
 fst = raw-array-get(_, 0)
 snd = raw-array-get(_, 1)
@@ -1887,8 +1884,6 @@ fun line-plot-from-list(xs :: CL.LoN, ys :: CL.LoN) -> DataSeries block:
   when xs.length() <> ys.length():
     raise(ERR.message-exception('line-plot: xs and ys should have the same length'))
   end
-  xs.each(check-num)
-  ys.each(check-num)
   default-line-plot-series.{
     ps: map4(get-scatter-point, xs, ys, xs.map({(_): ''}), xs.map({(_): none}))
   } ^ line-plot-series
@@ -1909,8 +1904,6 @@ fun scatter-plot-from-list(xs :: CL.LoN, ys :: CL.LoN) -> DataSeries block:
   when xs.length() <> ys.length():
     raise(ERR.message-exception('scatter-plot: xs and ys should have the same length'))
   end
-  xs.each(check-num)
-  ys.each(check-num)
   default-scatter-plot-series.{
     ps: map4(get-scatter-point, xs, ys, xs.map({(_): ''}), xs.map({(_): none}))
   } ^ scatter-plot-series
@@ -1924,11 +1917,7 @@ fun image-scatter-plot-from-list(images :: CL.LoI, xs :: CL.LoN, ys :: CL.LoN) -
   scatter-plot-from-list(xs, ys).image-labels(images)
 end
 
-fun image-bar-chart-from-list(
-  images :: CL.LoI, 
-  labels :: CL.LoS, 
-  values :: CL.LoN) -> DataSeries block:
-
+fun image-bar-chart-from-list(images :: CL.LoI, labels :: CL.LoS, values :: CL.LoN) -> DataSeries block:
   doc: ```
        Consume images, labels, a list of string, and values, a list of numbers
        and construct a bar chart using images as bars
@@ -1988,9 +1977,6 @@ fun exploding-pie-chart-from-list(
       raise(ERR.message-exception('exploding-pie-chart: offset must be between 0 and 1'))
     end
   end
-  values.each(check-num)
-  offsets.each(check-num)
-  labels.each(check-string)
   default-pie-chart-series.{
     tab: to-table3-n(labels, values, offsets)
   } ^ pie-chart-series
@@ -2014,8 +2000,6 @@ fun pie-chart-from-list(labels :: CL.LoS, values :: CL.LoN) -> DataSeries block:
   when label-length == 0:
     raise(ERR.message-exception('pie-chart: need at least one data'))
   end
-  values.each(check-num)
-  labels.each(check-string)
   default-pie-chart-series.{
     tab: to-table3-n(labels, values, labels.map({(_): 0}))
   } ^ pie-chart-series
@@ -2039,9 +2023,6 @@ fun image-pie-chart-from-list(images :: CL.LoI, labels :: CL.LoS, values :: CL.L
   when label-length == 0:
     raise(ERR.message-exception('pie-chart: need at least one data'))
   end
-  images.each(check-image)
-  values.each(check-num)
-  labels.each(check-string)
   default-pie-chart-series.{
     tab: to-table4(labels, values, labels.map({(_): 0}), images)
   } ^ pie-chart-series
@@ -2086,7 +2067,6 @@ fun num-dot-chart-from-list(x-values :: CL.LoN) -> DataSeries block:
        Consume a (possibly repeating, unordered) list of numbers
        and construct a dot chart
        ```
-  x-values.each(check-num)
   when x-values.length() == 0:
     raise(ERR.message-exception("num-dot-chart: can't have empty data"))
   end
@@ -2264,9 +2244,6 @@ fun labeled-interval-chart-from-list(
   when xs-length == 0:
     raise(ERR.message-exception('interval-chart: need at least one datum'))
   end
-  xs.each(check-num)
-  ys.each(check-num)
-  deltas.each(check-num)
 
   default-interval-chart-series.{
     ps: map5(get-interval-point, xs, ys, deltas, labels, xs.map({(_): none}))
@@ -2299,14 +2276,12 @@ fun labeled-box-plot-from-list(
   when label-length == 0:
     raise(ERR.message-exception('labeled-box-plot: expect at least one box'))
   end
-  values.each(_.each(check-num))
   values.each(
     lam(lst):
       when lst.length() <= 1:
         raise(ERR.message-exception('labeled-box-plot: the list length should be at least 2'))
       end
     end)
-  labels.each(check-string)
 
   max-height = for fold(cur from values.first.first, lst from values):
     num-max(lst.rest.foldl(num-max, lst.first), cur)
@@ -2345,7 +2320,6 @@ fun histogram-from-list(values :: CL.LoN) -> DataSeries block:
   doc: ```
        Consume a list of numbers and construct a histogram
        ```
-  values.each(check-num)
   default-histogram-series.{
     vals: map3(get-histogram-value, values, values.map({(_): ''}), values.map({(_): none})),
   } ^ histogram-series
@@ -2360,8 +2334,6 @@ fun labeled-histogram-from-list(labels :: CL.LoS, values :: CL.LoN) -> DataSerie
   when label-length <> value-length:
     raise(ERR.message-exception('labeled-histogram: labels and values should have the same length'))
   end
-  values.each(check-num)
-  labels.each(check-string)
   default-histogram-series.{
     vals: map3(get-histogram-value, values, labels, values.map({(_): none})),
   } ^ histogram-series
