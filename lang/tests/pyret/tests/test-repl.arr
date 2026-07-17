@@ -424,3 +424,27 @@ check "Loading images at the CLI REPL":
   result = restart("include image\na = circle(50, 'solid', 'red')\nimage-width(a)", false)
   val(result) is some(100)
 end
+
+# These two functions back the CLI REPL's "show me the value I just typed" and
+# "only print test results when I wrote a check" behaviors (used by server.arr).
+check "get-result-repr renders the interaction's answer, or none for definitions":
+  restart("", false)
+
+  L.get-result-repr(next-interaction("1 + 1").v) is some("2")
+  L.get-result-repr(next-interaction("\"hello\"").v) is some("\"hello\"")
+  L.get-result-repr(next-interaction("[list: 1, 2, 3]").v) is some("[list: 1, 2, 3]")
+
+  # A definition produces no answer value, so the REPL shows nothing.
+  L.get-result-repr(next-interaction("x = 10").v) is none
+  # A later expression that uses the binding does produce a value.
+  L.get-result-repr(next-interaction("x + 5").v) is some("15")
+end
+
+check "result-has-checks distinguishes check blocks from plain expressions":
+  restart("", false)
+
+  L.result-has-checks(next-interaction("1 + 1").v) is false
+  L.result-has-checks(next-interaction("x = 10").v) is false
+  L.result-has-checks(next-interaction("check: 2 + 2 is 4 end").v) is true
+  L.result-has-checks(next-interaction("check \"named\": 1 is 1 end").v) is true
+end
