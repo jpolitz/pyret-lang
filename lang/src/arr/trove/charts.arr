@@ -1150,7 +1150,7 @@ type LinePlotSeries = {
   trendlineDegree :: NumInteger, 
   dashedLine :: Boolean, 
   dashlineStyle :: RawArray<NumInteger>, 
-  point-size :: Number,
+  point-size :: Option<Number>,
   useImageSizes :: Boolean,
   pointshapeType :: String, 
   pointshapeSides :: NumInteger, 
@@ -1171,7 +1171,7 @@ default-line-plot-series = {
   trendlineDegree: 3,  
   dashedLine: false,
   dashlineStyle: [raw-array: 2, 2],
-  point-size: 0,
+  point-size: none,
   useImageSizes: true,
   pointshapeType: 'circle', 
   pointshapeSides: 5,
@@ -1570,13 +1570,21 @@ data DataSeries:
     dashed-line: dashed-line-method, 
     dashline-style: dashed-line-style-method,
     point-shape: pointshape-method, 
-    labels: labels-method,
+    method labels(self, labels :: CL.LoS) block:
+      when self.obj!ps.length() <> labels.length():
+        raise(ERR.message-exception('plot: xs and labels should have the same length'))
+      end
+      self.constr()(self.obj.{
+          ps: map2({(val, label): val.{label: label}}, self.obj!ps, labels),
+          point-size: self.obj.point-size.or-else(some(default-scatter-plot-series.point-size))
+        })
+    end,
     image-labels: image-labels-method,
     method point-size(self, point-size :: Number) block:
       when point-size < 0: 
         raise(ERR.message-exception("point-size: Point Size must be non-negative"))
       end
-      self.constr()(self.obj.{point-size: point-size})
+      self.constr()(self.obj.{point-size: some(point-size)})
     end,
     method use-image-sizes(self, use-image-sizes :: Boolean):
       self.constr()(self.obj.{useImageSizes: use-image-sizes})
@@ -1886,32 +1894,12 @@ fun line-plot-from-list(xs :: CL.LoN, ys :: CL.LoN) -> DataSeries block:
   } ^ line-plot-series
 end
 
-fun labeled-line-plot-from-list(labels :: CL.LoS, xs :: CL.LoN, ys :: CL.LoN) -> DataSeries block:
-  when xs.length() <> ys.length():
-    raise(ERR.message-exception('labeled-line-plot: xs and ys should have the same length'))
-  end
-  when xs.length() <> labels.length():
-    raise(ERR.message-exception('labeled-line-plot: xs and labels should have the same length'))
-  end
-  xs.each(check-num)
-  ys.each(check-num)
-  default-line-plot-series.{
-    ps: map4(get-scatter-point, xs, ys, labels, xs.map({(_): none}))
-  } ^ line-plot-series
+fun labeled-line-plot-from-list(labels :: CL.LoS, xs :: CL.LoN, ys :: CL.LoN) -> DataSeries:
+  line-plot-from-list(xs, ys).labels(labels)
 end
 
-fun image-line-plot-from-list(images :: CL.LoI, xs :: CL.LoN, ys :: CL.LoN) -> DataSeries block:
-  when xs.length() <> ys.length():
-    raise(ERR.message-exception('image-line-plot: xs and ys should have the same length'))
-  end
-  when xs.length() <> images.length():
-    raise(ERR.message-exception('image-line-plot: xs and images should have the same length'))
-  end
-  xs.each(check-num)
-  ys.each(check-num)
-  default-line-plot-series.{
-    ps: map4(get-scatter-point, xs, ys, xs.map({(_): ''}), images.map(some))
-  } ^ line-plot-series
+fun image-line-plot-from-list(images :: CL.LoI, xs :: CL.LoN, ys :: CL.LoN) -> DataSeries:
+  line-plot-from-list(xs, ys).image-labels(images)
 end
 
 fun get-scatter-point(x :: Number, y :: Number, label :: String, optimg :: Option<IM.Image>) -> ScatterPoint:
@@ -1928,40 +1916,12 @@ fun scatter-plot-from-list(xs :: CL.LoN, ys :: CL.LoN) -> DataSeries block:
   } ^ scatter-plot-series
 end
 
-fun labeled-scatter-plot-from-list(
-  labels :: CL.LoS,
-  xs :: CL.LoN,
-  ys :: CL.LoN) -> DataSeries block:
-  when xs.length() <> ys.length():
-    raise(ERR.message-exception('labeled-scatter-plot: xs and ys should have the same length'))
-  end
-  when xs.length() <> labels.length():
-    raise(ERR.message-exception('labeled-scatter-plot: xs and labels should have the same length'))
-  end
-  xs.each(check-num)
-  ys.each(check-num)
-  labels.each(check-string)
-  default-scatter-plot-series.{
-    ps: map4(get-scatter-point, xs, ys, labels, xs.map({(_): none}))
-  } ^ scatter-plot-series
+fun labeled-scatter-plot-from-list(labels :: CL.LoS, xs :: CL.LoN, ys :: CL.LoN) -> DataSeries:
+  scatter-plot-from-list(xs, ys).labels(labels)
 end
 
-fun image-scatter-plot-from-list(
-  images :: CL.LoI,
-  xs :: CL.LoN,
-  ys :: CL.LoN) -> DataSeries block:
-  when xs.length() <> ys.length():
-    raise(ERR.message-exception('labeled-scatter-plot: xs and ys should have the same length'))
-  end
-  when xs.length() <> images.length():
-    raise(ERR.message-exception('labeled-scatter-plot: xs and images should have the same length'))
-  end
-  xs.each(check-num)
-  ys.each(check-num)
-  images.each(check-image)
-  default-scatter-plot-series.{
-    ps: map4(get-scatter-point, xs, ys, xs.map({(_): ''}), images.map(some))
-  } ^ scatter-plot-series
+fun image-scatter-plot-from-list(images :: CL.LoI, xs :: CL.LoN, ys :: CL.LoN) -> DataSeries:
+  scatter-plot-from-list(xs, ys).image-labels(images)
 end
 
 fun image-bar-chart-from-list(

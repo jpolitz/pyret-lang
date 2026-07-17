@@ -2663,17 +2663,10 @@
       const defaultColor = config.defaultColor || default_colors[0];
       const lineWidth = toFixnum(get(rawData, 'lineWidth'));
       const color = getColorOrDefault(get(rawData, 'color'), defaultColor);
-      const asScatterPlot = scatterPlot(globalOptions, rawData, config);
+      debugger
+      const pointSize = getNumOrDefault(get(rawData, 'point-size'), 0);
+      const asScatterPlot = scatterPlot(globalOptions, rawData.extendWith({'point-size': pointSize}), config);
       const marks = asScatterPlot.marks;
-      const markShapeMarks = marks.find((m) => m.name === `${prefix}ShapeMarks`);
-      if (markShapeMarks) {
-        markShapeMarks.encode.enter.size.value = Math.max(40, markShapeMarks.encode.enter.size.value);
-        markShapeMarks.encode.hover = markShapeMarks.encode.update;
-        markShapeMarks.encode.update = {
-          fill: { signal: `${prefix}crosshair === datum ? '${color}' : 'transparent'` },
-          stroke: { signal: `${prefix}crosshair === datum ? '${color}' : 'transparent'` },
-        }
-      }
       marks.push({
         type: 'line',
         from: { data: `${prefix}rawTable` },
