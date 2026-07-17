@@ -1551,6 +1551,9 @@ export function canonicalizeNames(typ: T.Type, uri: URI, transformName: NameChan
     case 't-data-refinement':
       return new T.TDataRefinement(c(typ.dataType), typ.variantName, typ.l, typ.inferred);
     case 't-existential': return typ;
+    case 't-schema':
+      return new T.TSchema(typ.columns.map(([n, t2]): T.SchemaColumn => [n, c(t2)]), typ.l, typ.inferred);
+    case 't-str-singleton': return typ;
     default:
       throw raise('Unknown Type in canonicalizeNames: ' + (typ as any).$name);
   }

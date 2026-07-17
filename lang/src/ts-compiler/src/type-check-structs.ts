@@ -443,6 +443,10 @@ export class ConstraintSolution {
           return app(assignedType.setLoc(typ.l).setInferred(typ.inferred || assignedType.inferred));
         }
       }
+      case 't-schema':
+        return new TS.TSchema(typ.columns.map(([name, colTyp]): TS.SchemaColumn => [name, app(colTyp)]), typ.l, typ.inferred);
+      case 't-str-singleton':
+        return typ;
       default:
         throw new InternalCompilerError('Unknown Type in ConstraintSolution.apply');
     }
@@ -551,6 +555,18 @@ export class ConstraintSolution {
             return [typ2, varMapping];
           }
         }
+        case 't-schema': {
+          const newColumns: TS.SchemaColumn[] = [];
+          let colsMapping = varMapping;
+          for (const [name, colTyp] of typ2.columns) {
+            const [newTyp, typMapping] = collectVars(colTyp, colsMapping);
+            newColumns.push([name, newTyp]);
+            colsMapping = typMapping;
+          }
+          return [new TS.TSchema(newColumns, typ2.l, typ2.inferred), colsMapping];
+        }
+        case 't-str-singleton':
+          return [typ2, varMapping];
         default:
           throw new InternalCompilerError('Unknown Type in generalize');
       }
@@ -795,6 +811,21 @@ export function addSubstitution(newType: Type, typeVar: Type, system: Constraint
   };
 }
 
+// If typ is an application of a type *alias* (e.g. Reducer<Number, Number,
+// Number> where `type Reducer<A, I, O> = {...}`), unfold it one step;
+// otherwise return typ unchanged. Annotation processing (toType) unfolds
+// alias applications eagerly, but types deserialized from module provides
+// arrive folded, so mismatch-bound constraints get one unfolding chance.
+export function unfoldAliasApp(typ: Type, context: Context): Type {
+  if (typ.$name === 't-app' && typ.onto.$name === 't-name') {
+    const onto = resolveAlias(typ.onto, context);
+    if (onto.$name === 't-forall') {
+      return resolveAlias(new TS.TApp(onto, typ.args, typ.l, typ.inferred), context);
+    }
+  }
+  return typ;
+}
+
 export function solveHelperConstraints(system: AnyConstraintSystem, solution: ConstraintSolution, context: Context): AnyFoldResult<[AnyConstraintSystem, ConstraintSolution]> {
   const addSubstitutionAndContinue = (newType: Type, typeVar: Type, system2: ConstraintSystem, solution2: ConstraintSolution, context2: Context): AnyFoldResult<[AnyConstraintSystem, ConstraintSolution]> => {
     const newSolutionAndSystem = addSubstitution(newType, typeVar, system2, solution2);
@@ -911,7 +942,20 @@ export function solveHelperConstraints(system: AnyConstraintSystem, solution: Co
                   }, shadowSystem.addConstraint(subtype.onto, supertype.onto), subtype.args, supertype.args);
                   return solveHelperConstraints(system2, solution, context);
                 }
+              } else if (supertype.$name === 't-name'
+                  && ((TS.isTableApp(subtype) && TS.isTableName(supertype))
+                      || (TS.isRowApp(subtype) && TS.isRowName(supertype)))) {
+                // Forgetting a table/row schema: Table<S> <: Table, Row<S> <: Row.
+                return solveHelperConstraints(shadowSystem, solution, context);
+              } else if (supertype.$name === 't-name' && TS.isColApp(subtype)
+                  && supertype.equals(TS.tString(supertype.l))) {
+                // Column names are strings: Col<S, T> <: String.
+                return solveHelperConstraints(shadowSystem, solution, context);
               } else {
+                const unfolded = unfoldAliasApp(subtype, context);
+                if (unfolded !== subtype) {
+                  return solveHelperConstraints(shadowSystem.addConstraint(unfolded, supertype), solution, context);
+                }
                 return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
               }
             }
@@ -946,6 +990,10 @@ export function solveHelperConstraints(system: AnyConstraintSystem, solution: Co
                   return solveHelperConstraints(system2, solution, context2);
                 });
               } else {
+                const unfolded = unfoldAliasApp(supertype, context);
+                if (unfolded !== supertype) {
+                  return solveHelperConstraints(shadowSystem.addConstraint(subtype, unfolded), solution, context);
+                }
                 return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
               }
             }
@@ -995,6 +1043,75 @@ export function solveHelperConstraints(system: AnyConstraintSystem, solution: Co
             case 't-existential': {
               const system2 = shadowSystem.addConstraint(supertype, subtype);
               return solveHelperConstraints(system2, solution, context);
+            }
+            case 't-schema': {
+              if (supertype.$name === 't-schema') {
+                const aCols = subtype.columns;
+                const bCols = supertype.columns;
+                if (aCols.length !== bCols.length
+                    || !aCols.every(([n], i) => n === bCols[i][0])) {
+                  return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+                }
+                // Schema subtyping is equality (mutual constraints let
+                // existential column sorts get solved from either side).
+                let system2: AnyConstraintSystem = shadowSystem;
+                for (let i = 0; i < aCols.length; i++) {
+                  system2 = system2.addConstraint(aCols[i][1], bCols[i][1]);
+                  system2 = system2.addConstraint(bCols[i][1], aCols[i][1]);
+                }
+                return solveHelperConstraints(system2, solution, context);
+              } else {
+                return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+              }
+            }
+            case 't-str-singleton': {
+              if (supertype.$name === 't-str-singleton') {
+                if (subtype.s === supertype.s) {
+                  return solveHelperConstraints(shadowSystem, solution, context);
+                }
+                return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+              }
+              if (supertype.$name === 't-name' && supertype.equals(TS.tString(supertype.l))) {
+                return solveHelperConstraints(shadowSystem, solution, context);
+              }
+              if (TS.isColApp(supertype)) {
+                // "name" <: Col<S, T>: verify membership once S is known.
+                const schema = solution.apply(supertype.args[0]);
+                const bound = supertype.args[1];
+                switch (schema.$name) {
+                  case 't-schema': {
+                    const sort = TS.schemaLookup(schema.columns, subtype.s);
+                    if (sort === undefined) {
+                      return new FoldErrors([new C.CantTypecheck(
+                        'the string `"' + subtype.s + '"` is used as a column name, but it is not a column of the '
+                        + 'table schema ' + schema.toString() + '. The columns are: '
+                        + schema.columns.map(([n]) => '`' + n + '`').join(', '), subtype.l)]);
+                    }
+                    return solveHelperConstraints(shadowSystem.addConstraint(sort.setLoc(subtype.l), bound), solution, context);
+                  }
+                  case 't-existential':
+                    // The schema is not known yet; retry this constraint at
+                    // the next level, where the existential may be solved
+                    // (mirrors the deferral for out-of-level existentials).
+                    return solveHelperConstraints(
+                      new ConstraintSystem(shadowSystem.variables,
+                        shadowSystem.constraints,
+                        shadowSystem.refinementConstraints,
+                        shadowSystem.fieldConstraints,
+                        shadowSystem.exampleTypes,
+                        shadowSystem.nextSystem.addConstraint(subtype, new TS.TApp(supertype.onto, [schema, bound], supertype.l, supertype.inferred))),
+                      solution,
+                      context);
+                  case 't-var':
+                    return new FoldErrors([new C.CantTypecheck(
+                      'the string `"' + subtype.s + '"` is used as a column name of a table whose schema is abstract '
+                      + '(a type variable) here, so its membership cannot be verified. Take the column name as a '
+                      + 'Col<...>-typed parameter instead.', subtype.l)]);
+                  default:
+                    return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+                }
+              }
+              return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
             }
             default:
               throw new InternalCompilerError('Unknown Type in solve-helper-constraints');
@@ -1132,6 +1249,26 @@ export function solveHelperFields(system: AnyConstraintSystem, solution: Constra
           system3 = new ConstraintSystem(typeSetUnion(system2.variables, contextConstraints.variables), system2.constraints, system2.refinementConstraints, system2.fieldConstraints, system2.exampleTypes, system2.nextSystem);
         }
 
+        // Schema-typed tables/rows: their (method) field types are not in a
+        // DataType; compute them from the schema.
+        if (TS.isTableApp(typ) || TS.isRowApp(typ)) {
+          const tblOrRow = typ as TS.TApp;
+          const isTableTyp = TS.isTableApp(typ);
+          let system4: AnyConstraintSystem = system3;
+          for (const fieldName of fieldMappings.keys()) {
+            const fieldTyp = isTableTyp
+              ? TD.tableAppFieldType(tblOrRow, fieldName, tblOrRow.l)
+              : TD.rowAppFieldType(tblOrRow, fieldName, tblOrRow.l);
+            if (fieldTyp === undefined) {
+              return new FoldErrors<[AnyConstraintSystem, ConstraintSolution]>([
+                new C.ObjectMissingField(fieldName, tblOrRow.toString(), tblOrRow.l, mapGetValue(fieldMappings, fieldName)[0].l)]);
+            }
+            for (const fieldType of mapGetValue(fieldMappings, fieldName)) {
+              system4 = system4.addConstraint(fieldTyp, fieldType);
+            }
+          }
+          return system4.solveLevelHelper(solution, context2);
+        }
         switch (typ.$name) {
           case 't-record': {
             const fields = typ.fields;
@@ -1275,6 +1412,10 @@ export function removeRefinementsAndForalls(typ: Type): Type {
       return typ;
     case 't-existential':
       return typ;
+    case 't-schema':
+      return new TS.TSchema(typ.columns.map(([name, colTyp]): TS.SchemaColumn => [name, rraf(colTyp)]), typ.l, typ.inferred);
+    case 't-str-singleton':
+      return typ;
     default:
       throw new InternalCompilerError('Unknown Type in remove-refinements-and-foralls');
   }
@@ -1366,6 +1507,18 @@ export function generalizeType(currentType: Type, nextType: Type): Type {
     }
     case 't-existential':
       return currentType;
+    case 't-schema': {
+      if (nextType.$name === 't-schema'
+          && currentType.columns.length === nextType.columns.length
+          && currentType.columns.every(([n], i) => n === nextType.columns[i][0])) {
+        const newColumns = currentType.columns.map(([n, t], i): TS.SchemaColumn =>
+          [n, generalizeType(t, nextType.columns[i][1])]);
+        return new TS.TSchema(newColumns, currentType.l, currentType.inferred);
+      }
+      return newVar();
+    }
+    case 't-str-singleton':
+      return (nextType.$name === 't-str-singleton' && currentType.s === nextType.s) ? currentType : newVar();
     default:
       throw new InternalCompilerError('Unknown Type in generalize-type');
   }
@@ -1460,6 +1613,10 @@ export function flattenTreeWithPaths(typ: Type): [Type, Path][] {
         return [[typ2, currentPath]];
       case 't-existential':
         return [[typ2, currentPath]];
+      case 't-schema':
+        return [[typ2, currentPath]];
+      case 't-str-singleton':
+        return [[typ2, currentPath]];
       default:
         throw new InternalCompilerError('Unknown Type in flatten-tree-with-paths');
     }
@@ -1521,6 +1678,10 @@ export function maintainCommonStructure(struct: Structure, typ: Type): Type {
           }
         }
       }
+      case 't-schema':
+        return typ2;
+      case 't-str-singleton':
+        return typ2;
       default:
         throw new InternalCompilerError('Unknown Type in maintain-common-structure');
     }

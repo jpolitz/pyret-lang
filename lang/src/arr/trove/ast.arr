@@ -1242,10 +1242,29 @@ data Expr:
         PP.flow-map(PP.hardline, _.tosource(), self.extensions),
         str-end)
     end
-    # s-table-update not yet implemented
   | s-table-update(l :: Loc,
       column-binds :: ColumnBinds,
-      updates :: List<Member>)
+      updates :: List<Member>) with:
+    method label(self): "s-table-update" end,
+    method tosource(self):
+      maybe-using =
+        cases(List) self.column-binds.binds:
+          | empty => empty
+          | link(_, _) => link(str-using,
+              [list: PP.flow-map(PP.commabreak, _.tosource(),
+                  self.column-binds.binds) + str-colon])
+        end
+      tbl-src =
+        cases(List) maybe-using:
+          | empty => self.column-binds.table.tosource() + str-colon
+          | link(_,_) => self.column-binds.table.tosource()
+        end
+      header = PP.flow([list: str-transform, tbl-src] + maybe-using)
+      PP.surround(INDENT, 1,
+        header,
+        PP.flow-map(PP.commabreak, _.tosource(), self.updates),
+        str-end)
+    end
   | s-table-select(l :: Loc,
       columns :: List<Name>,
       table   :: Expr) with:
@@ -1529,7 +1548,7 @@ data TableExtendField:
         if is-a-blank(self.ann):
           PP.mt-doc
         else:
-          str-coloncolon + self.ann.tosource()
+          PP.str(" ") + str-coloncolon + PP.str(" ") + self.ann.tosource()
         end
       PP.nest(INDENT, name-part + maybe-ann + str-colonspace + self.value.tosource())
     end
@@ -1541,7 +1560,7 @@ data TableExtendField:
         if is-a-blank(self.ann):
           PP.mt-doc
         else:
-          str-coloncolon + self.ann.tosource()
+          PP.str(" ") + str-coloncolon + PP.str(" ") + self.ann.tosource()
         end
       col-part = self.col.tosource()
       PP.nest(INDENT, name-part + maybe-ann + str-colonspace + self.reducer.tosource() + PP.str(" ") + str-of + col-part)

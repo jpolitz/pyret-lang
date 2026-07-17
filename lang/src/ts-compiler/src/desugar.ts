@@ -129,7 +129,13 @@ export function desugarAnn(a: A.Ann): A.Ann {
   }
 }
 
-export function desugar(program: A.Program): { ast: A.Program; newBinds: Map<string, C.ValueBind> } {
+// When true (set while compiling with the type checker on), the s-table*
+// syntax forms are preserved (children still desugared) so the type checker
+// can see them; they are then lowered by desugar-post-tc. When false, tables
+// are lowered here exactly as before.
+let preserveTables = false;
+
+export function desugar(program: A.Program, options?: { preserveTables?: boolean }): { ast: A.Program; newBinds: Map<string, C.ValueBind> } {
   /*
     Desugar non-scope and non-check based constructs.
     Preconditions on program:
@@ -146,6 +152,7 @@ export function desugar(program: A.Program): { ast: A.Program; newBinds: Map<str
         appear in binding positions as in s-let-bind, s-letrec-bind)
   */
   generatedBinds = new Map();
+  preserveTables = options !== undefined && options.preserveTables === true;
   return {
     ast: new A.SProgram(program.l, program._use, program._provide, program.providedTypes,
       program.provides, program.imports, desugarExpr(program.block)),
@@ -586,6 +593,11 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       return new A.SPrimApp(l, 'makeReactor', [desugarExpr(init), new A.SObj(l, optionFields)], flatPrimApp);
     }
     case 's-table': {
+      if (preserveTables) {
+        return new A.STable(expr.l,
+          expr.headers.map((h) => new A.SFieldName(h.l, h.name, desugarAnn(h.ann))),
+          expr.rows.map((row) => new A.STableRow(row.l, row.elems.map(desugarExpr))));
+      }
       const l = dummyLoc; // shadow l = A.dummy-loc
       const columnNames = expr.headers.map((header) => new A.SStr(header.l, header.name));
       const anns = expr.headers.map((header) => desugarAnn(header.ann));
@@ -608,6 +620,13 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       return new A.SCheckTest(expr.l, expr.op, desugarOpt(desugarExpr, expr.refinement),
         desugarExpr(expr.left), desugarOpt(desugarExpr, expr.right), desugarOpt(desugarExpr, expr.cause));
     case 's-load-table': {
+      if (preserveTables) {
+        return new A.SLoadTable(expr.l,
+          expr.headers.map((h) => new A.SFieldName(h.l, h.name, desugarAnn(h.ann))),
+          expr.spec.map((sp) => sp.$name === 's-sanitize'
+            ? new A.SSanitize(sp.l, sp.name, desugarExpr(sp.sanitizer))
+            : new A.STableSrc(sp.l, desugarExpr(sp.src))));
+      }
       const l = expr.l;
       const dummy = dummyLoc;
       let src: A.Expr | undefined = undefined;
@@ -646,6 +665,13 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       return new A.SApp(l, bid(l, 'open-table'), [loaded]);
     }
     case 's-table-extend': {
+      if (preserveTables) {
+        return new A.STableExtend(expr.l,
+          new A.SColumnBinds(expr.columnBinds.l, expr.columnBinds.binds.map(desugarBind), desugarExpr(expr.columnBinds.table)),
+          expr.extensions.map((ext) => ext.$name === 's-table-extend-field'
+            ? new A.STableExtendField(ext.l, ext.name, desugarExpr(ext.value), desugarAnn(ext.ann))
+            : new A.STableExtendReducer(ext.l, ext.name, desugarExpr(ext.reducer), ext.col, desugarAnn(ext.ann))));
+      }
       // NOTE(philip): I am fairly certain that this will need to be moved
       //               to post-type-check desugaring, since the variables used
       //               by reducers is not well-typed
@@ -786,6 +812,11 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       return new A.SLetExpr(dummyLoc, binds, body, true);
     }
     case 's-table-update': {
+      if (preserveTables) {
+        return new A.STableUpdate(expr.l,
+          new A.SColumnBinds(expr.columnBinds.l, expr.columnBinds.binds.map(desugarBind), desugarExpr(expr.columnBinds.table)),
+          expr.updates.map(desugarMember));
+      }
       const l = expr.l;
       const columnBinds = expr.columnBinds;
       const row = mkId(dummyLoc, 'row');
@@ -845,6 +876,9 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       return new A.SLetExpr(dummyLoc, binds, body, true);
     }
     case 's-table-select': {
+      if (preserveTables) {
+        return new A.STableSelect(expr.l, expr.columns, desugarExpr(expr.table));
+      }
       const l = expr.l;
       const row = mkId(dummyLoc, 'row');
       const tbl = mkId(l, 'table');
@@ -876,6 +910,9 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       return new A.SLetExpr(dummyLoc, binds, body, true);
     }
     case 's-table-extract': {
+      if (preserveTables) {
+        return new A.STableExtract(expr.l, expr.column, desugarExpr(expr.table));
+      }
       const l = expr.l;
       const column = expr.column;
       const table = expr.table;
@@ -895,6 +932,9 @@ export function desugarExpr(expr: A.Expr): A.Expr {
             new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')])], flatPrimApp), true);
     }
     case 's-table-order': {
+      if (preserveTables) {
+        return new A.STableOrder(expr.l, desugarExpr(expr.table), expr.ordering);
+      }
       const l = expr.l;
       const orderingRawArr = expr.ordering.map((o) =>
         new A.SArray(o.l, [new A.SBool(o.l, A.isASCENDING(o.direction)), new A.SStr(o.l, (o.column as A.SName).s)]));
@@ -903,6 +943,11 @@ export function desugarExpr(expr: A.Expr): A.Expr {
         [new A.SArray(dummyLoc, orderingRawArr)]);
     }
     case 's-table-filter': {
+      if (preserveTables) {
+        return new A.STableFilter(expr.l,
+          new A.SColumnBinds(expr.columnBinds.l, expr.columnBinds.binds.map(desugarBind), desugarExpr(expr.columnBinds.table)),
+          desugarExpr(expr.predicate));
+      }
       const l = expr.l;
       const columnBinds = expr.columnBinds;
       const predicate = expr.predicate;

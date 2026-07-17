@@ -78,6 +78,28 @@ export function typeMemberOutput(fieldName: string, typ: Type): string {
   return fieldName + ' :: ' + typ.toString();
 }
 
+// ---------- Table schemas ----------
+
+// Ordered column list for t-schema (table/row schemas). Unlike TypeMembers
+// (a field *set*), order is significant: it is the display/index order of a
+// table's columns.
+export type SchemaColumn = [string, Type];
+
+export function schemaColumnsEqual(as_: SchemaColumn[], bs: SchemaColumn[]): boolean {
+  if (as_.length !== bs.length) { return false; }
+  for (let i = 0; i < as_.length; i++) {
+    if (as_[i][0] !== bs[i][0] || !as_[i][1].equals(bs[i][1])) { return false; }
+  }
+  return true;
+}
+
+export function schemaLookup(columns: SchemaColumn[], name: string): Type | undefined {
+  for (const [colName, colType] of columns) {
+    if (colName === name) { return colType; }
+  }
+  return undefined;
+}
+
 // Pyret `{String; Type}` tuple
 export type VariantField = [string, Type];
 
@@ -350,6 +372,13 @@ export abstract class TypeBase {
           return self;
         }
       }
+      case 't-schema': {
+        const newColumns = self.columns.map(([name, typ]): SchemaColumn =>
+          [name, typ.substitute(newType, typeVar)]);
+        return new TSchema(newColumns, self.l, self.inferred);
+      }
+      case 't-str-singleton':
+        return self;
     }
   }
 
@@ -400,6 +429,15 @@ export abstract class TypeBase {
         return new Map();
       case 't-existential':
         return new Map([[self.key(), self as Type]]);
+      case 't-schema': {
+        let free: TypeSet = new Map();
+        for (const [, colType] of self.columns) {
+          free = typeSetUnion(free, colType.freeVariables());
+        }
+        return free;
+      }
+      case 't-str-singleton':
+        return new Map();
     }
   }
 
@@ -441,6 +479,10 @@ export abstract class TypeBase {
         }
         return true;
       }
+      case 't-schema':
+        return self.columns.every(([, colType]) => colType.hasVariableFree(varType));
+      case 't-str-singleton':
+        return true;
     }
   }
 
@@ -491,6 +533,11 @@ export abstract class TypeBase {
         return self.id.key();
       case 't-existential':
         return self.id.key();
+      case 't-schema':
+        // Unlike t-record, column order IS part of a schema's identity.
+        return '#schema{' + self.columns.map(([name, typ]) => name + ' :: ' + typ.key()).join(', ') + '}';
+      case 't-str-singleton':
+        return JSON.stringify(self.s);
     }
   }
 
@@ -521,6 +568,10 @@ export abstract class TypeBase {
         return new TVar(self.id, self.l, inferred);
       case 't-existential':
         return new TExistential(self.id, self.l, inferred);
+      case 't-schema':
+        return new TSchema(self.columns, self.l, inferred);
+      case 't-str-singleton':
+        return new TStrSingleton(self.s, self.l, inferred);
     }
   }
 
@@ -552,6 +603,10 @@ export abstract class TypeBase {
         return new TVar(self.id, loc, self.inferred);
       case 't-existential':
         return new TExistential(self.id, loc, self.inferred);
+      case 't-schema':
+        return new TSchema(self.columns.map(([name, typ]): SchemaColumn => [name, sl(typ)]), loc, self.inferred);
+      case 't-str-singleton':
+        return new TStrSingleton(self.s, loc, self.inferred);
     }
   }
 
@@ -636,6 +691,14 @@ export abstract class TypeBase {
         }
         return false;
       }
+      case 't-schema': {
+        if (other.$name === 't-schema') {
+          return schemaColumnsEqual(self.columns, other.columns);
+        }
+        return false;
+      }
+      case 't-str-singleton':
+        return other.$name === 't-str-singleton' && self.s === other.s;
     }
   }
 
@@ -705,6 +768,12 @@ export abstract class TypeBase {
         }
         case 't-existential':
           return '?-' + mapGetValue(freeVarsMapping, typ.key());
+        case 't-schema':
+          return '{'
+            + typ.columns.map(([name, colTyp]) => name + ' :: ' + h(colTyp)).join(', ')
+            + '}';
+        case 't-str-singleton':
+          return JSON.stringify(typ.s);
       }
     };
     const self = this as unknown as Type;
@@ -828,6 +897,33 @@ export class TExistential extends TypeBase {
   ) { super(); }
 }
 
+// A table/row schema: an *ordered* sequence of column-name/sort pairs.
+// Used as the argument of the Table/Row/Col type constructors, e.g.
+// Table<{name :: String, age :: Number}>. Order is significant (it is the
+// column display/index order), so this is deliberately not a t-record.
+export class TSchema extends TypeBase {
+  get $name(): 't-schema' { return 't-schema'; }
+  constructor(
+    public columns: SchemaColumn[],
+    public l: Loc,
+    public inferred: boolean,
+  ) { super(); }
+}
+
+// A singleton string type: the type of a specific string literal. INTERNAL
+// to the type checker: it is only created when a string literal is checked
+// against a column-name type Col<S, T>, so that the membership check can be
+// deferred until S's existential is solved. It never appears in annotations
+// or synthesized types.
+export class TStrSingleton extends TypeBase {
+  get $name(): 't-str-singleton' { return 't-str-singleton'; }
+  constructor(
+    public s: string,
+    public l: Loc,
+    public inferred: boolean,
+  ) { super(); }
+}
+
 export type Type =
   | TName
   | TArrow
@@ -840,7 +936,9 @@ export type Type =
   | TRef
   | TDataRefinement
   | TVar
-  | TExistential;
+  | TExistential
+  | TSchema
+  | TStrSingleton;
 
 export function isTName(x: any): x is TName { return x instanceof TName; }
 export function isTArrow(x: any): x is TArrow { return x instanceof TArrow; }
@@ -854,6 +952,8 @@ export function isTRef(x: any): x is TRef { return x instanceof TRef; }
 export function isTDataRefinement(x: any): x is TDataRefinement { return x instanceof TDataRefinement; }
 export function isTVar(x: any): x is TVar { return x instanceof TVar; }
 export function isTExistential(x: any): x is TExistential { return x instanceof TExistential; }
+export function isTSchema(x: any): x is TSchema { return x instanceof TSchema; }
+export function isTStrSingleton(x: any): x is TStrSingleton { return x instanceof TStrSingleton; }
 
 // ---------- Helper constructors and constants ----------
 
@@ -879,3 +979,62 @@ export const tArray = (v: Type, l: Loc): Type => new TApp(tArrayName.setLoc(l), 
 export const tOption = (v: Type, l: Loc): Type =>
   new TApp(new TName(new ModuleUri('builtin://option'), new A.STypeGlobal('Option'), l, false), [v], l, false);
 export const tTable = (l: Loc): Type => new TName(builtinUri, new A.STypeGlobal('Table'), l, false);
+export const tRow = (l: Loc): Type => new TName(builtinUri, new A.STypeGlobal('Row'), l, false);
+export const tColName = (l: Loc): Type => new TName(builtinUri, new A.STypeGlobal('Col'), l, false);
+
+// ---------- Table/Row/Col type-application helpers ----------
+//
+// Schema-carrying table types are represented as ordinary t-app forms over
+// the builtin Table/Row/Col names, with a t-schema (or type variable /
+// existential) argument:
+//   Table<{a :: Number}>  =  t-app(Table, [t-schema [a :: Number]])
+//   Row<S>                =  t-app(Row, [t-var S])
+//   Col<S, T>             =  t-app(Col, [S, T])   (Col<S> = Col<S, Any>)
+// This lets the existing t-app machinery (unification, substitution,
+// generalization) provide schema polymorphism with no new plumbing.
+
+export const tTableApp = (schema: Type, l: Loc): TApp => new TApp(tTable(l), [schema], l, false);
+export const tRowApp = (schema: Type, l: Loc): TApp => new TApp(tRow(l), [schema], l, false);
+export const tColApp = (schema: Type, bound: Type, l: Loc): TApp => new TApp(tColName(l), [schema, bound], l, false);
+
+function isBuiltinTName(t: Type, name: string): boolean {
+  return t.$name === 't-name'
+    && t.moduleName.$name === 'module-uri' && t.moduleName.uri === 'builtin://global'
+    && t.id.$name === 's-type-global' && t.id.toname() === name;
+}
+
+export function isTableName(t: Type): boolean { return isBuiltinTName(t, 'Table'); }
+export function isRowName(t: Type): boolean { return isBuiltinTName(t, 'Row'); }
+export function isColTypeName(t: Type): boolean { return isBuiltinTName(t, 'Col'); }
+
+// t-app(Table, [S]) — S may be a t-schema, t-var, or t-existential
+export function isTableApp(t: Type): t is TApp {
+  return t.$name === 't-app' && t.args.length === 1 && isTableName(t.onto);
+}
+export function isRowApp(t: Type): t is TApp {
+  return t.$name === 't-app' && t.args.length === 1 && isRowName(t.onto);
+}
+export function isColApp(t: Type): t is TApp {
+  return t.$name === 't-app' && t.args.length === 2 && isColTypeName(t.onto);
+}
+
+// Table/Row/Col applications whose schema argument arrived as a t-record
+// (e.g. deserialized from a module's provides, where schemas are stored in
+// the record form) are normalized to carry a t-schema. The record's field
+// iteration order is the serialized column order.
+export function normalizeSchemaArgs(app: TApp): TApp {
+  const isTableish = isTableName(app.onto) || isRowName(app.onto) || isColTypeName(app.onto);
+  if (!isTableish) { return app; }
+  const newArgs = app.args.map((arg, i) => {
+    const schemaPosition = i === 0; // Col's second argument is a sort, not a schema
+    if (schemaPosition && arg.$name === 't-record') {
+      const columns: SchemaColumn[] = [];
+      for (const key of arg.fields.keys()) {
+        columns.push([key, arg.fields.get(key)!]);
+      }
+      return new TSchema(columns, arg.l, arg.inferred);
+    }
+    return arg;
+  });
+  return new TApp(app.onto, newArgs, app.l, app.inferred);
+}

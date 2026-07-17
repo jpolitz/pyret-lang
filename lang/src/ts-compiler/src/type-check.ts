@@ -19,6 +19,7 @@ import * as AU from './ast-util';
 import * as TS from './type-structs';
 import * as TCS from './type-check-structs';
 import * as C from './compile-structs';
+import * as TBL from './type-check-tables';
 import {
   InternalCompilerError,
   map2,
@@ -605,8 +606,18 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
             return checkSynthesis(e, expectType, topLevel, context);
           case 's-bool':
             return checkSynthesis(e, expectType, topLevel, context);
-          case 's-str':
+          case 's-str': {
+            const resolvedExpect = TCS.resolveAlias(expectType, context);
+            if (TS.isColApp(resolvedExpect)) {
+              // A string literal used as a column name: check membership via
+              // an (internal) singleton type so the schema existential can be
+              // solved before the membership test runs.
+              const singleton = new TS.TStrSingleton(e.s, e.l, false);
+              return new TCS.TypingResult(e, resolvedExpect.setLoc(e.l),
+                context.addConstraint(singleton, resolvedExpect));
+            }
             return checkSynthesis(e, expectType, topLevel, context);
+          }
           case 's-dot':
             return checkSynthesis(e, expectType, topLevel, context);
           case 's-get-bang':
@@ -621,6 +632,15 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
             return raise('s-for should have already been desugared');
           case 's-check':
             return new TCS.TypingResult(e, expectType, context);
+          case 's-table':
+          case 's-load-table':
+          case 's-table-extend':
+          case 's-table-update':
+          case 's-table-select':
+          case 's-table-order':
+          case 's-table-extract':
+          case 's-table-filter':
+            return checkSynthesis(e, expectType, topLevel, context);
           default:
             throw new InternalCompilerError('No cases matched in checking for ' + e.$name);
         }
@@ -852,12 +872,24 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
         return raise('synthesis for s-construct not implemented');
       case 's-app': {
         const { l, _fun, args } = e;
+        // Table methods whose result schema depends on column-name argument
+        // values (add-column, drop, ...) get precise result types when the
+        // receiver has a concrete schema and the names are string literals.
+        if (_fun.$name === 's-dot' && TBL.isNameDependentTableMethod(_fun.field)) {
+          const attempt = TBL.tryTableMethodApp(l, _fun, args, context);
+          if (attempt !== null) { return attempt; }
+        }
         return synthesisAppFun(l, _fun, args, context)
           .typingBind((funType, ctx) =>
             synthesisSpine(funType, (exprs) => new A.SApp(l, _fun, exprs), args, l, ctx));
       }
       case 's-prim-app': {
         const { l, _fun, args, appInfo } = e;
+        // r["col"] on rows: getBracket has no type binding (it would be an
+        // unbound-id error), so bracket access is typed here for Row values.
+        if (_fun === 'getBracket' && args.length === 3) {
+          return TBL.synthesisGetBracket(e, context);
+        }
         return lookupId(l, _fun, e, context).typingBind((arrowType, ctx) =>
           synthesisSpine(arrowType, (exprs) => new A.SPrimApp(l, _fun, exprs, appInfo), args, l, ctx)
             .mapType((t) => t.setLoc(l)));
@@ -963,6 +995,15 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
         const ctx = context.addVariable(resultType);
         return new TCS.TypingResult(e, resultType, ctx);
       }
+      case 's-table':
+      case 's-load-table':
+      case 's-table-extend':
+      case 's-table-update':
+      case 's-table-select':
+      case 's-table-order':
+      case 's-table-extract':
+      case 's-table-filter':
+        return TBL.synthesisTableExpr(e, context);
       default:
         throw new InternalCompilerError('No cases matched in synthesis for ' + e.$name);
     }
@@ -1638,6 +1679,17 @@ export function trackBranches(dataType: DataType): { remove: (b: TypeVariant) =>
 }
 
 export function synthesisField(accessLoc: Loc, obj: Expr, objType: Type, fieldName: string, recreate: (l: Loc, obj: Expr, field: string) => Expr, context: Context): AnyTypingResult {
+  // Schema-typed tables and rows: field types come from the schema.
+  const resolvedObjType = TCS.resolveAlias(objType, context);
+  if (TS.isTableApp(resolvedObjType) || TS.isRowApp(resolvedObjType)) {
+    const fieldTyp = TS.isTableApp(resolvedObjType)
+      ? TBL.tableFieldType(resolvedObjType, fieldName, accessLoc)
+      : TBL.rowFieldType(resolvedObjType, fieldName, accessLoc);
+    if (fieldTyp !== undefined) {
+      return new TCS.TypingResult(recreate(accessLoc, obj, fieldName), fieldTyp, context);
+    }
+    return new TCS.TypingError([new C.ObjectMissingField(fieldName, resolvedObjType.toString(), resolvedObjType.l, accessLoc)]);
+  }
   return TCS.instantiateObjectType(objType, context).typingBind((objType2, ctx) => {
     switch (objType2.$name) {
       case 't-record': {
@@ -2529,7 +2581,12 @@ export function toType(inAnn: A.Ann, context: Context): AnyFoldResult<Type | und
         }), fields, context, new Map());
 
       return fieldsResult.bind((members, ctx) =>
-        new TCS.FoldResult<Type | undefined>(new TS.TRecord(members, l, false), ctx));
+        // The fold above processes fields right-to-left (do not change that:
+        // gensym/context order matters); reverse the accumulated map so the
+        // record's field iteration order matches the source order. Record
+        // identity is order-insensitive (key() sorts), but source order is
+        // what table schemas written via record aliases should preserve.
+        new TCS.FoldResult<Type | undefined>(new TS.TRecord(new Map([...members.entries()].reverse()), l, false), ctx));
     }
     case 'a-tuple': {
       const { l, fields: elts } = inAnn;
@@ -2548,11 +2605,21 @@ export function toType(inAnn: A.Ann, context: Context): AnyFoldResult<Type | und
     }
     case 'a-app': {
       const { l, ann, args } = inAnn;
+      // Col<...> must be intercepted syntactically: the global alias for a
+      // bare Col is String, so it cannot be recognized after resolution.
+      if (ann.$name === 'a-name' && ann.id.$name === 's-type-global' && ann.id.toname() === 'Col') {
+        const colResult = TBL.tableAppAnnToType(TS.tColName(l), inAnn, context);
+        if (colResult !== null) { return colResult; }
+      }
       return toType(ann, context).bind((maybeTyp, ctx) => {
         if (maybeTyp === undefined) {
           return new TCS.FoldErrors<Type | undefined>([new C.CantTypecheck('no annotation provided on ' + toRepr(ann), l)]);
         } else {
           const typ = maybeTyp;
+          // Table<Schema> / Row<Schema>: interpret the argument as an
+          // ordered schema rather than a generic type application.
+          const tableResult = TBL.tableAppAnnToType(typ, inAnn, ctx);
+          if (tableResult !== null) { return tableResult; }
           const argsResult = TCS.mapFoldResult((arg: A.Ann, ctx2: Context) => toType(arg, ctx2), args, ctx);
           return argsResult.bind((maybeArgTypes, ctx2) => {
             const foldArgTyps = TCS.mapFoldResult((maybeArgTyp: Type | undefined, ctx3: Context): AnyFoldResult<Type> => {

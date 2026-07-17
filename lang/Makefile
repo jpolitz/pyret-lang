@@ -429,7 +429,7 @@ ts-pyret-test: tests/pyret/main2-ts.jarr $(TS_SUITE_CACHE_WARM)
 	$(NODE) tests/pyret/main2-ts.jarr
 
 .PHONY : ts-test
-ts-test: ts-unit-test ts-parity-test ts-repl-test ts-pyret-test ts-type-check-test ts-regression-test ts-io-test
+ts-test: ts-unit-test ts-parity-test ts-repl-test ts-pyret-test ts-type-check-test ts-tables-test ts-regression-test ts-io-test
 
 .PHONY : ts-clean
 ts-clean:
@@ -468,6 +468,15 @@ tests/type-check/main-ts.jarr: ts-compiler tests/type-check/main.arr $(TYPE_TEST
 .PHONY : ts-type-check-test
 ts-type-check-test: ts-compiler tests/type-check/main-ts.jarr
 	$(NODE) tests/type-check/main-ts.jarr
+
+# Table type checking (implemented in the TS compiler only; see
+# src/ts-compiler/src/type-check-tables.ts). tables-good/ must compile (with
+# type-check: true) and run; tables-bad/ must produce type errors.
+TABLE_TYPE_TEST_FILES := $(wildcard tests/type-check/tables-good/*.arr) $(wildcard tests/type-check/tables-bad/*.arr)
+
+.PHONY : ts-tables-test
+ts-tables-test: ts-compiler
+	bash src/ts-compiler/tests/tables-test.sh
 
 .PHONY : ts-io-test
 ts-io-test: ts-compiler

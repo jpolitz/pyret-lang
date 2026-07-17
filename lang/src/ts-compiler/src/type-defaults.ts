@@ -169,6 +169,100 @@ export function makeDefaultTypes(): Map<string, Type> {
   return defaultTyps;
 }
 
+// ---------------------------------------------------------------------------
+// Field (method) types for schema-typed tables and rows: Table<S> and Row<S>.
+// Used by the type checker (synthesisField) and the constraint solver
+// (solveHelperFields). The schema may be a concrete t-schema or abstract
+// (a type variable / existential); the types below are valid for both, with
+// ground-schema-only entries (like .row) returning undefined when abstract.
+// ---------------------------------------------------------------------------
+
+function tArrowAt(args: Type[], ret: Type, l: A.Loc): Type {
+  return new TS.TArrow(args, ret, l, false);
+}
+
+export function tableAppFieldType(tblType: TS.TApp, fieldName: string, l: A.Loc): Type | undefined {
+  const schema = tblType.args[0];
+  const tbl: Type = new TS.TApp(tblType.onto, [schema], l, false);
+  const row: Type = TS.tRowApp(schema, l);
+  const colOf = (bound: Type): Type => TS.tColApp(schema, bound, l);
+  const num = TS.tNumber(l);
+  const boo = TS.tBoolean(l);
+  const top: Type = new TS.TTop(l, false);
+  const tv = () => TS.newTypeVar(l);
+  switch (fieldName) {
+    case 'length': return tArrowAt([], num, l);
+    case 'empty': return tArrowAt([], tbl, l);
+    case 'row-n': return tArrowAt([num], row, l);
+    case 'all-rows': return tArrowAt([], tListApp(row), l);
+    case 'column-names': return tArrowAt([], tListApp(colOf(top)), l);
+    case 'column':
+    case 'get-column': {
+      const t = tv();
+      return new TS.TForall([t], tArrowAt([colOf(t)], tListApp(t), l), l, false);
+    }
+    case 'filter': return tArrowAt([tArrowAt([row], boo, l)], tbl, l);
+    case 'filter-by': {
+      const t = tv();
+      return new TS.TForall([t], tArrowAt([colOf(t), tArrowAt([t], boo, l)], tbl, l), l, false);
+    }
+    case 'order-by': return tArrowAt([colOf(top), boo], tbl, l);
+    case 'increasing-by':
+    case 'decreasing-by': return tArrowAt([colOf(top)], tbl, l);
+    case 'order-by-columns':
+      return tArrowAt([tListApp(new TS.TTuple([colOf(top), boo], l, false))], tbl, l);
+    case 'stack': return tArrowAt([tbl], tbl, l);
+    case 'add-row': return tArrowAt([row], tbl, l);
+    case 'row': {
+      if (!TS.isTSchema(schema)) { return undefined; }
+      return tArrowAt(schema.columns.map(([, t]) => t), row, l);
+    }
+    case 'reduce': {
+      // .reduce(colname, reducer) — reducer :: Reducer<Acc, InVal, OutVal>
+      const acc = tv();
+      const out = tv();
+      const t = tv();
+      const pair = new TS.TTuple([acc, out], l, false);
+      const reducerType = new TS.TRecord(new Map<string, Type>([
+        ['one', tArrowAt([t], pair, l)],
+        ['reduce', tArrowAt([acc, t], pair, l)],
+      ]), l, false);
+      return new TS.TForall([acc, out, t], tArrowAt([colOf(t), reducerType], out, l), l, false);
+    }
+    case 'column-n': return tArrowAt([num], tListApp(top), l);
+    case 'all-columns': return tArrowAt([], tListApp(tListApp(top)), l);
+    // Methods whose result schema depends on argument *values*; precise
+    // typing happens at application sites when the names are literals.
+    // These fallbacks (e.g. for the method extracted as a value) soundly
+    // forget the result schema.
+    case 'add-column': return tArrowAt([tString, tListApp(top)], tTable, l);
+    case 'build-column': return tArrowAt([tString, tArrowAt([row], top, l)], tTable, l);
+    case 'transform-column': return tArrowAt([colOf(top), tArrowAt([top], top, l)], tTable, l);
+    case 'drop': return tArrowAt([colOf(top)], tTable, l);
+    case 'rename-column': return tArrowAt([colOf(top), tString], tTable, l);
+    case 'select-columns': return tArrowAt([tListApp(colOf(top))], tTable, l);
+    default: return undefined;
+  }
+}
+
+export function rowAppFieldType(rowType: TS.TApp, fieldName: string, l: A.Loc): Type | undefined {
+  const schema = rowType.args[0];
+  const colOf = (bound: Type): Type => TS.tColApp(schema, bound, l);
+  const top: Type = new TS.TTop(l, false);
+  switch (fieldName) {
+    case 'get-value': {
+      const t = TS.newTypeVar(l);
+      return new TS.TForall([t], tArrowAt([colOf(t)], t, l), l, false);
+    }
+    case 'get': {
+      const t = TS.newTypeVar(l);
+      return new TS.TForall([t], tArrowAt([colOf(t)], tOptionApp(t), l), l, false);
+    }
+    case 'get-column-names': return tArrowAt([], tListApp(colOf(top)), l);
+    default: return undefined;
+  }
+}
+
 export function makeDefaultDataExprs(): Map<string, DataType> {
   const defaultDataExprs = new Map<string, DataType>();
   return defaultDataExprs;
@@ -811,8 +905,30 @@ export const moduleConstJsonStructs = tModule('builtin://json-structs',
     ['List', tList],
     ['JSON', tJson]));
 
+// Types for the csv module (NEW, supporting typed load-table sources). The
+// loaders are "Table-Loader" objects consumed by load-table's `source:`.
+const tCsvLoader: Type = tRecord(dict<Type>(['load', tTop]));
+const tCsvOptions: Type = tRecord(dict<Type>(
+  ['header-row', tBoolean],
+  ['infer-content', tBoolean],
+  ['orig-headers', tOptionApp(tArray(tString))]));
+export const moduleConstCsv = tModule('builtin://csv',
+  tRecord(dict<Type>(
+    ['parse-string', tArrow([tString, tTop], tArray(tArray(tString)))],
+    ['csv-table', tArrow([tArray(tArray(tString))], tCsvLoader)],
+    ['csv-table-opt', tArrow([tArray(tArray(tString)), tTop], tCsvLoader)],
+    ['csv-table-options', tArrow([tArray(tArray(tString)), tTop], tCsvLoader)],
+    ['csv-table-str', tArrow([tString, tTop], tCsvLoader)],
+    ['csv-table-file', tArrow([tString, tTop], tCsvLoader)],
+    ['csv-table-url', tArrow([tString, tTop], tCsvLoader)],
+    ['default-options', tCsvOptions])),
+  dict<DataType>(),
+  dict<Type>(
+    ['CSVOptions', tCsvOptions]));
+
 export const defaultModules: Map<string, ModuleType> = new Map<string, ModuleType>();
 defaultModules.set('builtin://equality', moduleConstEquality);
+defaultModules.set('builtin://csv', moduleConstCsv);
 defaultModules.set('builtin://lists', moduleConstLists);
 defaultModules.set('builtin://option', moduleConstOption);
 defaultModules.set('builtin://error', moduleConstError);

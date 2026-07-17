@@ -38,6 +38,31 @@ desugar-visitor = A.default-map-visitor.{
   end,
   method s-check(self, l, name, body, keyword-check):
     A.s-id(l, A.s-global("nothing"))
+  end,
+  # Col<...> / bare Col (the table type checker's column-name type) has no
+  # runtime type to check against; as far as the dynamic semantics go, a
+  # column name is a String.
+  method a-name(self, l, id):
+    cases(A.Name) id:
+      | s-type-global(name) =>
+        if name == "Col": A.a-name(l, A.s-type-global("String"))
+        else: A.a-name(l, id)
+        end
+      | else => A.a-name(l, id)
+    end
+  end,
+  method a-app(self, l, ann, args):
+    cases(A.Ann) ann:
+      | a-name(_, id) =>
+        cases(A.Name) id:
+          | s-type-global(name) =>
+            if name == "Col": A.a-name(l, A.s-type-global("String"))
+            else: A.a-app(l, ann.visit(self), args.map(_.visit(self)))
+            end
+          | else => A.a-app(l, ann.visit(self), args.map(_.visit(self)))
+        end
+      | else => A.a-app(l, ann.visit(self), args.map(_.visit(self)))
+    end
   end
 }
 

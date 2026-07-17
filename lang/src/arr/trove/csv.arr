@@ -88,7 +88,7 @@ fun csv-table(csv :: RawArray<RawArray<String>>) -> { load :: Function }:
   csv-table-opt(csv, default-options)
 end
 
-fun csv-table-str(csv :: String, opts):
+fun csv-table-str(csv :: String, opts :: Any) -> { load :: Function }:
   shadow opts = builtins.record-concat(default-options, opts)
   skip-rows = if opts.header-row: 1 else: 0 end
   rows = csv-lib.parse-string(csv, {})
@@ -105,7 +105,7 @@ fun csv-table-str(csv :: String, opts):
   csv-table-opt(contents, opts.{ orig-headers: headers })
 end
 
-fun csv-table-file(path :: String, opts):
+fun csv-table-file(path :: String, opts :: Any) -> { load :: Function }:
   if FS.exists(path):
     contents = F.file-to-string(path)
     csv-table-str(contents, opts)
@@ -119,7 +119,7 @@ fun csv-table-file(path :: String, opts):
   
 end
 
-fun csv-table-url(url :: String, opts):
+fun csv-table-url(url :: String, opts :: Any) -> { load :: Function }:
   contents = Fetch.fetch(url)
   cases(E.Either) contents:
     | left(str) => csv-table-str(str, opts)

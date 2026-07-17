@@ -37,7 +37,7 @@ running-mean :: Reducer<{Number; Number}, Number, Number> = {
   end
 }
 
-running-fold = lam<Result, Col>(init :: Result, op :: (Result, Col -> Result)) -> Reducer<Result, Col, Result>:
+running-fold = lam<Result, ColV>(init :: Result, op :: (Result, ColV -> Result)) -> Reducer<Result, ColV, Result>:
   {
     one: lam(n):
       first-row = op(init, n)
@@ -50,7 +50,7 @@ running-fold = lam<Result, Col>(init :: Result, op :: (Result, Col -> Result)) -
   }
 end
 
-running-reduce = lam<Col>(op :: (Col, Col -> Col)) -> Reducer<Col, Col, Col>:
+running-reduce = lam<ColV>(op :: (ColV, ColV -> ColV)) -> Reducer<ColV, ColV, ColV>:
   {
     one: lam(n): {n; n} end,
     reduce: lam(m, n):

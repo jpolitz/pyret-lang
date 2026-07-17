@@ -2009,11 +2009,25 @@ export class STableExtend extends ExprBase {
   }
 }
 
-// s-table-update not yet implemented (no label/tosource in ast.arr)
 export class STableUpdate extends ExprBase {
   get $name(): 's-table-update' { return 's-table-update'; }
   constructor(public l: Loc, public columnBinds: ColumnBinds, public updates: Member[]) { super(); }
   visit(visitor: any): any { return visitor.sTableUpdate(this); }
+  label(): string { return 's-table-update'; }
+  tosource(): any {
+    const maybeUsing: any[] =
+      this.columnBinds.binds.length === 0 ? []
+      : [strUsing, PP.flowMap(PP.commabreak, (b: Bind) => b.tosource(),
+          this.columnBinds.binds).append(strColon)];
+    const tblSrc =
+      maybeUsing.length === 0 ? this.columnBinds.table.tosource().append(strColon)
+      : this.columnBinds.table.tosource();
+    const header = PP.flow([strTransform, tblSrc, ...maybeUsing]);
+    return PP.surround(INDENT, 1,
+      header,
+      PP.flowMap(PP.commabreak, (u: Member) => u.tosource(), this.updates),
+      strEnd);
+  }
 }
 
 export class STableSelect extends ExprBase {
@@ -2532,7 +2546,7 @@ export class STableExtendField extends TableExtendFieldBase {
     const namePart = PP.str(this.name);
     const maybeAnn =
       isABlank(this.ann) ? PP.mtDoc
-      : strColoncolon.append(this.ann.tosource());
+      : PP.str(' ').append(strColoncolon).append(PP.str(' ')).append(this.ann.tosource());
     return PP.nest(INDENT, namePart.append(maybeAnn).append(strColonspace).append(this.value.tosource()));
   }
 }
@@ -2547,7 +2561,7 @@ export class STableExtendReducer extends TableExtendFieldBase {
     const namePart = PP.str(this.name);
     const maybeAnn =
       isABlank(this.ann) ? PP.mtDoc
-      : strColoncolon.append(this.ann.tosource());
+      : PP.str(' ').append(strColoncolon).append(PP.str(' ')).append(this.ann.tosource());
     const colPart = this.col.tosource();
     return PP.nest(INDENT, namePart.append(maybeAnn).append(strColonspace).append(this.reducer.tosource()).append(PP.str(' ')).append(strOf).append(colPart));
   }

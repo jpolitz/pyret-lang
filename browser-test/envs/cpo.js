@@ -5,7 +5,7 @@
  * the real /editor page -- the role the old fidelity check played. Needs the CPO
  * server running at BASE_URL.
  */
-const { launchChromium } = require("../shared/browser");
+const { launchChromium, newPageWithRewrite } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:4999";
@@ -15,7 +15,7 @@ const COMPILER = process.env.PYRET_COMPILER || "pyret";
 
 async function setup() {
   const browser = await launchChromium();
-  const page = await browser.newPage();
+  const page = await newPageWithRewrite(browser);
   page.setDefaultTimeout(60000);
   const query = COMPILER === "pyret" ? "" : "?compiler=" + COMPILER;
   await page.goto(BASE_URL + "/editor" + query, { waitUntil: "domcontentloaded", timeout: 120000 });

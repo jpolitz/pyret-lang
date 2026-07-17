@@ -495,7 +495,10 @@ export function compileModule(
             : namedResult.ast.visit(spyStripVisitor);
         let provides = dummyProvides(locator.uri());
         // Once name resolution has happened, any newly-created s-binds must be added to bindings...
-        let desugared: { ast: A.Program; newBinds: Map<string, CS.ValueBind> } | undefined = D.desugar(spied!);
+        // With the type checker on, table syntax forms are preserved through
+        // desugaring (so they can be type checked) and lowered post-TC.
+        let desugared: { ast: A.Program; newBinds: Map<string, CS.ValueBind> } | undefined =
+          D.desugar(spied!, { preserveTables: options.typeCheck });
         spied = undefined;
         mapMergeNow((namedResult.env as CS.ComputedEnv).bindings, desugared.newBinds);
         // ...in order to be checked for bad assignments here

@@ -51,6 +51,7 @@ if (!["pyret", "ts"].includes(compiler)) {
 const nodeArgs = ["--test", "--test-reporter=" + reporter];
 if (grep) nodeArgs.push("--test-name-pattern=" + grep);
 nodeArgs.push(path.join(__dirname, "tests", "suite.test.js"));
+nodeArgs.push(path.join(__dirname, "tests", "typed-tables.test.js"));
 
 const child = spawn(process.execPath, nodeArgs, {
   stdio: "inherit",

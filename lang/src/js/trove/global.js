@@ -464,12 +464,15 @@
       "RawArray": { tag: "name", 
                     origin: { "import-type": "uri", uri: "builtin://global" },
                     name: "RawArray" },
-      "Row": { tag: "name", 
+      "Row": { tag: "name",
                     origin: { "import-type": "uri", uri: "builtin://global" },
                     name: "Row" },
-      "Table": { tag: "name", 
+      "Table": { tag: "name",
                     origin: { "import-type": "uri", uri: "builtin://global" },
-                    name: "Table" }
+                    name: "Table" },
+      // Column-name type for the table type checker (Col<Schema, Sort> when
+      // applied); dynamically a column name is just a String.
+      "Col": "String"
     },
     datatypes: {
       "Number": ["data", "Number", [], [], {
@@ -570,9 +573,39 @@
         "_greaterequal": ["arrow", ["String"], "Boolean"]
       }],
       "Table": ["data", "Table", [], [], {
-        "length": ["arrow", [], "Number"]
+        "length": ["arrow", [], "Number"],
+        // Loose method types for tables whose column schema is unknown to
+        // the type checker (schema-typed tables get precise method types).
+        "empty": ["arrow", [], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "row-n": ["arrow", ["Number"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Row"}],
+        "all-rows": ["arrow", [], "tany"],
+        "column-names": ["arrow", [], "tany"],
+        "column": ["arrow", ["String"], "tany"],
+        "get-column": ["arrow", ["String"], "tany"],
+        "column-n": ["arrow", ["Number"], "tany"],
+        "all-columns": ["arrow", [], "tany"],
+        "filter": ["arrow", ["tany"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "filter-by": ["arrow", ["String", "tany"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "order-by": ["arrow", ["String", "Boolean"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "increasing-by": ["arrow", ["String"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "decreasing-by": ["arrow", ["String"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "order-by-columns": ["arrow", ["tany"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "multi-order": ["arrow", ["tany"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "stack": ["arrow", [{tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "add-row": ["arrow", [{tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Row"}], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "add-column": ["arrow", ["String", "tany"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "build-column": ["arrow", ["String", "tany"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "transform-column": ["arrow", ["String", "tany"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "rename-column": ["arrow", ["String", "String"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "drop": ["arrow", ["String"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "select-columns": ["arrow", ["tany"], {tag: "name", origin: {"import-type": "uri", uri: "builtin://global"}, name: "Table"}],
+        "reduce": ["arrow", ["String", "tany"], "tany"]
       }],
-      "Row": ["data", "Row", [], [], { }],
+      "Row": ["data", "Row", [], [], {
+        "get-value": ["arrow", ["String"], "tany"],
+        "get": ["arrow", ["String"], "tany"],
+        "get-column-names": ["arrow", [], "tany"]
+      }],
       "Function": ["data", "Function", [], [], {}],
       "Boolean": ["data", "Boolean", [], [], {}],
       "Object": ["data", "Object", [], [], {}],

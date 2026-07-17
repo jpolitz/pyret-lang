@@ -2515,6 +2515,15 @@ export function compileProvidedType(typ: T.Type): J.JExprT {
     case 't-data-refinement':
       return jList(true,
         clist<J.JExprT>(jStr('data%'), compileProvidedType(typ.dataType), jStr(typ.variantName)));
+    case 't-schema': {
+      // Serialized in the record form (field order = column order); the
+      // deserializer re-schema-izes record arguments of Table/Row/Col
+      // applications (see typeFromRaw).
+      const fields: J.JFieldT[] = typ.columns.map(([name, colTyp]) =>
+        jField(name, compileProvidedType(colTyp)) as J.JFieldT);
+      return jList(false,
+        clist<J.JExprT>(jStr('record'), jObj(CL.clist(...fields))));
+    }
     default:
       return jTernary(jFalse, jStr(String(typ)), jStr('tany'));
   }

@@ -12,3 +12,6 @@ you can run:
   $ node build/phase1/main-wrapper.js -type-check --run path/to/file.arr
 
 Note that the --run flag is necessary for now, so as to use the new module system.
+
+Table type checking (Table<{...}>, Row, Col; TypeScript compiler only) is
+documented in TYPED-TABLES.md; run its suite with `make ts-tables-test`.

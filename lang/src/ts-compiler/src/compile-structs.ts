@@ -798,7 +798,8 @@ export function typeFromRaw(uri: string, typ: any, tyvarEnv: Map<string, A.Name>
     }
     return new T.TForall(params, typeFromRaw(uri, typ.onto, newEnv), l, false);
   } else if (t === "tyapp") {
-    return new T.TApp(tfr(typ.onto), typ.args.map((a: any) => tfr(a)), l, false);
+    const app = new T.TApp(tfr(typ.onto), typ.args.map((a: any) => tfr(a)), l, false);
+    return T.normalizeSchemaArgs(app);
   } else if (t === "arrow") {
     return new T.TArrow(typ.args.map((a: any) => tfr(a)), tfr(typ.ret), l, false);
   } else {
@@ -1297,8 +1298,12 @@ export const runtimeProvides: Provides = new Provides("builtin://global",
     ["NumNonPositive", tTop],
     ["NumNonNegative", tTop],
     ["String", tStr],
-    ["Table", tTop],
-    ["Row", tTop],
+    // Nominal (matches the compiled global module's provides, which is what
+    // the type checker actually consults); Col is the column-name type of the
+    // table type checker — dynamically it is just a String.
+    ["Table", T.tTable(A.dummyLoc)],
+    ["Row", T.tRow(A.dummyLoc)],
+    ["Col", tStr],
     ["Function", tTop],
     ["Boolean", tTop],
     ["Object", tTop],

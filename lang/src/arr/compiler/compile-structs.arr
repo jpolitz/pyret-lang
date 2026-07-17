@@ -3207,6 +3207,10 @@ runtime-provides = provides("builtin://global",
      "String", t-str,
      "Table", t-top,
      "Row", t-top,
+     # Column-name type for the table type checker (see the TypeScript
+     # compiler's type-check-tables.ts); dynamically a column name is just a
+     # String, and desugar-post-tc rewrites Col annotations to String.
+     "Col", t-str,
      "Function", t-top,
      "Boolean", t-top,
      "Object", t-top,
