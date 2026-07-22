@@ -2663,7 +2663,6 @@
       const defaultColor = config.defaultColor || default_colors[0];
       const lineWidth = toFixnum(get(rawData, 'lineWidth'));
       const color = getColorOrDefault(get(rawData, 'color'), defaultColor);
-      debugger
       const pointSize = getNumOrDefault(get(rawData, 'point-size'), 0);
       const asScatterPlot = scatterPlot(globalOptions, rawData.extendWith({'point-size': pointSize}), config);
       const marks = asScatterPlot.marks;
