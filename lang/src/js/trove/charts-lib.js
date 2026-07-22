@@ -2051,7 +2051,7 @@
         p.value = countForCat;
         rawCounts.set(p.category, countForCat + 1);
       }
-      const counts = [...rawCounts.entries().map((kv) => ({ category: kv[0], count: kv[1] }))];
+      const counts = [...rawCounts.entries()].map((kv) => ({ category: kv[0], count: kv[1] }));
       const data = [
         {
           name: 'rawDotsData',
@@ -2950,7 +2950,7 @@
 
       addCrosshairs(prefix, ['Dots'], signals, marks, pointColor);
 
-      const samplePoints = [...Array(numSamples).keys().map((i) => (xMinValue + (fraction * i)))];
+      const samplePoints = [...Array(numSamples).keys()].map((i) => (xMinValue + (fraction * i)));
 
       return recomputePoints(func, samplePoints, (dataValues) => {
         data[0].values = dataValues;
@@ -2968,7 +2968,7 @@
             const xMinValue = globalOptions.xMinValue;
             const xMaxValue = globalOptions.xMaxValue;
             const fraction = (xMaxValue - xMinValue) / (numSamples - 1);
-            const samplePoints = [...Array(numSamples).keys().map((i) => (xMinValue + (fraction * i)))];
+            const samplePoints = [...Array(numSamples).keys()].map((i) => (xMinValue + (fraction * i)));
             RUNTIME.runThunk(() => {
               // NOTE(Ben): We can use view.data(`${prefix}rawTable`, ...newData...)
               // to replace the existing data points in the _current_ view, so that
