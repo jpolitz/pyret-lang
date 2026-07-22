@@ -245,9 +245,9 @@ parse-test: tests/parse/parse.js build/phaseA/js/pyret-tokenizer.js build/phaseA
 	cd tests/parse/ && $(NODE) parse.js
 
 TEST_FILES := $(wildcard tests/pyret/tests/*.arr)
-TYPE_TEST_FILES := $(wildcard tests/type-check/bad/*.arr) $(wildcard tests/type-check/good/*.arr) $(wildcard tests/type-check/should/*.arr) $(wildcard tests/type-check/should-not/*.arr)
+TYPE_TEST_FILES := $(wildcard tests/type-check/bad/*.arr) $(wildcard tests/type-check/good/*.arr) $(wildcard tests/type-check/should/*.arr) $(wildcard tests/type-check/should-not/*.arr) $(wildcard tests/type-check/tests/*.arr) tests/type-check/tc-helper.arr
 REG_TEST_FILES := $(wildcard tests/pyret/regression/*.arr)
-MAIN_TEST_FILES := tests/pyret/main2.arr tests/type-check/main.arr tests/pyret/regression.arr tests/lib-test/lib-test-main.arr tests/all.arr
+MAIN_TEST_FILES := tests/pyret/main2.arr tests/type-check/main.arr tests/type-check/main2.arr tests/pyret/regression.arr tests/lib-test/lib-test-main.arr tests/all.arr
 
 tests/pyret/all.jarr: phaseA $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) $(MAIN_TEST_FILES)
 	$(TEST_BUILD) \
@@ -257,6 +257,7 @@ tests/pyret/all.jarr: phaseA $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) 
 
 .PHONY : all-pyret-test
 all-pyret-test: tests/pyret/all.jarr parse-test pyret-io-test
+	$(call RMDIR,tests/type-check/tmp-serialized)
 	$(NODE) tests/pyret/all.jarr
 
 tests/pyret/main2.jarr: phaseA tests/pyret/main2.arr  $(TEST_FILES)
@@ -287,12 +288,18 @@ tests/pyret/regression.jarr: $(PYRET_TEST_PREREQ) $(REG_TEST_FILES) tests/pyret/
 		--build-runnable tests/pyret/regression.arr --outfile tests/pyret/regression.jarr
 
 .PHONY : type-check-test
-type-check-test: phaseA tests/type-check/main.jarr
+type-check-test: phaseA tests/type-check/main.jarr tests/type-check/main2.jarr
 	$(NODE) tests/type-check/main.jarr
+	$(call RMDIR,tests/type-check/tmp-serialized)
+	$(NODE) tests/type-check/main2.jarr
 
 tests/type-check/main.jarr: phaseA tests/type-check/main.arr $(TYPE_TEST_FILES)
 	$(TEST_BUILD) \
 		--build-runnable tests/type-check/main.arr --outfile tests/type-check/main.jarr
+
+tests/type-check/main2.jarr: phaseA tests/type-check/main2.arr $(TYPE_TEST_FILES)
+	$(TEST_BUILD) \
+		--build-runnable tests/type-check/main2.arr --outfile tests/type-check/main2.jarr
 
 
 .PHONY : clean

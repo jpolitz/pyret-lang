@@ -12,3 +12,50 @@ you can run:
   $ node build/phase1/main-wrapper.js -type-check --run path/to/file.arr
 
 Note that the --run flag is necessary for now, so as to use the new module system.
+
+Tests
+-----
+
+  $ make type-check-test
+
+runs two suites:
+
+1. tests/type-check/main.arr — the original directory-based runner. Every
+   .arr file in tests/type-check/good/ must compile (with type-check on) and
+   run without errors; every file in tests/type-check/bad/ must produce at
+   least one type error.
+
+2. tests/type-check/main2.arr — check-block suites in
+   tests/type-check/tests/test-tc-*.arr, one file per feature area. These
+   compile inline program strings in-process via tests/type-check/tc-helper.arr,
+   so hundreds of programs check in one run without per-file process startup.
+   Unlike the bad/ directory runner, they assert *which* CompileError variant
+   each bad program produces.
+
+The helper's main entry points:
+
+  msgs(prog)                rendered type errors for a one-module program
+                            (empty list means it type-checks; test failures
+                            print the actual errors)
+  prog is%(tc-err) pred     the program's errors all satisfy pred
+                            (e.g. CS.is-type-mismatch)
+  errs-with / msgs-with / tc-err-with
+                            same, with a list of {name; source} dependency
+                            modules resolved in memory
+
+Serialized module boundary
+--------------------------
+
+Provided types are serialized into a module's compiled -static.js artifact
+and re-inflated (src/js/base/type-util.js, then provides-from-raw-provides in
+compile-structs.arr) when a dependent module compiles against the cache. Bugs
+here don't show up in single-process compiles, where dependencies' provides
+stay in memory.
+
+tests/type-check/tests/test-tc-serialized.arr covers this: the helper's
+compile-serialized-twice writes the modules under
+tests/type-check/tmp-serialized/, compiles the entry module twice against an
+on-disk cache, and returns both error lists. The first compile sees its
+dependencies' types in memory; the second re-reads them from the serialized
+artifacts (the entry module itself is never cached). A difference between the
+two runs is a round-trip bug.
