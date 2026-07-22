@@ -495,7 +495,9 @@ fun tvariant-from-raw(uri, tvariant, env):
   ask:
     | t == "variant" then:
       members = tvariant.vmembers.foldr(lam(tm, members):
-        link({tm.name; type-from-raw(uri, tm.typ, env)}, members)
+        typ = type-from-raw(uri, tm.typ, env)
+        member-typ = if tm.kind == "ref": T.t-ref(typ, l, false) else: typ end
+        link({tm.name; member-typ}, members)
       end, empty)
       with-members = for fold(wmembers from [string-dict:], wm from tvariant.withmembers):
         wmembers.set(wm.name, type-from-raw(uri, wm.value, env))

@@ -2015,7 +2015,7 @@ fun check-fun(fun-loc :: Loc, body :: Expr, params :: List<A.Name>, args :: List
           end, {temp-lam-binds; context})
           lam-arg-types = map(lam(arg): lam-binds.get-value(arg.id.key()) end, args)
           shadow context = foldr2(lam(shadow context, lam-arg-type, expect-arg-type):
-            context.add-constraint(lam-arg-type, expect-arg-type)
+            context.add-constraint(expect-arg-type, lam-arg-type)
           end, context.add-dict-to-bindings(lam-binds), lam-arg-types, expect-args)
           body-result = checking(body, ret-type, false, context)
           body-result.bind(lam(new-body, new-ret-type, shadow context):
