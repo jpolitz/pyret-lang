@@ -25,8 +25,8 @@ const SUITES = {
   "tables": "tables.js",
 };
 
-if (!ENV || !["cpo", "embed", "vscode", "vscode-ovsx"].includes(ENV)) {
-  throw new Error("PYRET_ENV must be one of cpo | embed | vscode | vscode-ovsx (got " + JSON.stringify(ENV) + ")");
+if (!ENV || !["cpo", "embed", "embed-static", "vscode", "vscode-ovsx"].includes(ENV)) {
+  throw new Error("PYRET_ENV must be one of cpo | embed | embed-static | vscode | vscode-ovsx (got " + JSON.stringify(ENV) + ")");
 }
 const chosen =
   !process.env.PYRET_SUITES || process.env.PYRET_SUITES === "all"
