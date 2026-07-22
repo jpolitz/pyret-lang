@@ -1573,7 +1573,7 @@ data DataSeries:
       end
       self.constr()(self.obj.{
           ps: map2({(val, label): val.{label: label}}, self.obj!ps, labels),
-          point-size: self.obj.point-size.or-else(some(default-scatter-plot-series.point-size))
+          point-size: some(self.obj.point-size.or-else(default-scatter-plot-series.point-size))
         })
     end,
     image-labels: image-labels-method,
