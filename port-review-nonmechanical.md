@@ -127,7 +127,7 @@ list, error ordering, and load-bearing trailing spaces match.
 - [~] ✅ ts:929-933 `sReactor` — Pyret's `wf-error` no-loc arity bug becomes a reported error with `undefined` loc (crash → loc-less user error; downstream loc rendering may break). [`290f99b7a`: worse than "may break" — a reactor with both on-key + on-raw-key **crashed both** (Pyret arity error; TS `undefined.format()`). Fixed both by passing the reactor loc; err-reactor-key.arr guards it.]
 - [~] ts:1365-1369 `TopLevelVisitor.sVariantMember`, ts:466-473 `sSpecialImport` — Pyret returns `nothing` into an `and` (runtime error); port returns `false` (clean short-circuit).
 - [!!] ✅ ts:938 — reactor "Valid options" message order = Map insertion order (user-visible; see cross-cutting #1). [`f28667e0a`: a missed canonicalization — sort() the option keys in *both* compilers. The byte-parity test `err-reactor-options.arr` lands in the next commit `289d52db2` (with a well-formed unit test guarding this commit): it can see quote-wrapped vs non-quote-wrapped strings in errors in a new way, which surfaces the separate srcloc divergence below, fixed there.]
-- [!] ⏭️ ts:442 `sUse` — `(node.n as A.SName).l` silently `undefined` for non-SName (Pyret: field-not-found). [See TS-impl-choice above.]
+- [!] ✅ ts:442 `sUse` — `(node.n as A.SName).l` silently `undefined` for non-SName (Pyret: field-not-found). [See TS-impl-choice above.] [`4e2c68f2e`: reinforced — `field(node.n, 'l')`; structural checked access restores the field-not-found error at the site, no change on well-formed input (21/21 parity, 211/211 type-check).]
 - [i] ts:312-315 `rejectStandaloneExprs` — empty-list edge no longer errors (unreachable); ts:122-133 `ensureUniqueCases` — two identical arms collapsed, no default-throw (inconsistent with file's own convention); ts:65-67/1414-1418 — push+slice replaces prepend+reverse (verified order-equivalent).
 
 ### resolve-scope.ts
@@ -136,7 +136,7 @@ effect hoisting preserves atom-serial order (ts:884, 945, 1689…); Name/Loc equ
 `.equals`/`.key()`; many original quirks bit-for-bit (typo "a a provided module", double
 ann visit ts:1996, `sLam` shadows=false ts:1810…).
 - [~] ts:423-467 — the `desugarScopeBlock` trampoline (cross-cutting #5): exported `addLetBind(s)`/`addLetrecBind(s)`/`addTypeLetBind`/`addContracts` (ts:307-421) can now return the `undefined` sentinel and stash into module-global `dsbPending`; non-reentrant; API change vs directly-callable originals.
-- [!] ⏭️ ts:288-294 `bindWrap` — `bg as LetBinds|LetrecBinds` on a `TypeLetBinds` → raw TypeError (Pyret: field-not-found). ts:2047 `NamesVisitor.aDot` — `(obj as A.SUnderscore).l` silently undefined for atom/global. [See TS-impl-choice above.]
+- [!] ✅ ts:288-294 `bindWrap` — `bg as LetBinds|LetrecBinds` on a `TypeLetBinds` → raw TypeError (Pyret: field-not-found). ts:2047 `NamesVisitor.aDot` — `(obj as A.SUnderscore).l` silently undefined for atom/global. [See TS-impl-choice above.] [`4e2c68f2e`: reinforced — `bindWrap` → `field(bg, 'contracts')` (now a clean field-not-found ICE at the access instead of a downstream "not iterable" TypeError on type-let-binds); `aDot` → `field(obj, 'l')`.]
 - [i] ts:19 `mtd` — exported *mutable* Map where arr:20 had an immutable empty dict (unused; latent aliasing hazard). ts:24-31 `toRepr` (JSON) used at 11 raise sites ↔ arr `torepr`. ts:105 `export let errors` — module-level mutable exported binding. `where:` tests arr:410-500, 1868-1874 dropped. Added "no cases matched" throws at ~20 sites.
 - [~] ts:53-81 `desugarToplevelTypes` — forward accumulation replaces reverse-then-reverse (verified output+gensym-order equivalent, commented).
 
@@ -145,7 +145,7 @@ Verified: **no gensym/make-atom reordering anywhere** (every mk-id site traced,
 including the s-table-extend var/let interleave and NoChecksVisitor's right-to-left
 foldr); rationals exact via jsnums.
 - [!] ⏭️ `desugar.ts:148`, `desugar-post-tc.ts:70-71` — dropped `else => raise("Attempt to desugar non-program …")` guards. [See TS-impl-choice above.]
-- [!] ⏭️ `desugar-check.ts:49-67` `sCheckTest` — `right!` replaces `right.value`: malformed input now builds an AST with `undefined` body instead of raising. [See TS-impl-choice above.]
+- [!] ✅ `desugar-check.ts:49-67` `sCheckTest` — `right!` replaces `right.value`: malformed input now builds an AST with `undefined` body instead of raising. [See TS-impl-choice above.] [`4e2c68f2e`: reinforced — the six `right!` → `nonNull(right)`; a missing `right` now raises at the unwrap (mirrors Pyret `right.value` on `none`) instead of constructing an undefined-body AST.]
 - [i] `desugar.ts:127-128` `desugarAnn` — added `default:` raise with invented message (other no-else cases trust TS exhaustiveness — inconsistent). Error strings via `$name`/`String(l)` instead of `torepr` at desugar.ts:224, 306, 968; desugar-check.ts:137.
 - [~] `desugar.ts:68-77` `checkHasColumn` — Pyret's loc-as-string bug kept bit-for-bit via `as any` ("sic" comment; dead code). `desugar.ts:531` s-ref latent bug preserved, crash shape differs.
 - [i] `desugar.ts:575` s-reactor — `sort()` is UTF-16 code-unit order vs Pyret string `<` (identical for current ASCII keys). `where:` blocks dropped (arr:278-318, 956-1007).
@@ -173,7 +173,7 @@ preserved via reverse-index loops; type-logger shim byte-equivalent.
 - [~] ts:362-374 `_checking` s-module — ~50 lines of dead-but-present Pyret (arity-broken `foldr-fold-result` call) replaced by a documented throw.
 - [~] ts:1636-1647 `trackBranches` — Set-of-variants → array with name-based removal; `remaining-branches` **order** feeds the `non-exhaustive-pattern` error (ts:1537), so variant order in that message can differ. [✔ verified identical — both list declaration order.]
 - [i] `cant-typecheck` messages render anns via JSON-ish `toRepr` instead of Pyret `tostring` at ts:2512, 2521, 2534, 2562, 2592 (+ internal raises ts:197, 206, 299; ts:136 uses `toString` where arr used `to-repr`). [⏭️ unreachable from source — a blank ann in a type is written `_` and errors in well-formed before here.]
-- [!] ⏭️ ts:157, 165, 178, 223, 226 — `(… as C.VVar).t` silent-undefined casts. [See TS-impl-choice above.]
+- [!] ✅ ts:157, 165, 178, 223, 226 — `(… as C.VVar).t` silent-undefined casts. [See TS-impl-choice above.] [`4e2c68f2e`: reinforced — all `(… as C.VVar).t` → `field(x, 't')`. Deliberately *structural*, not nominal `instanceof VVar`: `.t` also lives on VFun/VJustType (Pyret reaches it via a bare `.t`, not a `cases`), so it throws only on VAlias, exactly as Pyret does — a nominal check would have thrown where Pyret succeeds.]
 - [~] ts:2110-2111, 2130-2131 `synthesisUpdate` — **faithfully preserves** the original's accumulator bug (spreads `fields` not `_newFields`, arr:1950/1971); don't fix one side only.
 - [i] ts:2464 — DataType stored via `as unknown as Type`; ts:2633-2635 reifies Pyret's implicit `stmts.last()` error with the exact message; ts:2144 carries the *wrong* TODO(MATT) comment (belongs to synthesis-instantiation, arr:2048; the real check-fun TODO arr:1986 was dropped).
 
@@ -202,7 +202,7 @@ Verified: ConcatList traversal orders element-identical; gensym.ts fully mechani
 flatness dict threading safe; double-Option `.has()` sites correct (ts:361-363, 481,
 703-712); `getDefinedValues` kept for effect parity (ts:685).
 - [~] `flatness.ts:314-416, 151-232` — frame-stack rewrites (order verified); ts:284-285, 530-531 — dead `a-id-safe-letrec` branches deleted (verified dead) while the equally-dead `isAIdSafeLetrec` *tests* are kept with casts (ts:177, 355).
-- [!] ⏭️ `flatness.ts:717` `getFlatProvides` — `(existingVal as any).t` silently undefined (Pyret: field-not-found). [See TS-impl-choice above.]
+- [!] ✅ `flatness.ts:717` `getFlatProvides` — `(existingVal as any).t` silently undefined (Pyret: field-not-found). [See TS-impl-choice above.] [`4e2c68f2e`: reinforced — `field(existingVal, 't')`; the adjacent NOTE claimed the access "mirrors Pyret's v-alias error", but `as any` made it silently yield undefined — it now actually raises on a v-alias as the comment always described.]
 - [i] `concat-lists.ts:28-33` — `_plus` renamed `append`; ts:58-59 explicit getFirst/getLast throws on empty; ts:70-71 etc. — `[x, ...rest]` makes toList O(n²) (semantics fine); ts:253-269 `clist` variadic replaces make0-5 object; ts:183-193, 329-333 — added aliases break uniform naming. `where:` fold-order tests (arr:120-147) dropped.
 - [i] `list-aux.ts` — nothing functional dropped (shrink = where-blocks); module unimported on both sides; `map2Strict` deliberately kept recursive (stack-unsafe) to preserve last-pair-first effect order while siblings went iterative.
 
