@@ -45,6 +45,17 @@ check "render-chart":
   render-chart(p5) does-not-raise
 end
 
+check "line-plot point-size composes with labels in either order":
+  xs = [list: 1, 2, 3, 4]
+  ys = [list: 1, 4, 9, 16]
+  labels = [list: "a", "b", "c", "d"]
+
+  render-chart(from-list.line-plot(xs, ys).point-size(10).labels(labels)).get-image()
+    does-not-raise
+  render-chart(from-list.line-plot(xs, ys).labels(labels).point-size(10)).get-image()
+    does-not-raise
+end
+
 check "image-dot-chart-from-list ordering invariant":
   # Each image carries the name of its own category, so a save-image of a
   # failing run shows exactly which image landed under which column label.
