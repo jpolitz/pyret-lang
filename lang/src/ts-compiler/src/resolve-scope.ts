@@ -10,7 +10,7 @@ import type { CompileError } from './compile-errors';
 import * as U from './ast-util';
 import * as T from './type-structs';
 import { DefaultMapVisitor, DefaultIterVisitor } from './ast-visitors';
-import { InternalCompilerError, mapSet, mapGetValue, toRepr } from './shared';
+import { InternalCompilerError, mapSet, mapGetValue, toRepr, field, asVariant } from './shared';
 
 export type ValueBind = C.ValueBind;
 export type TypeBind = C.TypeBind;
@@ -118,7 +118,7 @@ export function weaveContracts(contracts: Contract[], revBinds: any[]): any[] {
     if (funargs.length === 0 && annargs.length === 0) { return true; }
     else if (funargs.length === 0 || annargs.length === 0) { return false; }
     else {
-      return ((funargs[0] as A.SBind).id.toname() === annargs[0].name)
+      return (field(funargs[0], 'id').toname() === annargs[0].name)
         && namesMatch(funargs.slice(1), annargs.slice(1));
     }
   }
@@ -184,7 +184,7 @@ export function weaveContracts(contracts: Contract[], revBinds: any[]): any[] {
               const _checkLoc = fv._checkLoc;
               const _check = fv._check;
               const blocky = fv.blocky;
-              if (!(args.every((a) => isBlankContract((a as A.SBind).ann)) && A.isABlank(ret))) {
+              if (!(args.every((a) => isBlankContract(field(a, 'ann'))) && A.isABlank(ret))) {
                 errors = [new CE.ContractRedefined(c.l, idName, lFun), ...errors];
                 ans = [funToLam(bind), ...ans];
               } else if (A.isAArrow(c.ann)) {
@@ -205,7 +205,7 @@ export function weaveContracts(contracts: Contract[], revBinds: any[]): any[] {
                 }
                 if (okParams && okArgs) {
                   const newArgs = args.map((a, i) => {
-                    const ab = a as A.SBind;
+                    const ab = asVariant(a, A.SBind);
                     return new A.SBind(ab.l, ab.shadows, ab.id, cAnn.args[i]);
                   });
                   ans = [
@@ -234,7 +234,7 @@ export function weaveContracts(contracts: Contract[], revBinds: any[]): any[] {
                 }
                 if (okParams && okArgs) {
                   const newArgs = args.map((a, i) => {
-                    const ab = a as A.SBind;
+                    const ab = asVariant(a, A.SBind);
                     return new A.SBind(ab.l, ab.shadows, ab.id, cAnn.args[i].ann);
                   });
                   ans = [
@@ -278,7 +278,7 @@ export function bindWrap(bg: BindingGroup, expr: A.Expr): A.Expr {
   if (bg.binds.length === 0) {
     // NOTE: for type-let-binds (which has no contracts field) this access
     // fails, mirroring the Pyret field-access error; that case cannot occur.
-    for (const c of (bg as LetBinds | LetrecBinds).contracts) {
+    for (const c of field<Contract[]>(bg, 'contracts')) {
       errors = [new CE.ContractUnused(c.l, c.name.toname()), ...errors];
     }
     return expr;
@@ -327,7 +327,7 @@ export function simplifyLetBind(
       boundExpr = new A.SId(lb, name);
       binding = rebuild(lb, new A.SBind(lb, false, name, ann), expr);
     } else {
-      const b = asName as A.SBind;
+      const b = asVariant(asName, A.SBind);
       let asBinding: A.Bind;
       if (A.isABlank(b.ann)) {
         // just create a tuple of the correct arity; leave the field annotations to be checked later
@@ -669,7 +669,7 @@ export function desugarScope(prog: A.Program, env: C.CompileEnvironment): C.Scop
     if (A.isSTypeLetExpr(last)) {
       const l3 = last.l;
       const binds = last.binds;
-      const body2 = last.body as A.SBlock;
+      const body2 = asVariant(last.body, A.SBlock);
       const innerLast = body2.stmts[body2.stmts.length - 1];
       withProvides = new A.SBlock(l2,
         [...stmts.slice(0, stmts.length - 1),
@@ -686,7 +686,7 @@ export function desugarScope(prog: A.Program, env: C.CompileEnvironment): C.Scop
 
   errors = [];
 
-  const recombined = new A.SBlock(withProvides.l, (withProvides as A.SBlock).stmts);
+  const recombined = new A.SBlock(withProvides.l, field(withProvides, 'stmts'));
   const visited = recombined.visit(desugarScopeVisitor);
   return new C.ResolvedScope(
     new A.SProgram(l, _useRaw, _provideRaw, provideTypesRaw, provides, importsRaw, visited),
@@ -870,7 +870,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       // TODO(joe): I think that b.b.ann.visit below could be wrong if
       // a letrec'd ID is used in a refinement within the same letrec,
       // so state may be necessary here
-      const bBind = b.b as A.SBind;
+      const bBind = asVariant(b.b, A.SBind);
       const visitedAnn = bBind.ann.visit(visitor);
       const atomEnv = makeAtomFor(bBind.id, bBind.shadows, env, bindings,
         (atom) => new C.ValueBind(C.boLocal(b.l, bBind.id), C.vbLetrec, atom, visitedAnn));
@@ -882,7 +882,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
     const visitBinds = binds.map((b, i) => {
       const a = atomsInOrder[i];
       const l2 = b.l;
-      const bind = b.b as A.SBind;
+      const bind = asVariant(b.b, A.SBind);
       const newBind = new A.SBind(l2, false, a, bind.ann.visit(visitor.extend({ env })));
       const visitExpr = b.value.visit(newVisitor);
       return new A.SLetrecBind(l2, newBind, visitExpr);
@@ -930,7 +930,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
     let env = visitor.env;
     let cbs: A.Bind[] = [];
     for (const cbBind of columnBinds.binds) {
-      const cb = cbBind as A.SBind;
+      const cb = asVariant(cbBind, A.SBind);
       const accEnv = env;
       const visitedAnn = cb.ann.visit(visitor);
       const atomEnv = makeAtomFor(cb.id, cb.shadows, accEnv, bindings,
@@ -961,8 +961,8 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       const vbinder = C.isVVar(valueExport) ? C.vbVar : C.vbLet;
       const atomEnv = makeImportAtomFor(asName, valueExport.origin.uriOfDefinition, env, bindings,
         (atom) => new C.ValueBind(
-          C.boModule((asName as A.SName).l, valueExport.origin.definitionBindSite, valueExport.origin.uriOfDefinition, valueExport.origin.originalName),
-          vbinder, atom, new A.AAny((vname as A.SName).l)));
+          C.boModule(field(asName, 'l'), valueExport.origin.definitionBindSite, valueExport.origin.uriOfDefinition, valueExport.origin.originalName),
+          vbinder, atom, new A.AAny(field(vname, 'l'))));
       return atomEnv.env;
     }
   }
@@ -993,7 +993,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       }
       const atomEnv = makeImportAtomFor(asName, uriOfTyp, typeEnv, typeBindings,
         (atom) => new C.TypeBind(
-          C.boModule((asName as A.SName).l, locOfTyp, uriOfTyp, origName),
+          C.boModule(field(asName, 'l'), locOfTyp, uriOfTyp, origName),
           C.tbTypeLet, atom, new C.TbTyp(t)));
       return atomEnv.env;
     }
@@ -1008,7 +1008,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       const uri = maybeModuleExport;
       const atomEnv = makeImportAtomFor(asName, modInfo.fromUri, moduleEnv, moduleBindings,
         (atom) => new C.ModuleBind(
-          C.boModule((asName as A.SName).l, new SL.Builtin(uri), modInfo.fromUri, mname),
+          C.boModule(field(asName, 'l'), new SL.Builtin(uri), modInfo.fromUri, mname),
           atom, uri));
       return atomEnv.env;
     }
@@ -1298,13 +1298,13 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       let provideValsSpecs: A.ProvideBlock;
       if (A.isSProvide(_provide)) {
         const pl = _provide.l;
-        const obj = _provide.block as A.SObj;
+        const obj = asVariant(_provide.block, A.SObj);
         const specs: A.ProvideSpec[] = obj.fields.map((f) => {
-          const fd = f as A.SDataField;
+          const fd = asVariant(f, A.SDataField);
           if (!A.isSId(fd.value)) {
             throw new InternalCompilerError("The rhs of an object provide was not an id: " + toRepr(f));
           }
-          return new A.SProvideName(fd.l, new A.SModuleRef(fd.l, [(fd.value as A.SId).id], new A.SName(fd.l, fd.name)));
+          return new A.SProvideName(fd.l, new A.SModuleRef(fd.l, [field(fd.value, 'id')], new A.SName(fd.l, fd.name)));
         });
         provideValsSpecs = new A.SProvideBlock(pl, [],
           [...specs, new A.SProvideData(pl, new A.SStar(pl, []), [])]);
@@ -1464,7 +1464,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
           const remoteReferenceUri = maybeUriForPath(prePath, initialEnv, finalVisitor!.moduleEnv);
           if (remoteReferenceUri === undefined) {
             for (const k of [...datatypes.keys()].sort()) {
-              const dataExpr = mapGetValue(datatypes, k) as A.SDataExpr;
+              const dataExpr = asVariant(mapGetValue(datatypes, k), A.SDataExpr);
               expandDataSpec(valEnv, typeEnv, new A.SModuleRef(l, [new A.SName(l, dataExpr.name)], undefined), prePath, hidden, hiddenTodo);
             }
           } else {
@@ -1489,7 +1489,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
           if (maybeUri === undefined) {
             // path must be a single element if there's no URI of a remote module
             // e.g. provide: D end   NOT    provide: M.D end
-            const dataExpr = mapGetValue(datatypes, path[0].toname()) as A.SDataExpr;
+            const dataExpr = asVariant(mapGetValue(datatypes, path[0].toname()), A.SDataExpr);
             maybeAdd2(providedDatatypes, dataExpr.name, [l, undefined, dataExpr.namet]);
             const dataCheckerName = A.makeCheckerName(dataExpr.name);
             const dataCheckerVb = mapGetValue(valEnv, dataCheckerName);
@@ -1523,7 +1523,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
                 const remoteDatatype = initialEnv.providesByUriValue(moduleName.uri).dataDefinitions.get(datatypeName);
                 if (remoteDatatype !== undefined) {
                   datatypeUri = moduleName.uri;
-                  datatype = (remoteDatatype as C.DType).typ;
+                  datatype = field(remoteDatatype, 'typ');
                 } else {
                   throw new InternalCompilerError("Cannot re-provide datatype " + datatypeName + " because it isn't a datatype in " + uri);
                 }
@@ -1565,7 +1565,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
           const hidden = provideSpec.hidden;
           const hiddenTodo = new Map<string, C.Loc | undefined>();
           for (const h of hidden) {
-            hiddenTodo.set(h.toname(), (h as A.SName).l);
+            hiddenTodo.set(h.toname(), field(h, 'l'));
           }
           expandDataSpec(finalVisitor!.env, finalVisitor!.typeEnv, provideSpec.nameSpec, path, hidden, hiddenTodo);
           for (const key of [...hiddenTodo.keys()].sort()) {
@@ -1594,7 +1594,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       }
 
       for (const k of [...datatypes.keys()]) {
-        const dt = mapGetValue(datatypes, k) as A.SDataExpr;
+        const dt = asVariant(mapGetValue(datatypes, k), A.SDataExpr);
         providedDatatypes.set(k, [dt.l, undefined, dt.namet]);
       }
 
@@ -1674,7 +1674,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       for (const b of node.binds) {
         if (A.isSLetBind(b)) {
           const l2 = b.l;
-          const bind = b.b as A.SBind;
+          const bind = asVariant(b.b, A.SBind);
           const expr = b.value;
           const visitedAnn = bind.ann.visit(this.extend({ env: e }));
           const atomEnv = makeAtomFor(bind.id, bind.shadows, e, bindings,
@@ -1686,7 +1686,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
           atoms = [atomEnv.atom, ...atoms];
         } else if (A.isSVarBind(b)) {
           const l2 = b.l;
-          const bind = b.b as A.SBind;
+          const bind = asVariant(b.b, A.SBind);
           const expr = b.value;
           const visitedAnn = bind.ann.visit(this.extend({ env: e }));
           const atomEnv = makeAtomFor(bind.id, bind.shadows, e, bindings,
@@ -1716,7 +1716,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       let fbs: A.ForBind[] = [];
       for (const fb of node.bindings) {
         const l2 = fb.l;
-        const bind = fb.bind as A.SBind;
+        const bind = asVariant(fb.bind, A.SBind);
         const val = fb.value;
         const visitedAnn = bind.ann.visit(this);
         const atomEnv = makeAtomFor(bind.id, bind.shadows, env, bindings,
@@ -1734,7 +1734,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
     sCasesBranch(node: A.SCasesBranch): A.CasesBranch {
       let env = this.env;
       let atoms: A.Name[] = [];
-      for (const a of node.args.map((arg) => arg.bind as A.SBind)) {
+      for (const a of node.args.map((arg) => asVariant(arg.bind, A.SBind))) {
         const visitedAnn = a.ann.visit(this);
         const atomEnv = makeAtomFor(a.id, a.shadows, env, bindings,
           (atom) => new C.ValueBind(C.boLocal(a.l, a.id), C.vbLet, atom, visitedAnn));
@@ -1746,7 +1746,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
         const at = atomsInOrder[i];
         const l2 = a.l;
         const typ = a.fieldType;
-        const binding = a.bind as A.SBind;
+        const binding = asVariant(a.bind, A.SBind);
         return new A.SCasesBind(l2, typ, new A.SBind(binding.l, false, at, binding.ann.visit(this.extend({ env }))));
       });
       const newBody = node.body.visit(this.extend({ env }));
@@ -1786,7 +1786,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       let env = withParams.env;
       let atoms: A.Name[] = [];
       for (const arg of node.args) {
-        const a = arg as A.SBind;
+        const a = asVariant(arg, A.SBind);
         const visitedAnn = a.ann.visit(withParams);
         const atomEnv = makeAtomFor(a.id, a.shadows, env, bindings,
           (atom) => new C.ValueBind(C.boLocal(a.l, a.id), C.vbLet, atom, visitedAnn));
@@ -1796,7 +1796,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       const atomsInOrder = [...atoms].reverse();
       const newArgs = node.args.map((arg, i) => {
         const at = atomsInOrder[i];
-        const a = arg as A.SBind;
+        const a = asVariant(arg, A.SBind);
         return new A.SBind(a.l, false, at, a.ann.visit(withParams));
       });
       const withParamsAndArgs = withParams.extend({ env });
@@ -1815,7 +1815,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       let tyAtoms: A.Name[] = [];
       for (const param of node.params) {
         const atomEnv = makeAtomFor(param, false, tyEnv, typeBindings,
-          (atom) => new C.TypeBind(C.boLocal((param as A.SName).l, param), C.tbTypeVar, atom, C.tbNone));
+          (atom) => new C.TypeBind(C.boLocal(field(param, 'l'), param), C.tbTypeVar, atom, C.tbNone));
         tyEnv = atomEnv.env;
         tyAtoms = [atomEnv.atom, ...tyAtoms];
       }
@@ -1823,7 +1823,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       let env = withParams.env;
       let atoms: A.Name[] = [];
       for (const arg of node.args) {
-        const a = arg as A.SBind;
+        const a = asVariant(arg, A.SBind);
         const visitedAnn = a.ann.visit(withParams);
         const atomEnv = makeAtomFor(a.id, a.shadows, env, bindings,
           (atom) => new C.ValueBind(C.boLocal(a.l, a.id), C.vbLet, atom, visitedAnn));
@@ -1833,7 +1833,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       const atomsInOrder = [...atoms].reverse();
       const newArgs = node.args.map((arg, i) => {
         const at = atomsInOrder[i];
-        const a = arg as A.SBind;
+        const a = asVariant(arg, A.SBind);
         return new A.SBind(a.l, a.shadows, at, a.ann.visit(withParams));
       });
       const newBody = node.body.visit(withParams.extend({ env }));
@@ -1855,7 +1855,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       let env = withParams.env;
       let atoms: A.Name[] = [];
       for (const arg of node.args) {
-        const a = arg as A.SBind;
+        const a = asVariant(arg, A.SBind);
         const visitedAnn = a.ann.visit(withParams);
         const atomEnv = makeAtomFor(a.id, a.shadows, env, bindings,
           (atom) => new C.ValueBind(C.boLocal(a.l, a.id), C.vbLet, atom, visitedAnn));
@@ -1865,7 +1865,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       const atomsInOrder = [...atoms].reverse();
       const newArgs = node.args.map((arg, i) => {
         const at = atomsInOrder[i];
-        const a = arg as A.SBind;
+        const a = asVariant(arg, A.SBind);
         return new A.SBind(a.l, a.shadows, at, a.ann.visit(withParams));
       });
       const newBody = node.body.visit(withParams.extend({ env }));
@@ -2034,7 +2034,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
           return new A.ADot(node.l, mb.atom, node.field);
         }
       } else {
-        nameErrors = [new CE.UnderscoreAsAnn((obj as A.SUnderscore).l), ...nameErrors];
+        nameErrors = [new CE.UnderscoreAsAnn(field(obj, 'l')), ...nameErrors];
         return new A.ADot(node.l, obj.visit(this), node.field);
       }
     }
@@ -2075,7 +2075,7 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
 
 export function checkUnboundIdsBadAssignments(ast: A.Program, resolved: C.NameResolution, initialEnv: C.CompileEnvironment): CompileError[] {
   let errors: CompileError[] = []; // THE MUTABLE LIST OF ERRORS
-  const env = resolved.env as C.ComputedEnv;
+  const env = asVariant(resolved.env, C.ComputedEnv);
   const bindings = env.bindings;
   const typeBindings = env.typeBindings;
   const moduleBindings = env.moduleBindings;

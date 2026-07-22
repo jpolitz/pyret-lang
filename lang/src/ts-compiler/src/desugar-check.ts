@@ -8,7 +8,7 @@ import * as G from './gensym';
 import * as U from './ast-util';
 import { DefaultMapVisitor } from './ast-visitors';
 import { Loc } from './srcloc';
-import { raise } from './shared';
+import { raise, nonNull } from './shared';
 
 // ---------- data CheckInfo ----------
 
@@ -46,25 +46,25 @@ class CheckStmtsVisitor extends DefaultMapVisitor {
     const cause = node.cause;
     const checkOp = (fieldname: string): A.Expr =>
       new A.SApp(l, new A.SDot(l, U.checkers(l), fieldname),
-        [astLam(left), astLam(right!), astSrcloc(l)]);
+        [astLam(left), astLam(nonNull(right)), astSrcloc(l)]);
     const checkOpCause = (cause2: A.Expr, fieldname: string): A.Expr =>
       new A.SApp(l, new A.SDot(l, U.checkers(l), fieldname),
-        [astLam(left), astLam(right!), astLam(cause2), astSrcloc(l)]);
+        [astLam(left), astLam(nonNull(right)), astLam(cause2), astSrcloc(l)]);
     const checkRefinement = (refinement2: A.Expr, fieldname: string): A.Expr =>
       new A.SApp(l, new A.SDot(l, U.checkers(l), fieldname),
-        [refinement2, astLam(left), astLam(right!), astSrcloc(l)]);
+        [refinement2, astLam(left), astLam(nonNull(right)), astSrcloc(l)]);
     const checkRefinementCause = (refinement2: A.Expr, cause2: A.Expr, fieldname: string): A.Expr =>
       new A.SApp(l, new A.SDot(l, U.checkers(l), fieldname),
-        [refinement2, astLam(left), astLam(right!), astLam(cause2), astSrcloc(l)]);
+        [refinement2, astLam(left), astLam(nonNull(right)), astLam(cause2), astSrcloc(l)]);
     const checkRaises = (fieldname: string): A.Expr =>
       new A.SApp(l, new A.SDot(l, U.checkers(l), fieldname),
-        [astLam(left), right!, astSrcloc(l)]);
+        [astLam(left), nonNull(right), astSrcloc(l)]);
     const checkRaisesNot = (fieldname: string): A.Expr =>
       new A.SApp(l, new A.SDot(l, U.checkers(l), fieldname),
         [astLam(left), astSrcloc(l)]);
     const checkRaisesCause = (cause2: A.Expr, fieldname: string): A.Expr =>
       new A.SApp(l, new A.SDot(l, U.checkers(l), fieldname),
-        [astLam(left), right!, astLam(cause2), astSrcloc(l)]);
+        [astLam(left), nonNull(right), astLam(cause2), astSrcloc(l)]);
     const checkRaisesNotCause = (cause2: A.Expr, fieldname: string): A.Expr =>
       new A.SApp(l, new A.SDot(l, U.checkers(l), fieldname),
         [astLam(left), astLam(cause2), astSrcloc(l)]);

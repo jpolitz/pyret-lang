@@ -35,7 +35,7 @@ import * as AU from './ast-util';
 import * as T from './type-structs';
 import * as SL from './srcloc';
 import { jsnums } from './interop/js-numbers';
-import { InternalCompilerError, raise, map2, mapGetValue, partition } from './shared';
+import { InternalCompilerError, raise, map2, mapGetValue, partition, field } from './shared';
 
 export type Loc = SL.Loc;
 export type CList<T> = CL.ConcatList<T>;
@@ -1104,8 +1104,8 @@ export function* compileSplitMethodApp(
 ): ChainGen<DAG.CBlock> {
   const ans = compiler.curAns;
   const step = compiler.curStep;
-  const compiledObj = (obj.visit(compiler) as DAG.CExp).exp;
-  const compiledArgs = CL.map_list((a: N.AVal) => (a.visit(compiler) as DAG.CExp).exp, args);
+  const compiledObj = field(obj.visit(compiler), 'exp');
+  const compiledArgs = CL.map_list((a: N.AVal) => field(a.visit(compiler), 'exp'), args);
 
   const argcount = compiledArgs.length();
 
@@ -1225,8 +1225,8 @@ export function* compileSplitApp(
 ): ChainGen<DAG.CBlock> {
   const ans = compiler.curAns;
   const step = compiler.curStep;
-  const compiledF = (f.visit(compiler) as DAG.CExp).exp;
-  const compiledArgs = CL.map_list((a: N.AVal) => (a.visit(compiler) as DAG.CExp).exp, args);
+  const compiledF = field(f.visit(compiler), 'exp');
+  const compiledArgs = CL.map_list((a: N.AVal) => field(a.visit(compiler), 'exp'), args);
   const [newCases, afterAppLabel] = yield* getNewCases(compiler, optDest, optBody, ans);
   if (appInfo.isRecursive &&
     appInfo.isTail &&
@@ -1288,8 +1288,8 @@ export function* compileFlatApp(
   _isDefinitelyFn: boolean
 ): ChainGen<DAG.CBlock> {
   const ans = compiler.curAns;
-  const compiledF = (f.visit(compiler) as DAG.CExp).exp;
-  const compiledArgs = CL.map_list((a: N.AVal) => (a.visit(compiler) as DAG.CExp).exp, args);
+  const compiledF = field(f.visit(compiler), 'exp');
+  const compiledArgs = CL.map_list((a: N.AVal) => field(a.visit(compiler), 'exp'), args);
 
   // Generate the code for calling the function
   const callCode = clist<J.JStmt>(
@@ -1347,7 +1347,7 @@ export function* compileSplitIf(
   return cBlock(
     jBlock(clist<J.JStmt>(
       jExpr(jAssign(compiler.curStep,
-        jTernary(rtMethod('checkPyretTrue', clist((cond.visit(compiler) as DAG.CExp).exp)),
+        jTernary(rtMethod('checkPyretTrue', clist(field(cond.visit(compiler), 'exp'))),
           consqLabel, altLabel))),
       jBreak
     )),
@@ -1488,7 +1488,7 @@ export function* compileSplitCases(
   _else: N.AExpr,
   optBody: N.AExpr | undefined
 ): ChainGen<DAG.CBlock> {
-  const compiledVal = (val.visit(compiler) as DAG.CExp).exp;
+  const compiledVal = field(val.visit(compiler), 'exp');
   const [afterCasesCases, afterCasesLabel] = yield* getNewCases(compiler, optDest, optBody, compiler.curAns);
   const compilerAfterCases = ext(compiler, { curTarget: afterCasesLabel });
   const compiledBranches: DAG.CBlock[] = [];
@@ -1532,8 +1532,8 @@ export function* compileSplitUpdate(
 ): ChainGen<DAG.CBlock> {
   const ans = compiler.curAns;
   const step = compiler.curStep;
-  const compiledObj = (obj.visit(compiler) as DAG.CExp).exp;
-  const compiledFieldVals = CL.map_list((a: N.AField) => (a.value.visit(compiler) as DAG.CExp).exp, fields);
+  const compiledObj = field(obj.visit(compiler), 'exp');
+  const compiledFieldVals = CL.map_list((a: N.AField) => field(a.value.visit(compiler), 'exp'), fields);
   const fieldNames = CL.map_list((f: N.AField) => jStr(f.name) as J.JExprT, fields);
   const fieldLocs = CL.map_list((f: N.AField) => compiler.getLoc(f.l), fields);
   const [newCases, afterUpdateLabel] = yield* getNewCases(compiler, optDest, optBody, ans);
@@ -1616,7 +1616,7 @@ export function* compileSplitPrimApp(
 ): ChainGen<DAG.CBlock> {
   const ans = compiler.curAns;
   const step = compiler.curStep;
-  const compiledArgs = CL.map_list((a: N.AVal) => (a.visit(compiler) as DAG.CExp).exp, args);
+  const compiledArgs = CL.map_list((a: N.AVal) => field(a.visit(compiler), 'exp'), args);
   const [newCases, afterAppLabel] = yield* getNewCases(compiler, optDest, optBody, ans);
   return cBlock(
     jBlock(
@@ -1640,7 +1640,7 @@ export function* compileFlatPrimApp(
   optBody: N.AExpr | undefined
 ): ChainGen<DAG.CBlock> {
   const ans = compiler.curAns;
-  const compiledArgs = CL.map_list((a: N.AVal) => (a.visit(compiler) as DAG.CExp).exp, args);
+  const compiledArgs = CL.map_list((a: N.AVal) => field(a.visit(compiler), 'exp'), args);
 
   // Generate the code for calling the function
   const callCode = jExpr(wrapWithSrcnode(l, jAssign(ans, rtMethod(f, compiledArgs))));
@@ -1952,7 +1952,7 @@ export class CompilerVisitor {
               CL.map_list((dv: N.ADefinedValue) => {
                 switch (dv.$name) {
                   case 'a-defined-value': {
-                    const compiledVal = (dv.value.visit(this) as DAG.CExp).exp;
+                    const compiledVal = field(dv.value.visit(this), 'exp');
                     return jField(dv.name, compiledVal) as J.JFieldT;
                   }
                   case 'a-defined-var':

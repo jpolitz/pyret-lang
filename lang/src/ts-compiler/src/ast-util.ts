@@ -5,7 +5,7 @@ import * as SL from './srcloc';
 import * as CS from './compile-structs';
 import * as T from './type-structs';
 import { DefaultMapVisitor, DefaultIterVisitor } from './ast-visitors';
-import { raise, mapSet, mapGetValue, map2 } from './shared';
+import { raise, mapSet, mapGetValue, map2, field, asVariant, nonNull } from './shared';
 
 export type URI = string;
 export type Loc = SL.Loc;
@@ -540,19 +540,19 @@ export const bindingHandlers: EnvBindHandlers<BindingEnv, BindingEnv> = {
   sLetBind(lb: A.LetBind, env: BindingEnv): BindingEnv {
     switch (lb.$name) {
       case 's-let-bind':
-        return mapSet(env, (lb.b as A.SBind).id.key(), new EBind(lb.l, false, bindOrUnknown(lb.value, env)));
+        return mapSet(env, field(lb.b, 'id').key(), new EBind(lb.l, false, bindOrUnknown(lb.value, env)));
       case 's-var-bind':
-        return mapSet(env, (lb.b as A.SBind).id.key(), new EBind(lb.l, true, bUnknown));
+        return mapSet(env, field(lb.b, 'id').key(), new EBind(lb.l, true, bUnknown));
       default:
         throw raise('Unknown LetBind in bindingHandlers: ' + (lb as any).$name);
     }
   },
   sLetrecBind(lrb: A.LetrecBind, env: BindingEnv): BindingEnv {
-    return mapSet(env, (lrb.b as A.SBind).id.key(),
+    return mapSet(env, field(lrb.b, 'id').key(),
       new EBind(lrb.l, false, bindOrUnknown(lrb.value, env)));
   },
   sBind(b: A.Bind, env: BindingEnv): BindingEnv {
-    return mapSet(env, (b as A.SBind).id.key(), new EBind(b.l, false, bUnknown));
+    return mapSet(env, field(b, 'id').key(), new EBind(b.l, false, bUnknown));
   },
 };
 
@@ -749,7 +749,7 @@ class SetRecursiveVisitor extends DefaultMapVisitor {
   // Return an environment with a binding containing function's name
   collectFunName(binding: A.LetrecBind): this {
     if (A.isSLam(binding.value)) {
-      return extendVisitor(this, { scope: new PartialFunS((binding.b as A.SBind).id) } as Partial<this>);
+      return extendVisitor(this, { scope: new PartialFunS(field(binding.b, 'id')) } as Partial<this>);
     } else {
       return this;
     }
@@ -759,7 +759,7 @@ class SetRecursiveVisitor extends DefaultMapVisitor {
   collectMethodSelf(selfBind: A.Bind): this {
     const scope = this.scope;
     switch (scope.$name) {
-      case 'partial-method-s': return extendVisitor(this, { scope: new MethodS((selfBind as A.SBind).id, scope.name) } as Partial<this>);
+      case 'partial-method-s': return extendVisitor(this, { scope: new MethodS(field(selfBind, 'id'), scope.name) } as Partial<this>);
       case 'no-s': return this.clearScope(); // `method(self): 1 end`
       case 'fun-s': return this.clearScope(); // fun foo(): method(self): 1 end end
       case 'method-s': return this.clearScope(); // { a(self1): method(self2): 1 end end }
@@ -1003,10 +1003,10 @@ class LetrecVisitor extends DefaultMapVisitor {
 
   sLetrec(node: A.SLetrec): A.Expr {
     const bindEnvs = node.binds.map((b1: A.LetrecBind, i: number) => {
-      const rhsIsDelayed = valueDelaysExecOf((b1.b as A.SBind).id, b1.value);
+      const rhsIsDelayed = valueDelaysExecOf(field(b1.b, 'id'), b1.value);
       const acc = new Map(this.env);
       node.binds.forEach((b2: A.LetrecBind, j: number) => {
-        const key = (b2.b as A.SBind).id.key();
+        const key = field(b2.b, 'id').key();
         if (i < j) {
           acc.set(key, false);
         } else if (i === j) {
@@ -1020,7 +1020,7 @@ class LetrecVisitor extends DefaultMapVisitor {
     const newBinds = map2((b: A.LetrecBind, bindEnv: Map<string, boolean>) =>
       b.visit(extendVisitor(this, { env: bindEnv } as Partial<this>)), node.binds, bindEnvs);
     const bodyEnv = mapSet(bindEnvs[bindEnvs.length - 1],
-      (node.binds[node.binds.length - 1].b as A.SBind).id.key(), true);
+      field(node.binds[node.binds.length - 1].b, 'id').key(), true);
     const newBody = node.body.visit(extendVisitor(this, { env: bodyEnv } as Partial<this>));
     return new A.SLetrec(node.l, newBinds, newBody, node.blocky);
   }
@@ -1265,9 +1265,9 @@ export function getNamedProvides(resolved: CS.NameResolution, uri: URI, compileE
     for (let i = ms.length - 1; i >= 0; i--) {
       const m = ms[i];
       const typ = A.isSMutable(m.memberType)
-        ? new T.TRef(att((m.bind as A.SBind).ann), m.l, false)
-        : att((m.bind as A.SBind).ann);
-      members.unshift([(m.bind as A.SBind).id.toname(), typ]);
+        ? new T.TRef(att(field(m.bind, 'ann')), m.l, false)
+        : att(field(m.bind, 'ann'));
+      members.unshift([field(m.bind, 'id').toname(), typ]);
     }
     return members;
   }
@@ -1282,7 +1282,7 @@ export function getNamedProvides(resolved: CS.NameResolution, uri: URI, compileE
         return new T.TRef(att(m.ann), m.l, false);
       case 's-method-field': {
         const arrowPart =
-          new T.TArrow(m.args.map((a: A.Bind) => att((a as A.SBind).ann)), att(m.ann), m.l, false);
+          new T.TArrow(m.args.map((a: A.Bind) => att(field(a, 'ann'))), att(m.ann), m.l, false);
         if (m.params.length === 0) { return arrowPart; }
         else {
           const tvars: T.Type[] = m.params.map((p: A.Name) => new T.TVar(p, m.l, false));
@@ -1343,7 +1343,7 @@ export function getNamedProvides(resolved: CS.NameResolution, uri: URI, compileE
       l);
   }
 
-  const env = resolved.env as CS.ComputedEnv;
+  const env = asVariant(resolved.env, CS.ComputedEnv);
   const provideBlocks = resolved.ast.provides;
   // NOTE(joe): assume the provide block is resolved
   const pb = provideBlocks[0];
@@ -1362,7 +1362,7 @@ export function getNamedProvides(resolved: CS.NameResolution, uri: URI, compileE
       }
       case 's-local-ref': {
         const mb = mapGetValue(env.moduleBindings, ns.name.key());
-        modProvides.set(ns.asName!.toname(), mb.uri);
+        modProvides.set(nonNull(ns.asName).toname(), mb.uri);
         break;
       }
       default:
@@ -1389,7 +1389,7 @@ export function getNamedProvides(resolved: CS.NameResolution, uri: URI, compileE
         break;
       }
       case 's-local-ref': {
-        const asName = ns.asName!;
+        const asName = nonNull(ns.asName);
         const vb = mapGetValue(env.bindings, ns.name.key());
         // NOTE(joe/ben): The as-name below has important semantic meaning.
         // This makes it so if you provide the same definition with
@@ -1444,7 +1444,7 @@ export function getNamedProvides(resolved: CS.NameResolution, uri: URI, compileE
       case 's-local-ref': {
         const tb = mapGetValue(env.typeBindings, ns.name.key());
         const typ = CS.isTbNone(tb.typ) ? new T.TTop(ns.l, false) : tb.typ.typ;
-        typProvides.set(ns.asName!.toname(), typ);
+        typProvides.set(nonNull(ns.asName).toname(), typ);
         break;
       }
       default:
@@ -1476,8 +1476,8 @@ export function getNamedProvides(resolved: CS.NameResolution, uri: URI, compileE
         break;
       }
       case 's-local-ref': {
-        const exp = mapGetValue(env.datatypes, ns.name.toname()) as A.SDataExpr;
-        dataProvides.set(ns.asName!.toname(),
+        const exp = asVariant(mapGetValue(env.datatypes, ns.name.toname()), A.SDataExpr);
+        dataProvides.set(nonNull(ns.asName).toname(),
           new CS.DType(new CS.BindOrigin(ns.l, exp.l, true, uri, ns.name), dataExprToDatatype(exp)));
         break;
       }
@@ -1670,7 +1670,7 @@ export function getTypedProvides(resolved: CS.NameResolution, typed: any, uri: U
     }
   };
   const c = (typ: T.Type): T.Type => canonicalizeNames(typ, uri, transformer);
-  const env = resolved.env as CS.ComputedEnv;
+  const env = asVariant(resolved.env, CS.ComputedEnv);
   const provideBlocks = (typed.ast as A.Program).provides;
   const pb = provideBlocks[0];
   const provideSpecs = pb.specs;
@@ -1688,7 +1688,7 @@ export function getTypedProvides(resolved: CS.NameResolution, typed: any, uri: U
       }
       case 's-local-ref': {
         const mb = mapGetValue(env.moduleBindings, ns.name.key());
-        modProvides.set(ns.asName!.toname(), mb.uri);
+        modProvides.set(nonNull(ns.asName).toname(), mb.uri);
         break;
       }
       default:
@@ -1708,7 +1708,7 @@ export function getTypedProvides(resolved: CS.NameResolution, typed: any, uri: U
         break;
       }
       case 's-local-ref': {
-        const asName = ns.asName!;
+        const asName = nonNull(ns.asName);
         const tcTyp = mapGetValue(typed.info.types as Map<string, T.Type>, ns.name.key());
         const vb = mapGetValue(env.bindings, ns.name.key());
         const correctedOrigin = new CS.BindOrigin(
@@ -1745,7 +1745,7 @@ export function getTypedProvides(resolved: CS.NameResolution, typed: any, uri: U
           typProvides.set(ns.name.toname(), c(dataTyp));
         } else {
           const typ = mapGetValue(typed.info.aliases as Map<string, T.Type>, key);
-          typProvides.set(ns.asName!.toname(), c(typ));
+          typProvides.set(nonNull(ns.asName).toname(), c(typ));
         }
         break;
       }
@@ -1767,9 +1767,9 @@ export function getTypedProvides(resolved: CS.NameResolution, typed: any, uri: U
         break;
       }
       case 's-local-ref': {
-        const exp = mapGetValue(env.datatypes, ns.name.toname()) as A.SDataExpr;
+        const exp = asVariant(mapGetValue(env.datatypes, ns.name.toname()), A.SDataExpr);
         const origin = new CS.BindOrigin(ns.l, exp.l, true, uri, ns.name);
-        dataProvides.set(ns.asName!.toname(),
+        dataProvides.set(nonNull(ns.asName).toname(),
           new CS.DType(origin,
             canonicalizeDataType(mapGetValue(typed.info.dataTypes as Map<string, T.DataType>, exp.namet.key()), uri, transformer)));
         break;

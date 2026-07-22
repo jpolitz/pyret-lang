@@ -7,7 +7,7 @@ import * as SL from './srcloc';
 import * as ED from './error-display';
 import * as C from './compile-structs';
 import { DefaultIterVisitor } from './ast-visitors';
-import { InternalCompilerError, raise } from './shared';
+import { InternalCompilerError, raise, field, asVariant } from './shared';
 import { jsnums, throwingErrbacks } from './interop/js-numbers';
 
 type Loc = SL.Loc;
@@ -363,7 +363,7 @@ function wrapRejectStandalonesInCheck(target: A.Expr | undefined): boolean {
   if (target === undefined) {
     ret = true;
   } else {
-    const stmts = (target as A.SBlock).stmts;
+    const stmts = field(target, 'stmts');
     if (stmts.length > 0) {
       ret = rejectStandaloneExprs(stmts, false);
     } else {
@@ -378,7 +378,7 @@ function wrapRejectStandalonesInCheck(target: A.Expr | undefined): boolean {
 function wfBlockStmts(visitor: any, l: Loc, stmts: A.Expr[], toplevel: boolean): boolean {
   const bindStmts = stmts
     .filter((s) => A.isSVar(s) || A.isSLet(s) || A.isSRec(s))
-    .map((s) => (s as A.SVar | A.SLet | A.SRec).name);
+    .map((s) => field(s, 'name'));
   ensureUniqueBindings(bindStmts);
   ensureDistinctLines(A.dummyLoc, false, stmts);
   if (!inCheckBlock && !toplevel) {
@@ -439,7 +439,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
   }
   sUse(node: A.SUse): boolean {
     if (!(node.n.toname() === 'context')) {
-      wfError([ED.text('The only supported type of '), ED.code(ED.text('use')), ED.text(' is '), ED.code(ED.text('context')), ED.text(', but this program used '), ED.code(ED.text(node.n.toname()))], (node.n as A.SName).l);
+      wfError([ED.text('The only supported type of '), ED.code(ED.text('use')), ED.text(' is '), ED.code(ED.text('context')), ED.text(', but this program used '), ED.code(ED.text(node.n.toname()))], field(node.n, 'l'));
       return false;
     } else {
       return true;
@@ -496,7 +496,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     const oldPbl = parentBlockLoc;
     parentBlockLoc = node.l;
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node.body as A.SBlock]);
+      wfBlockyBlocks(node.l, [asVariant(node.body, A.SBlock)]);
     }
     const ans = node.binds.every((b) => b.visit(this)) && node.body.visit(this);
     parentBlockLoc = oldPbl;
@@ -524,7 +524,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     const oldPbl = parentBlockLoc;
     parentBlockLoc = node.l;
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node.body as A.SBlock]);
+      wfBlockyBlocks(node.l, [asVariant(node.body, A.SBlock)]);
     }
     const ans = node.binds.every((b) => b.visit(this)) && node.body.visit(this);
     parentBlockLoc = oldPbl;
@@ -669,10 +669,10 @@ class WellFormedVisitor extends DefaultIterVisitor {
     }
     ensureUniqueIds(node.args);
     if (node._check !== undefined) {
-      ensureEmptyBlock(node.l, 'methods', node._check as A.SBlock);
+      ensureEmptyBlock(node.l, 'methods', asVariant(node._check, A.SBlock));
     }
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node.body as A.SBlock]);
+      wfBlockyBlocks(node.l, [asVariant(node.body, A.SBlock)]);
     }
     let ans = node.args.every((a) => a.visit(this)) && node.ann.visit(this) && node.body.visit(this);
     if (node._checkLoc !== undefined) {
@@ -705,10 +705,10 @@ class WellFormedVisitor extends DefaultIterVisitor {
     }
     ensureUniqueIds(node.args);
     if (node._check !== undefined) {
-      ensureEmptyBlock(node.l, 'methods', node._check as A.SBlock);
+      ensureEmptyBlock(node.l, 'methods', asVariant(node._check, A.SBlock));
     }
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node.body as A.SBlock]);
+      wfBlockyBlocks(node.l, [asVariant(node.body, A.SBlock)]);
     }
     let ans = node.args.every((a) => a.visit(this)) && node.ann.visit(this) && node.body.visit(this);
     if (node._checkLoc !== undefined) {
@@ -726,10 +726,10 @@ class WellFormedVisitor extends DefaultIterVisitor {
       : (node.l as SL.Srcloc).uptoEnd(node._checkLoc as SL.Srcloc);
     ensureUniqueIds(node.args);
     if (node._check !== undefined) {
-      ensureEmptyBlock(node.l, 'anonymous functions', node._check as A.SBlock);
+      ensureEmptyBlock(node.l, 'anonymous functions', asVariant(node._check, A.SBlock));
     }
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node.body as A.SBlock]);
+      wfBlockyBlocks(node.l, [asVariant(node.body, A.SBlock)]);
     }
     let ans = node.params.every((p) => p.visit(this))
       && node.args.every((a) => a.visit(this)) && node.ann.visit(this) && node.body.visit(this);
@@ -750,7 +750,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
       reservedName(node.l, node.name);
     }
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node.body as A.SBlock]);
+      wfBlockyBlocks(node.l, [asVariant(node.body, A.SBlock)]);
     }
     ensureUniqueIds(node.args);
     let ans = node.params.every((p) => p.visit(this))
@@ -793,7 +793,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     let ans: boolean;
     if (!node.keywordCheck) {
       wrapVisitCheck(this, node.body);
-      ans = wfExamplesBody(this, node.body as A.SBlock);
+      ans = wfExamplesBody(this, asVariant(node.body, A.SBlock));
     } else {
       wrapVisitCheck(this, node.body);
       ans = wrapRejectStandalonesInCheck(node.body);
@@ -805,7 +805,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     const oldPbl = parentBlockLoc;
     parentBlockLoc = node.l;
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node.block as A.SBlock]);
+      wfBlockyBlocks(node.l, [asVariant(node.block, A.SBlock)]);
     }
     const ans = node.test.visit(this) && node.block.visit(this);
     parentBlockLoc = oldPbl;
@@ -818,7 +818,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     const oldPbl = parentBlockLoc;
     parentBlockLoc = node.l;
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, node.branches.map((b) => b.body as A.SBlock));
+      wfBlockyBlocks(node.l, node.branches.map((b) => asVariant(b.body, A.SBlock)));
     }
     const ans = node.branches.every((b) => b.visit(this));
     parentBlockLoc = oldPbl;
@@ -828,7 +828,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     const oldPbl = parentBlockLoc;
     parentBlockLoc = node.l;
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node._else as A.SBlock, ...node.branches.map((b) => b.body as A.SBlock)]);
+      wfBlockyBlocks(node.l, [asVariant(node._else, A.SBlock), ...node.branches.map((b) => asVariant(b.body, A.SBlock))]);
     }
     const ans = node.branches.every((b) => b.visit(this)) && node._else.visit(this);
     parentBlockLoc = oldPbl;
@@ -838,7 +838,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     const oldPbl = parentBlockLoc;
     parentBlockLoc = node.l;
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, node.branches.map((b) => b.body as A.SBlock));
+      wfBlockyBlocks(node.l, node.branches.map((b) => asVariant(b.body, A.SBlock)));
     }
     const ans = node.branches.every((b) => b.visit(this));
     parentBlockLoc = oldPbl;
@@ -848,7 +848,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     const oldPbl = parentBlockLoc;
     parentBlockLoc = node.l;
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node._else as A.SBlock, ...node.branches.map((b) => b.body as A.SBlock)]);
+      wfBlockyBlocks(node.l, [asVariant(node._else, A.SBlock), ...node.branches.map((b) => asVariant(b.body, A.SBlock))]);
     }
     const ans = node.branches.every((b) => b.visit(this)) && node._else.visit(this);
     parentBlockLoc = oldPbl;
@@ -859,7 +859,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     parentBlockLoc = node.l;
     ensureUniqueCases(node.branches);
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, node.branches.map((b) => b.body as A.SBlock));
+      wfBlockyBlocks(node.l, node.branches.map((b) => asVariant(b.body, A.SBlock)));
     }
     const ans = node.typ.visit(this) && node.val.visit(this) && node.branches.every((b) => b.visit(this));
     parentBlockLoc = oldPbl;
@@ -870,7 +870,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     parentBlockLoc = node.l;
     ensureUniqueCases(node.branches);
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node._else as A.SBlock, ...node.branches.map((b) => b.body as A.SBlock)]);
+      wfBlockyBlocks(node.l, [asVariant(node._else, A.SBlock), ...node.branches.map((b) => asVariant(b.body, A.SBlock))]);
     }
     const ans = node.typ.visit(this) && node.val.visit(this)
       && node.branches.every((b) => b.visit(this)) && node._else.visit(this);
@@ -881,7 +881,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     const oldPbl = parentBlockLoc;
     parentBlockLoc = node.l;
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node.body as A.SBlock]);
+      wfBlockyBlocks(node.l, [asVariant(node.body, A.SBlock)]);
     }
     const ans = node.iterator.visit(this) && node.bindings.every((b) => b.visit(this))
       && node.ann.visit(this) && node.body.visit(this);
@@ -976,7 +976,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
     }
   }
   sTableExtend(node: A.STableExtend): boolean {
-    const boundNames = new Set<string>(node.columnBinds.binds.map((b) => (b as A.SBind).id.toname()));
+    const boundNames = new Set<string>(node.columnBinds.binds.map((b) => field(b, 'id').toname()));
     return node.extensions.every((extension) => {
       switch (extension.$name) {
         case 's-table-extend-field':
@@ -1067,7 +1067,7 @@ class TopLevelVisitor extends DefaultIterVisitor {
   }
   sTypeLetExpr(node: A.STypeLetExpr): boolean {
     if (!node.blocky) {
-      wfBlockyBlocks(node.l, [node.body as A.SBlock]);
+      wfBlockyBlocks(node.l, [asVariant(node.body, A.SBlock)]);
     }
     return node.binds.every((b) => b.visit(this)) && node.body.visit(wellFormedVisitor);
   }

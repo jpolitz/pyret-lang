@@ -21,6 +21,34 @@ export function raise(msg: string): never {
   throw new InternalCompilerError(msg);
 }
 
+// ---------- checked access ----------
+// Restore Pyret's loud field-not-found / Option-unwrap errors at sites the TS port
+// reaches through `as`-casts and `!`, which are erased at runtime.
+
+// Structural (matches Pyret's dynamic `.f`): use for downcast-then-field-access.
+export function field<T = any>(x: unknown, name: string, where?: string): T {
+  if (x !== null && x !== undefined && (name in (x as object))) {
+    return (x as any)[name];
+  }
+  const got = (x as any)?.$name ?? (x === null ? 'null' : typeof x);
+  throw new InternalCompilerError(`No field '${name}'${where ? ` at ${where}` : ''} on ${got}`);
+}
+
+// Nominal: use only when one exact variant is genuinely required (value passed on).
+export function asVariant<T>(x: unknown, ctor: abstract new (...args: any[]) => T, where?: string): T {
+  if (x instanceof ctor) { return x; }
+  const got = (x as any)?.$name ?? (x === null ? 'null' : typeof x);
+  throw new InternalCompilerError(`Expected ${ctor.name}${where ? ` at ${where}` : ''}, got ${got}`);
+}
+
+// Strips `| undefined` loudly: use for `!` and Option-unwrap-style casts.
+export function nonNull<T>(x: T | undefined | null, where?: string): T {
+  if (x === null || x === undefined) {
+    throw new InternalCompilerError(`Unexpected ${x === null ? 'null' : 'undefined'}${where ? ` at ${where}` : ''}`);
+  }
+  return x;
+}
+
 // ---------- Either ----------
 
 export type Left<L> = { readonly $name: 'left'; readonly v: L };

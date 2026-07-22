@@ -21,9 +21,12 @@ import * as TCS from './type-check-structs';
 import * as C from './compile-structs';
 import {
   InternalCompilerError,
+  asVariant,
+  field as getField,
   map2,
   mapGetValue,
   mapSet,
+  nonNull,
   raise,
   toRepr,
 } from './shared';
@@ -144,7 +147,7 @@ export function addExistentialsToDataName(typ: Type, context: Context): AnyFoldR
 export function valueExportSdToTypeSd(sd: Map<string, C.ValueExport>): Map<string, Type> {
   const tdict = new Map<string, Type>();
   for (const k of sd.keys()) {
-    tdict.set(k, (mapGetValue(sd, k) as C.VVar).t);
+    tdict.set(k, getField(mapGetValue(sd, k), 't'));
   }
   return tdict;
 }
@@ -153,7 +156,7 @@ export function valueExportSdToTypeSd(sd: Map<string, C.ValueExport>): Map<strin
 export function typeCheck(program: A.Program, compileEnv: C.CompileEnvironment, postCompileEnv: C.ComputedEnvironment, modules: Map<string, C.Loadable>): C.CompileResult<TCS.Typed> {
   let context = TCS.emptyContext();
   for (const key of primvalCopyKeys) {
-    primvalTypes.set(key, (mapGetValue(mapGetValue(modules, 'builtin://global').provides.values, key) as C.VVar).t);
+    primvalTypes.set(key, getField(mapGetValue(mapGetValue(modules, 'builtin://global').provides.values, key), 't'));
   }
   const globvs = compileEnv.globals.values;
   const globts = compileEnv.globals.types;
@@ -166,7 +169,7 @@ export function typeCheck(program: A.Program, compileEnv: C.CompileEnvironment, 
       if (g === '_') {
         // context unchanged
       } else {
-        context = context.setGlobalTypes(mapSet(context.globalTypes, new A.SGlobal(g).key(), (compileEnv.globalValueValue(g) as C.VVar).t));
+        context = context.setGlobalTypes(mapSet(context.globalTypes, new A.SGlobal(g).key(), getField(compileEnv.globalValueValue(g), 't')));
       }
     }
   }
@@ -211,10 +214,10 @@ export function typeCheck(program: A.Program, compileEnv: C.CompileEnvironment, 
         let typ: Type;
         switch (ve.$name) {
           case 'v-alias':
-            typ = (compileEnv.valueByUriValue(ve.origin.uriOfDefinition, ve.origin.originalName.toname()) as C.VVar).t;
+            typ = getField(compileEnv.valueByUriValue(ve.origin.uriOfDefinition, ve.origin.originalName.toname()), 't');
             break;
           default:
-            typ = (ve as C.VVar).t;
+            typ = getField(ve, 't');
         }
         valsTypesDict.set(k2, typ);
       }
@@ -238,7 +241,7 @@ export function typeCheck(program: A.Program, compileEnv: C.CompileEnvironment, 
       const moduleType = new TS.TModule(key, valProvides, dtsDict, mod.aliases);
       context = context.setModules(mapSet(context.modules, key, moduleType));
       for (const d of mod.dataDefinitions.keys()) {
-        context = context.setDataTypes(mapSet(context.dataTypes, d, compileEnv.resolveDatatypeByUri(mod.fromUri, d) as DataType));
+        context = context.setDataTypes(mapSet(context.dataTypes, d, nonNull(compileEnv.resolveDatatypeByUri(mod.fromUri, d))));
       }
     }
   }
@@ -253,7 +256,7 @@ export function typeCheck(program: A.Program, compileEnv: C.CompileEnvironment, 
   // that came from a module. This is slower, and having Yet Another
   // Datatype for "bindings after imports" would help here.
 
-  const pce = postCompileEnv as C.ComputedEnv;
+  const pce = asVariant(postCompileEnv, C.ComputedEnv);
   const mbinds = pce.moduleBindings;
   const vbinds = pce.bindings;
   const tbinds = pce.typeBindings;
@@ -270,7 +273,7 @@ export function typeCheck(program: A.Program, compileEnv: C.CompileEnvironment, 
       // unchanged
     } else {
       const thismod = mapGetValue(context.modules, vbind.origin.uriOfDefinition);
-      const typ = (thismod.provides as TS.TRecord).fields.get(vbind.origin.originalName.toname());
+      const typ = getField(thismod.provides, 'fields').get(vbind.origin.originalName.toname());
       if (typ === undefined) {
         return raise('Cannot find value binding for ' + vbind.origin.originalName.toname());
       } else {
@@ -390,7 +393,7 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
                   .bind((newExpr, newType, ctx3) => {
                     let ctx4 = ctx3;
                     for (let i = binds2.length - 1; i >= 0; i--) {
-                      ctx4 = ctx4.removeBinding((binds2[i].b as A.SBind).id.key());
+                      ctx4 = ctx4.removeBinding(getField(binds2[i].b, 'id').key());
                     }
                     return new TCS.TypingResult(newExpr, newType, ctx4);
                   });
@@ -678,7 +681,7 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
               .bind((newExpr, newType, ctx3) => {
                 let ctx4 = ctx3;
                 for (let i = binds2.length - 1; i >= 0; i--) {
-                  ctx4 = ctx4.removeBinding((binds2[i].b as A.SBind).id.key());
+                  ctx4 = ctx4.removeBinding(getField(binds2[i].b, 'id').key());
                 }
                 return new TCS.TypingResult(newExpr, newType, ctx4);
               });
@@ -1069,10 +1072,10 @@ export function handleDatatype(dataTypeBind: A.LetrecBind, bindings: A.LetrecBin
           dataFields = mapSet(mapSet(dataFields, variantType.name, mkConstructorType(variantType, branderType, tVars)),
             'is-' + variantType.name, predicateType);
         }
-        const ctx2 = ctx1.addBinding((dataTypeBind.b as A.SBind).id.key(), new TS.TRecord(dataFields, l, false));
+        const ctx2 = ctx1.addBinding(getField(dataTypeBind.b, 'id').key(), new TS.TRecord(dataFields, l, false));
         return TCS.mapFoldResult((binding: A.LetrecBind, ctx: Context) =>
           synthesis(binding.value, false, ctx).foldBind((newValue, resultType, ctx3) =>
-            new TCS.FoldResult(new A.SLetrecBind(binding.l, binding.b, newValue), ctx3.addBinding((binding.b as A.SBind).id.key(), resultType))),
+            new TCS.FoldResult(new A.SLetrecBind(binding.l, binding.b, newValue), ctx3.addBinding(getField(binding.b, 'id').key(), resultType))),
         bindings, ctx2).bind((newBindings, ctx3) =>
           TCS.mapFoldResult(collectVariant, variants, ctx3).bind((initialVariantTypes2, ctx4) =>
             collectMembers(fields, true, ctx4).bind((initialSharedFieldTypes, ctx5) => {
@@ -1258,7 +1261,7 @@ export function collectVariantConstructor(variant: A.Variant, context: Context):
           default:
             throw new InternalCompilerError('Unknown VariantMemberType in collect-variant-constructor');
         }
-        return toType((member.bind as A.SBind).ann, ctx).bind((maybeType, ctx2) => {
+        return toType(getField(member.bind, 'ann'), ctx).bind((maybeType, ctx2) => {
           if (maybeType === undefined) {
             return new TCS.FoldErrors<Type>([new C.CantTypecheck('No type annotation provided on member', l)]);
           } else {
@@ -1270,7 +1273,7 @@ export function collectVariantConstructor(variant: A.Variant, context: Context):
       return TCS.foldrFoldResult<A.VariantMember, TS.VariantField[]>((member, ctx, typeMembers) =>
         processMember(member, ctx)
           .bind((memberType, ctx2) =>
-            new TCS.FoldResult([[(member.bind as A.SBind).id.toname(), memberType] as TS.VariantField, ...typeMembers], ctx2)),
+            new TCS.FoldResult([[getField(member.bind, 'id').toname(), memberType] as TS.VariantField, ...typeMembers], ctx2)),
       members, context, []).bind((typeMembers, ctx) =>
         new TCS.FoldResult<TypeVariant>(new TS.TVariant(name, typeMembers, new Map(), l), ctx));
     }
@@ -1297,7 +1300,7 @@ export function collectVariant(variant: A.Variant, context: Context): AnyFoldRes
           default:
             throw new InternalCompilerError('Unknown VariantMemberType in collect-variant');
         }
-        return toType((member.bind as A.SBind).ann, ctx).bind((maybeType, ctx2) => {
+        return toType(getField(member.bind, 'ann'), ctx).bind((maybeType, ctx2) => {
           if (maybeType === undefined) {
             return new TCS.FoldErrors<Type>([new C.CantTypecheck('No type annotation provided on member', l)]);
           } else {
@@ -1309,7 +1312,7 @@ export function collectVariant(variant: A.Variant, context: Context): AnyFoldRes
       return TCS.foldrFoldResult<A.VariantMember, TS.VariantField[]>((member, ctx, typeMembers) =>
         processMember(member, ctx)
           .bind((memberType, ctx2) =>
-            new TCS.FoldResult([[(member.bind as A.SBind).id.toname(), memberType] as TS.VariantField, ...typeMembers], ctx2)),
+            new TCS.FoldResult([[getField(member.bind, 'id').toname(), memberType] as TS.VariantField, ...typeMembers], ctx2)),
       members, context, []).bind((typeMembers, ctx) =>
         collectMembers(withMembers, true, ctx).bind((typeWithMembers, ctx2) => {
           const typeVariant = new TS.TVariant(name, typeMembers, typeWithMembers, l);
@@ -1568,12 +1571,12 @@ export function handleBranch(dataType: DataType, casesLoc: A.Loc, branch: A.Case
               return foldr2((foldContext: AnyFoldResult<undefined>, arg: A.CasesBind, field: TS.VariantField) =>
                 foldContext.bind((_nothing, ctx) => {
                   const argType = field[1];
-                  return toType((arg.bind as A.SBind).ann, ctx).bind((maybeType, ctx2) => {
+                  return toType(getField(arg.bind, 'ann'), ctx).bind((maybeType, ctx2) => {
                     if (maybeType !== undefined) {
                       const ctx3 = ctx2.addConstraint(argType, maybeType);
-                      return new TCS.FoldResult<undefined>(undefined, ctx3.addBinding((arg.bind as A.SBind).id.key(), maybeType));
+                      return new TCS.FoldResult<undefined>(undefined, ctx3.addBinding(getField<A.Name>(arg.bind, 'id').key(), maybeType));
                     } else {
-                      return new TCS.FoldResult<undefined>(undefined, ctx2.addBinding((arg.bind as A.SBind).id.key(), argType));
+                      return new TCS.FoldResult<undefined>(undefined, ctx2.addBinding(getField<A.Name>(arg.bind, 'id').key(), argType));
                     }
                   });
                 }), new TCS.FoldResult<undefined>(undefined, ctx0), args, fields).bind((_nothing, ctx) =>
@@ -1583,7 +1586,7 @@ export function handleBranch(dataType: DataType, casesLoc: A.Loc, branch: A.Case
                     .bind((result, ctx4) => {
                       let ctx5 = ctx4;
                       for (let i = args.length - 1; i >= 0; i--) {
-                        ctx5 = ctx5.removeBinding((args[i].bind as A.SBind).id.key());
+                        ctx5 = ctx5.removeBinding(getField(args[i].bind, 'id').key());
                       }
                       return new TCS.FoldResult(result, ctx5);
                     });
@@ -1768,12 +1771,12 @@ export function handleLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, c
         switch (binding.$name) {
           case 's-letrec-bind': {
             const { l: l2, b, value } = binding;
-            const expectedType = mapGetValue(collectedTypes, (b as A.SBind).id.key());
-            const exampleEntry = (ctx.constraints as TCS.ConstraintSystem).exampleTypes.get(expectedType.key());
+            const expectedType = mapGetValue(collectedTypes, getField(b, 'id').key());
+            const exampleEntry = getField(ctx.constraints, 'exampleTypes').get(expectedType.key());
             if (exampleEntry !== undefined) {
               const partialType = exampleEntry[1];
               testInferenceData = {
-                name: (b as A.SBind).id,
+                name: getField(b, 'id'),
                 argTypes: partialType.argTypes,
                 retType: partialType.retType,
                 loc: partialType.loc,
@@ -1789,9 +1792,9 @@ export function handleLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, c
                 return raise('the right hand side should be a lambda');
               }
             } else {
-              const miscEntry = ctx.misc.get((b as A.SBind).id.key());
+              const miscEntry = ctx.misc.get(getField(b, 'id').key());
               if (miscEntry !== undefined) {
-                miscTestInferenceData = (b as A.SBind).id;
+                miscTestInferenceData = getField(b, 'id');
               }
 
               let ctx4 = ctx.addLevel();
@@ -1801,7 +1804,7 @@ export function handleLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, c
                 ctx5.solveLevel().typingBind((solution, ctx6) => {
                   const ctx7 = ctx6.substituteInBinds(solution);
                   const newType2 = solution.generalize(solution.apply(newType));
-                  const ctx8 = ctx7.addBinding((b as A.SBind).id.key(), newType2);
+                  const ctx8 = ctx7.addBinding(getField(b, 'id').key(), newType2);
                   if (A.isSLam(value)) {
                     if (value._check !== undefined) {
                       const checkBlock = value._check;
@@ -1833,7 +1836,7 @@ export function handleLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, c
             .bind((newAst, newType, ctx7) => {
               let ctx8 = ctx7;
               for (let i = binds.length - 1; i >= 0; i--) {
-                ctx8 = ctx8.removeBinding((binds[i].b as A.SBind).id.key());
+                ctx8 = ctx8.removeBinding(getField(binds[i].b, 'id').key());
               }
               return new TCS.TypingResult(newAst, newType, ctx8);
             });
@@ -1867,7 +1870,7 @@ export function collectLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, 
         default: {
           return collectBindings([firstBind.b], ctx).bind((collected, ctx2) => {
             const ctx3 = ctx2.addDictToBindings(collected);
-            const initialType = mapGetValue(collected, (firstBind.b as A.SBind).id.key());
+            const initialType = mapGetValue(collected, getField(firstBind.b, 'id').key());
             let folded: AnyFoldResult<Map<string, Type>>;
             if (TS.isTExistential(initialType)) {
               switch (firstBind.value.$name) {
@@ -1880,7 +1883,7 @@ export function collectLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, 
                       const checkBlock = _check;
                       lamTypeFold = lamToType(argColl, lamL, lamParams, lamArgs, lamAnn, false, ctx4).bind((lamType, ctx5) => {
                         const logPayload = '{'
-                          + "'function-name': " + "'" + (firstBind.b as A.SBind).id.toname() + "'" + ','
+                          + "'function-name': " + "'" + getField(firstBind.b, 'id').toname() + "'" + ','
                           + "'annotated-type': " + "'" + lamType.toString() + "'" + ','
                           + "'check-block': " + "'" + checkBlock.tosource().pretty(72).join('\n') + "'" + ','
                           + '}';
@@ -1894,15 +1897,15 @@ export function collectLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, 
                               let ctx6 = ctx5.addVariable(newExists);
                               ctx6 = ctx6.addExampleVariable(newExists, tempArgs, tempRet, tempL,
                                 (typ: Type, ctxx: Context) => checking(firstBind.value, typ, topLevel2, ctxx),
-                                (firstBind.b as A.SBind).id.toname());
+                                getField(firstBind.b, 'id').toname());
                               return new TCS.FoldResult<Type>(newExists, ctx6);
                             } else {
-                              const ctx6 = ctx5.addMiscExampleVariable((firstBind.b as A.SBind).id.key(), (firstBind.b as A.SBind).id.toname());
+                              const ctx6 = ctx5.addMiscExampleVariable(getField(firstBind.b, 'id').key(), getField(firstBind.b, 'id').toname());
                               return new TCS.FoldResult<Type>(lamType, ctx6);
                             }
                           }
                           default: {
-                            const ctx6 = ctx5.addMiscExampleVariable((firstBind.b as A.SBind).id.key(), (firstBind.b as A.SBind).id.toname());
+                            const ctx6 = ctx5.addMiscExampleVariable(getField(firstBind.b, 'id').key(), getField(firstBind.b, 'id').toname());
                             return lamToType(argColl, lamL, lamParams, lamArgs, lamAnn, topLevel2, ctx6);
                           }
                         }
@@ -1911,7 +1914,7 @@ export function collectLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, 
                       lamTypeFold = lamToType(argColl, lamL, lamParams, lamArgs, lamAnn, topLevel2, ctx4);
                     }
                     return lamTypeFold.bind((lamType, ctx5) =>
-                      new TCS.FoldResult(mapSet(collected, (firstBind.b as A.SBind).id.key(), lamType), ctx5));
+                      new TCS.FoldResult(mapSet(collected, getField(firstBind.b, 'id').key(), lamType), ctx5));
                   });
                   break;
                 }
@@ -1922,7 +1925,7 @@ export function collectLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, 
               folded = new TCS.FoldResult(collected, ctx3);
             }
             return folded.bind((collectedBindings, ctx4) => {
-              const key = (firstBind.b as A.SBind).id.key();
+              const key = getField(firstBind.b, 'id').key();
               return helper(restBinds, topLevel2, ctx4, dataBindings,
                 [[...bindings[0], firstBind], mapSet(bindings[1], key, mapGetValue(collectedBindings, key))]);
             });
@@ -1940,12 +1943,12 @@ export function collectLetrecBindings(binds: A.LetrecBind[], topLevel: boolean, 
 // The existential is added to the current level's variables
 export function collectBindings(binds: A.Bind[], context: Context): AnyFoldResult<Map<string, Type>> {
   return TCS.foldrFoldResult<A.Bind, Map<string, Type>>((binding, ctx, dict) =>
-    toType((binding as A.SBind).ann, ctx).bind((maybeType, ctx2) => {
+    toType(getField(binding, 'ann'), ctx).bind((maybeType, ctx2) => {
       const newType = maybeType !== undefined
         ? maybeType.setLoc(binding.l)
         : newExistential(binding.l, true);
       const ctx3 = ctx2.addVariable(newType);
-      return new TCS.FoldResult(mapSet(dict, (binding as A.SBind).id.key(), newType), ctx3);
+      return new TCS.FoldResult(mapSet(dict, getField(binding, 'id').key(), newType), ctx3);
     }), binds, context, new Map());
 }
 
@@ -1955,7 +1958,7 @@ export function lamToType(coll: Map<string, Type>, l: Loc, params: A.Name[], arg
     const retType = maybeType !== undefined ? maybeType : newExistential(l, true);
     const ctx2 = ctx.addVariable(retType);
     const foldArgTypes = TCS.mapFoldResult((arg: A.Bind, ctx3: Context): AnyFoldResult<Type> => {
-      const argId = (arg as A.SBind).id;
+      const argId = getField(arg, 'id');
       const argIsUnderscore = A.isSAtom(argId) ? argId.base === '$underscore' : false;
       const argType = mapGetValue(coll, argId.key());
       if (topLevel && TS.isTExistential(argType) && !argIsUnderscore) {
@@ -2042,22 +2045,22 @@ export function synthesisLetBind(binding: A.LetBind, context0: Context): AnyTypi
     switch (binding.$name) {
       case 's-let-bind': {
         const { l, b, value } = binding;
-        return toType((b as A.SBind).ann, context).typingBind((maybeType, ctx) => {
+        return toType(getField(b, 'ann'), context).typingBind((maybeType, ctx) => {
           const annType = maybeType !== undefined ? maybeType : newExistential(l, true);
           const ctx2 = ctx.addVariable(annType);
           return checking(value, annType, false, ctx2)
             .bind((newValue, newType, ctx3) =>
-              new TCS.TypingResult(newValue, newType, ctx3.addBinding((b as A.SBind).id.key(), newType)));
+              new TCS.TypingResult(newValue, newType, ctx3.addBinding(getField(b, 'id').key(), newType)));
         });
       }
       case 's-var-bind': {
         const { l, b, value } = binding;
-        return toType((b as A.SBind).ann, context).typingBind((maybeType, ctx) => {
+        return toType(getField(b, 'ann'), context).typingBind((maybeType, ctx) => {
           const annType = maybeType !== undefined ? maybeType : newExistential(l, true);
           const ctx2 = ctx.addVariable(annType);
           return checking(value, annType, false, ctx2)
             .bind((newValue, newType, ctx3) =>
-              new TCS.TypingResult(newValue, new TS.TRef(newType, l, false), ctx3.addBinding((b as A.SBind).id.key(), new TS.TRef(newType, l, false))));
+              new TCS.TypingResult(newValue, new TS.TRef(newType, l, false), ctx3.addBinding(getField(b, 'id').key(), new TS.TRef(newType, l, false))));
         });
       }
       default:
@@ -2098,7 +2101,7 @@ export function synthesisUpdate(updateLoc: Loc, obj: Expr, objType: Type, fields
           } else {
             switch (oldType.$name) {
               case 't-ref':
-                return checking((field as A.SDataField).value, oldType.typ, false, ctx2).foldBind((newValue, _t, ctx3) =>
+                return checking(getField(field, 'value'), oldType.typ, false, ctx2).foldBind((newValue, _t, ctx3) =>
                   new TCS.FoldResult([new A.SDataField(field.l, field.name, newValue), ...fields], ctx3));
               default:
                 return new TCS.FoldErrors<A.Member[]>([new C.IncorrectType(oldType.toString(), oldType.l, new TS.TRef(oldType, updateLoc, false).toString(), updateLoc)]);
@@ -2118,7 +2121,7 @@ export function synthesisUpdate(updateLoc: Loc, obj: Expr, objType: Type, fields
             } else {
               switch (oldType.$name) {
                 case 't-ref':
-                  return checking((field as A.SDataField).value, oldType.typ, false, ctx3).foldBind((newValue, _t, ctx4) =>
+                  return checking(getField(field, 'value'), oldType.typ, false, ctx3).foldBind((newValue, _t, ctx4) =>
                     new TCS.FoldResult([new A.SDataField(field.l, field.name, newValue), ...fields], ctx4));
                 default:
                   return new TCS.FoldErrors<A.Member[]>([new C.IncorrectType(oldType.toString(), oldType.l, new TS.TRef(oldType, updateLoc, false).toString(), updateLoc)]);
@@ -2150,7 +2153,7 @@ export function checkFun(funLoc: Loc, body: Expr, params: A.Name[], args: A.Bind
             return new TCS.TypingError([new C.IncorrectType(expected, funLoc, found, expectType.l)]);
           } else {
             const tempLamBinds = foldr2((lamBinds0: Map<string, Type>, arg: A.Bind, expectArgType: Type) => {
-              const key = (arg as A.SBind).id.key();
+              const key = getField(arg, 'id').key();
               const boundType = mapGetValue(lamBinds0, key);
               if (TS.isTExistential(boundType)) {
                 return mapSet(lamBinds0, key, expectArgType);
@@ -2172,7 +2175,7 @@ export function checkFun(funLoc: Loc, body: Expr, params: A.Name[], args: A.Bind
               lamBinds = newBinds;
               ctx2 = ctx2.addVariable(newExists);
             }
-            const lamArgTypes = args.map((arg) => mapGetValue(lamBinds, (arg as A.SBind).id.key()));
+            const lamArgTypes = args.map((arg) => mapGetValue(lamBinds, getField(arg, 'id').key()));
             const ctx3 = foldr2((ctxAcc: Context, lamArgType: Type, expectArgType: Type) =>
               ctxAcc.addConstraint(lamArgType, expectArgType), ctx2.addDictToBindings(lamBinds), lamArgTypes, expectArgs);
             const bodyResult = checking(body, retType, false, ctx3);
@@ -2611,7 +2614,7 @@ export function toType(inAnn: A.Ann, context: Context): AnyFoldResult<Type | und
 export function ignoreChecker(l: Loc, binds: A.LetBind[], body: Expr, blocky: boolean, context: Context, handler: (l: Loc, binds: A.LetBind[], body: Expr, context: Context) => AnyTypingResult): AnyTypingResult {
   if (binds.length === 1) {
     const binding = binds[0];
-    const bindingId = (binding.b as A.SBind).id;
+    const bindingId = getField(binding.b, 'id');
     switch (bindingId.$name) {
       case 's-atom': {
         const base = bindingId.base;

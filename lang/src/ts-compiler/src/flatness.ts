@@ -26,7 +26,7 @@
 import * as A from './ast';
 import * as AA from './ast-anf';
 import * as C from './compile-structs';
-import { InternalCompilerError, mapGetValue, raise, toRepr as torepr } from './shared';
+import { InternalCompilerError, mapGetValue, raise, toRepr as torepr, field, asVariant } from './shared';
 
 export type Flatness = number | undefined;
 export type FEnv = Map<string, Flatness>;
@@ -87,7 +87,7 @@ export function annFlatness(
       // the Number in List<Number>
       return annFlatness(ann.ann, valEnv, annEnv, mb, env);
     case 'a-pred': {
-      const valFlatness = valEnv.get((ann.exp as any).id.key());
+      const valFlatness = valEnv.get(field(ann.exp, 'id').key());
       return flatnessMax(
         annFlatness(ann.ann, valEnv, annEnv, mb, env),
         valFlatness
@@ -542,7 +542,7 @@ export function makeProgFlatnessEnv(
   postEnv: C.ComputedEnvironment,
   env: C.CompileEnvironment
 ): FlatnessEnv {
-  const pe = postEnv as C.ComputedEnv;
+  const pe = asVariant(postEnv, C.ComputedEnv);
   const bindings = pe.bindings;
   const moduleBindings = pe.moduleBindings;
   const mb = moduleBindings;
@@ -645,7 +645,7 @@ export function getDefinedValues(ast: AA.AProg): Map<string, string> {
   for (const d of theDvs) {
     switch (d.$name) {
       case 'a-defined-value':
-        dvsDict.set(d.name, ((d.value as any).id as A.Name).key());
+        dvsDict.set(d.name, field(d.value, 'id').key());
         break;
       case 'a-defined-var':
         dvsDict.set(d.name, d.id.key());
@@ -669,7 +669,7 @@ export function getFlatProvides(
   // exactly as in the Pyret original
   getDefinedValues(ast);
   const flatnessEnv = flatnessEnvAndTypes[0];
-  const pe = postEnv as C.ComputedEnv;
+  const pe = asVariant(postEnv, C.ComputedEnv);
   // cases(C.Provides) provides: | provides(uri, modules, values, aliases, datatypes)
   const uri = provides.fromUri;
   const modules = provides.modules;
@@ -698,8 +698,8 @@ export function getFlatProvides(
         newVal = ve;
       } else {
         // existing-val.t errors in Pyret if existing-val is a v-alias;
-        // mirrored here with a dynamic access
-        newVal = new C.VFun(ve.origin, (existingVal as any).t, k, maybeFlatness);
+        // mirrored here with a checked field access
+        newVal = new C.VFun(ve.origin, field(existingVal, 't'), k, maybeFlatness);
       }
     }
     newValues.set(k, newVal);

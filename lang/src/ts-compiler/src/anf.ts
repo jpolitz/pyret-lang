@@ -12,7 +12,7 @@
 import * as A from './ast';
 import * as SL from './srcloc';
 import * as N from './ast-anf';
-import { InternalCompilerError, raise, map2, toRepr as torepr } from './shared';
+import { InternalCompilerError, raise, map2, toRepr as torepr, field, asVariant } from './shared';
 import { jsnums, PyretNumber, throwingErrbacks } from './interop/js-numbers';
 
 export type Loc = SL.Srcloc;
@@ -289,7 +289,7 @@ function anfLinear(eInit: A.Expr, k: ANFCont): N.AExpr {
           switch (f.$name) {
             case 's-var-bind': {
               const l2 = f.l;
-              const b = f.b as A.SBind;
+              const b = asVariant(f.b, A.SBind);
               const val = f.value;
               if (A.isABlank(b.ann) || A.isAAny(b.ann)) {
                 let hole: N.AVar | undefined = undefined;
@@ -321,7 +321,7 @@ function anfLinear(eInit: A.Expr, k: ANFCont): N.AExpr {
             }
             case 's-let-bind': {
               const l2 = f.l;
-              const b = f.b as A.SBind;
+              const b = asVariant(f.b, A.SBind);
               const val = f.value;
               let hole: N.ALet | undefined = undefined;
               const translated = anf(val, (lettable) => {
@@ -348,7 +348,7 @@ function anfLinear(eInit: A.Expr, k: ANFCont): N.AExpr {
         const letBinds = binds.map((b) =>
           new A.SVarBind(b.l, b.b, new A.SUndefined(l)));
         const assigns = binds.map((b): A.Expr =>
-          new A.SAssign(b.l, (b.b as A.SBind).id, b.value));
+          new A.SAssign(b.l, field(b.b, 'id'), b.value));
         e = new A.SLetExpr(l, letBinds, new A.SBlock(l, [...assigns, body]), true);
         continue;
       }
@@ -453,7 +453,7 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
             const withExprs = v.withMembers.map(getValue);
             return anfNameRec(withExprs, 'anf_variant_member', (ts) => {
               const newFields = map2((f: A.Member, t: N.AVal): N.AField =>
-                new N.AField(f.l, (f as A.SDataField).name, t), v.withMembers, ts);
+                new N.AField(f.l, field(f, 'name'), t), v.withMembers, ts);
               return kv(new N.AVariant(v.l, v.constrLoc, v.name, v.members.map(anfMember), newFields));
             });
           }
@@ -461,7 +461,7 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
             const withExprs = v.withMembers.map(getValue);
             return anfNameRec(withExprs, 'anf_singleton_variant_member', (ts) => {
               const newFields = map2((f: A.Member, t: N.AVal): N.AField =>
-                new N.AField(f.l, (f as A.SDataField).name, t), v.withMembers, ts);
+                new N.AField(f.l, field(f, 'name'), t), v.withMembers, ts);
               return kv(new N.ASingletonVariant(v.l, v.name, newFields));
             });
           }
@@ -482,7 +482,7 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
 
       return anfNameRec(exprs, 'anf_shared', (ts) => {
         const newShared = map2((f: A.Member, t: N.AVal): N.AField =>
-          new N.AField(f.l, (f as A.SDataField).name, t), shared, ts);
+          new N.AField(f.l, field(f, 'name'), t), shared, ts);
         return anfVariants(variants, (newVariants) =>
           k(new N.ADataExpr(l, dataName, dataNameT, newVariants, newShared)));
       });
@@ -534,10 +534,10 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
     case 's-lam': {
       const { l, name, args, ann: ret, body } = e;
       if (A.isABlank(ret) || A.isAAny(ret)) {
-        return k(new N.ALam(l, name, args.map((a) => new N.ABind(a.l, (a as A.SBind).id, (a as A.SBind).ann)), ret, anfTerm(body)));
+        return k(new N.ALam(l, name, args.map((a) => new N.ABind(a.l, field(a, 'id'), field(a, 'ann'))), ret, anfTerm(body)));
       } else {
         const temp = mkId(l, 'ann_check_temp');
-        return k(new N.ALam(l, name, args.map((a) => new N.ABind(a.l, (a as A.SBind).id, (a as A.SBind).ann)), ret,
+        return k(new N.ALam(l, name, args.map((a) => new N.ABind(a.l, field(a, 'id'), field(a, 'ann'))), ret,
           anfTerm(new A.SLetExpr(l,
             [new A.SLetBind(l, new A.SBind(l, false, temp.id, ret), body)],
             new A.SId(l, temp.id), false))));
@@ -546,10 +546,10 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
     case 's-method': {
       const { l, name, args, ann: ret, body } = e;
       if (A.isABlank(ret) || A.isAAny(ret)) {
-        return k(new N.AMethod(l, name, args.map((a) => new N.ABind(a.l, (a as A.SBind).id, (a as A.SBind).ann)), ret, anfTerm(body)));
+        return k(new N.AMethod(l, name, args.map((a) => new N.ABind(a.l, field(a, 'id'), field(a, 'ann'))), ret, anfTerm(body)));
       } else {
         const temp = mkId(l, 'ann_check_temp');
-        return k(new N.AMethod(l, name, args.map((a) => new N.ABind(a.l, (a as A.SBind).id, (a as A.SBind).ann)), ret,
+        return k(new N.AMethod(l, name, args.map((a) => new N.ABind(a.l, field(a, 'id'), field(a, 'ann'))), ret,
           anfTerm(new A.SLetExpr(l,
             [new A.SLetBind(l, new A.SBind(l, false, temp.id, ret), body)],
             new A.SId(l, temp.id), false))));
@@ -673,7 +673,7 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
 
       return anfNameRec(exprs, 'anf_obj', (ts) => {
         const newFields = map2((f: A.Member, t: N.AVal): N.AField =>
-          new N.AField(f.l, (f as A.SDataField).name, t), fields, ts);
+          new N.AField(f.l, field(f, 'name'), t), fields, ts);
         return k(new N.AObj(l, newFields));
       });
     }
@@ -685,7 +685,7 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
       return anfName(obj, 'anf_update', (o) =>
         anfNameRec(exprs, 'anf_update', (ts) => {
           const newFields = map2((f: A.Member, t: N.AVal): N.AField =>
-            new N.AField(f.l, (f as A.SDataField).name, t), fields, ts);
+            new N.AField(f.l, field(f, 'name'), t), fields, ts);
           return k(new N.AUpdate(l, o, newFields));
         }));
     }
@@ -697,7 +697,7 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
       return anfName(obj, 'anf_extend', (o) =>
         anfNameRec(exprs, 'anf_extend', (ts) => {
           const newFields = map2((f: A.Member, t: N.AVal): N.AField =>
-            new N.AField(f.l, (f as A.SDataField).name, t), fields, ts);
+            new N.AField(f.l, field(f, 'name'), t), fields, ts);
           return k(new N.AExtend(l, o, newFields));
         }));
     }

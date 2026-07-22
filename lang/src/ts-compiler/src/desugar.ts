@@ -7,7 +7,7 @@ import * as A from './ast';
 import * as C from './compile-structs';
 import { Loc, dummyLoc } from './srcloc';
 import { jsnums, throwingErrbacks } from './interop/js-numbers';
-import { raise, partition } from './shared';
+import { raise, partition, field, nonNull } from './shared';
 
 const names = A.globalNames;
 
@@ -394,7 +394,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       return new A.SIfElse(l,
         [
           new A.SIfBranch(l, dsTest, A.isSBlock(expr.block)
-            ? new A.SBlock(l, [...(dsBody as A.SBlock).stmts, gNothing])
+            ? new A.SBlock(l, [...field<A.Expr[]>(dsBody, 'stmts'), gNothing])
             : new A.SBlock(l, [dsBody, gNothing]))
         ],
         new A.SBlock(l, [gNothing]),
@@ -528,7 +528,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
     case 's-obj': return new A.SObj(expr.l, expr.fields.map(desugarMember));
     case 's-tuple': return new A.STuple(expr.l, expr.fields.map(desugarExpr));
     case 's-tuple-get': return new A.STupleGet(expr.l, desugarExpr(expr.tup), expr.index, expr.indexLoc);
-    case 's-ref': return new A.SRef(expr.l, desugarAnn(expr.ann as A.Ann));
+    case 's-ref': return new A.SRef(expr.l, desugarAnn(nonNull(expr.ann)));
     case 's-construct': {
       const l = expr.l;
       const constructorVal = expr.constructorVal;
@@ -564,10 +564,10 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       const l = expr.l;
       const fieldsByName = new Map<string, A.Expr>();
       const initAndNonInit = partition((f: A.Member) => {
-        if (f.name !== 'init') { fieldsByName.set(f.name, (f as A.SDataField).value); }
+        if (f.name !== 'init') { fieldsByName.set(f.name, field(f, 'value')); }
         return f.name === 'init';
       }, expr.fields);
-      const init = (initAndNonInit.isTrue[0] as A.SDataField).value;
+      const init = field(initAndNonInit.isTrue[0], 'value');
       const nonInitFields = initAndNonInit.isFalse;
       void nonInitFields;
       const fieldNames = C.reactorOptionalFields;
@@ -656,10 +656,10 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       const tbl = mkId(dummyLoc, 'table');
 
       const columns = columnBinds.binds.map((c) => ({
-        name: new A.SStr(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
+        name: new A.SStr(dummyLoc, field(field(c, 'id'), 'base')),
         l: c.l,
-        idx: mkId(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
-        val: { idB: c, idE: new A.SId(c.l, (c as A.SBind).id) }
+        idx: mkId(dummyLoc, field(field(c, 'id'), 'base')),
+        val: { idB: c, idE: new A.SId(c.l, field(c, 'id')) }
       }));
 
       const splitExts = partition(A.isSTableExtendReducer, extensions);
@@ -692,8 +692,8 @@ export function desugarExpr(expr: A.Expr): A.Expr {
         let reducersAcc: A.LetBind[] = [];
         for (const ext of reducerExts) {
           const l2 = ext.l;
-          const reducer = reducers.get(ext.name)!;
-          const acc = accs.get(ext.name)!;
+          const reducer = nonNull(reducers.get(ext.name));
+          const acc = nonNull(accs.get(ext.name));
           const nothingExpr = new A.SId(l2, new A.SGlobal('nothing'));
           reducersAcc = [
             new A.SLetBind(l2, reducer.idB, desugarExpr(ext.reducer)),
@@ -714,11 +714,11 @@ export function desugarExpr(expr: A.Expr): A.Expr {
             const l2 = extension.l;
             const name = extension.name;
             const col = extension.col;
-            const reducer = reducers.get(name)!;
-            const acc = accs.get(name)!;
+            const reducer = nonNull(reducers.get(name));
+            const acc = nonNull(accs.get(name));
             // Dereferenced accumulator
             const accIdE = new A.SIdVar(acc.idE.l, acc.idE.id);
-            const found = columns.find((x) => x.name.s === (col as A.SName).s);
+            const found = columns.find((x) => x.name.s === field(col, 's'));
             // Lift from Option monad
             const colId = found === undefined
               // Dummy values; will end up unbound
@@ -793,17 +793,17 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       const tbl = mkId(l, 'table');
 
       const columns = columnBinds.binds.map((c) => ({
-        name: new A.SStr(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
+        name: new A.SStr(dummyLoc, field(field(c, 'id'), 'base')),
         l: c.l,
-        idx: mkId(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
-        val: { idB: c, idE: new A.SId(c.l, (c as A.SBind).id) }
+        idx: mkId(dummyLoc, field(field(c, 'id'), 'base')),
+        val: { idB: c, idE: new A.SId(c.l, field(c, 'id')) }
       }));
 
       const updates = expr.updates.map((u) => ({
         name: new A.SStr(dummyLoc, u.name),
         l: u.l,
         idx: mkId(dummyLoc, u.name),
-        val: desugarExpr((u as A.SDataField).value)
+        val: desugarExpr(field(u, 'value'))
       }));
 
       const binds: A.LetBind[] = [
@@ -849,9 +849,9 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       const row = mkId(dummyLoc, 'row');
       const tbl = mkId(l, 'table');
       const columns = expr.columns.map((c) => ({
-        l: (c as A.SName).l,
-        idx: mkId((c as A.SName).l, (c as A.SName).s),
-        name: new A.SStr((c as A.SName).l, (c as A.SName).s)
+        l: field(c, 'l'),
+        idx: mkId(field(c, 'l'), field(c, 's')),
+        name: new A.SStr(field(c, 'l'), field(c, 's'))
       }));
       const binds: A.LetBind[] = [
         new A.SLetBind(dummyLoc, tbl.idB,
@@ -880,13 +880,13 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       const column = expr.column;
       const table = expr.table;
       const tbl = mkId(table.l, 'table');
-      const col = mkId(dummyLoc, (column as A.SName).s);
-      const row = mkId(dummyLoc, (column as A.SName).s);
+      const col = mkId(dummyLoc, field(column, 's'));
+      const row = mkId(dummyLoc, field(column, 's'));
       return new A.SLetExpr(dummyLoc, [
         new A.SLetBind(dummyLoc, tbl.idB,
           checkTable(table.l, desugarExpr(table), (t) => t)),
         new A.SLetBind(dummyLoc, col.idB,
-          getTableColumn(l, table.l, tbl.idE, { l: (column as A.SName).l, name: new A.SStr(dummyLoc, (column as A.SName).s) }))],
+          getTableColumn(l, table.l, tbl.idE, { l: field(column, 'l'), name: new A.SStr(dummyLoc, field(column, 's')) }))],
         // Table Construction
         new A.SPrimApp(dummyLoc, 'raw_array_to_list', [
           new A.SApp(l, new A.SId(dummyLoc, g('raw-array-map')), [
@@ -897,7 +897,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
     case 's-table-order': {
       const l = expr.l;
       const orderingRawArr = expr.ordering.map((o) =>
-        new A.SArray(o.l, [new A.SBool(o.l, A.isASCENDING(o.direction)), new A.SStr(o.l, (o.column as A.SName).s)]));
+        new A.SArray(o.l, [new A.SBool(o.l, A.isASCENDING(o.direction)), new A.SStr(o.l, field(o.column, 's'))]));
       return new A.SApp(l,
         new A.SDot(dummyLoc, desugarExpr(expr.table), 'multi-order'),
         [new A.SArray(dummyLoc, orderingRawArr)]);
@@ -911,10 +911,10 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       const predRes = mkIdAnn(predicate.l, 'pred', new A.AName(predicate.l, new A.STypeGlobal('Boolean')));
 
       const columns = columnBinds.binds.map((c) => ({
-        name: new A.SStr(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
+        name: new A.SStr(dummyLoc, field(field(c, 'id'), 'base')),
         l: c.l,
-        idx: mkId(dummyLoc, ((c as A.SBind).id as A.SAtom).base),
-        val: { idB: c, idE: new A.SId(c.l, (c as A.SBind).id) }
+        idx: mkId(dummyLoc, field(field(c, 'id'), 'base')),
+        val: { idB: c, idE: new A.SId(c.l, field(c, 'id')) }
       }));
 
       const binds: A.LetBind[] = [
