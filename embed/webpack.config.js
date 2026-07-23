@@ -17,7 +17,8 @@ module.exports = {
         extensions: ['.ts', '.js'],
         fallback: {
             'fs': require.resolve('@zenfs/core'),
-            'path': require.resolve('path-browserify')
+            'path': require.resolve('path-browserify'),
+            'buffer': require.resolve('buffer/')
         }
     },
     output: {

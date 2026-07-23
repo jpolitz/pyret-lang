@@ -7,13 +7,14 @@ suite against the three places the Pyret editor renders. It's a **`node:test`**
 suite (no extra test-framework dependency) driven through **one runner**:
 
 ```
-node run.js --env=cpo|embed|vscode|vscode-ovsx [--grep=<regex>] [--suites=all|check-blocks,errors,...]
+node run.js --env=cpo|embed|embed-static|vscode|vscode-ovsx [--grep=<regex>] [--suites=all|check-blocks,errors,...]
 ```
 
 | `--env` | What it drives |
 |---|---|
 | `cpo` | the reference — `code.pyret.org`'s `/editor` page (reproduces upstream's outcomes) |
 | `embed` | the embed API's embedded instance (`<iframe>` in `/embed/embed1.html`) |
+| `embed-static` | the **pyret-embed library** (`embed/dist/pyret.js`) driving the **built** `editor.embed.html` artifact on a plain static server — the npm-consumer flow, no CPO server |
 | `vscode` | the `pyret-parley.cpo` webview, in headless VS Code for the Web |
 | `vscode-ovsx` | the same webview, but with its assets served the way **Open VSX** serves them to the **GitLab Web IDE** — reproduces issue #21 |
 
@@ -50,6 +51,25 @@ Env vars: `OVSX_FAITHFUL=1` (correct serving), `OVSX_ASSET_ROOT=<dir>` (override
 the served build; defaults to `vscode/dist/web/build/web`), `OVSX_CAP_MB=<n>`
 (hostile size cap, default 15). A standalone one-shot check that skips the full
 spec suite lives in `smoke-ovsx.js`.
+
+### `embed-static` — pyret-embed driving the built `editor.embed.html` artifact
+
+`--env=embed` drives `/editor#controlled=true` through a running CPO server, so
+it never loads `build/web/editor.embed.html`: the file an embedding host
+actually deploys, rendered once at build time from `src/web/editor.html` +
+`.env.embed` (`BASE_URL="."`, relative asset paths, `POSTMESSAGE_ORIGIN="*"`).
+`embed-static` serves `build/web` from a plain correct-MIME static server
+(`shared/static-server.js`) and embeds it through the **real pyret-embed
+library**: a host page (`pages/embed-static-host.html`, mirroring the package's
+own `embed/src/basic.html` examples) imports `embed/dist/pyret.js` and calls
+`makeEmbedConfig({ src: "/editor.embed.html", ... })` — the exact flow an npm
+consumer of `pyret-embed` runs. It catches breakage that lives only in the
+built artifact or the library: template variables mis-rendered at build time,
+asset references that resolve at a server root but 404 under relative/static
+hosting, and pyret-embed API drift against the editor. Needs the CPO build and
+`embed/dist` (`npm ci --ignore-scripts && npx webpack` in `embed/`) — no
+server, no `code.pyret.org/node_modules`. `EMBED_STATIC_ROOT=<dir>` overrides
+the served build dir.
 
 It is **strictly additive**: nothing under `code.pyret.org/` or `vscode/` is
 modified; the upstream test files are read as-is.
@@ -111,9 +131,13 @@ tests/suite.test.js     the node:test entry: boots one env, one test() per spec
 envs/
   cpo.js                launch chromium, goto /editor
   embed.js              goto /embed/embed1.html, sendReset, find the iframe
+  embed-static.js       pyret-embed (embed/dist) against the built editor.embed.html (no CPO server)
   vscode.js             boot @vscode/test-web, open the custom editor, find the webview
   vscode-ovsx.js        serve the webview via a simulated Open VSX (issue #21 repro)
+pages/
+  embed-static-host.html  host page embedding the artifact via pyret-embed's makeEmbedConfig
 shared/
+  static-server.js      plain correct-MIME static server (multi-root)
   ovsx-server.js        static server that mimics Open VSX serving (text/plain+nosniff, size cap)
   load-cpo-specs.js     extract exact specs from code.pyret.org/test/*.js (no copying)
   page-assertions.js    in-page DOM port of util.js predicates (window.PA)
@@ -154,6 +178,10 @@ BASE_URL=http://localhost:4999 node run.js --env=embed
 
 # vscode needs no CPO server (assets come from the built extension):
 node run.js --env=vscode
+
+# embed-static needs no CPO server either (build the library once:
+#   cd embed && npm ci --ignore-scripts && npx webpack):
+node run.js --env=embed-static
 
 # everything (starts the CPO server if needed):
 ./run-all.sh
