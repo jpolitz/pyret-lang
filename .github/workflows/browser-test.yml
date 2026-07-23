@@ -1,15 +1,18 @@
 name: browser-test (embed + vscode webviews)
 
-# Runs code.pyret.org's editor assertions against four environments via the
+# Runs code.pyret.org's editor assertions against five environments via the
 # single Playwright runner in browser-test/:
-#   cpo         -- the reference (/editor)
-#   embed       -- the embed API's embedded instance
-#   vscode      -- the pyret-parley.cpo webview (headless VS Code for the Web)
-#   vscode-ovsx -- the same webview, but with its assets served the way Open VSX
-#                  / the GitLab Web IDE serve them (text/plain + nosniff + size
-#                  cap) -- the reproduction of pyret-parley issue #21
+#   cpo          -- the reference (/editor)
+#   embed        -- the embed API's embedded instance
+#   embed-static -- the pyret-embed library (embed/dist) driving the BUILT
+#                   editor.embed.html artifact on a plain static server (no
+#                   CPO server) -- the npm-consumer flow
+#   vscode       -- the pyret-parley.cpo webview (headless VS Code for the Web)
+#   vscode-ovsx  -- the same webview, but with its assets served the way Open VSX
+#                   / the GitLab Web IDE serve them (text/plain + nosniff + size
+#                   cap) -- the reproduction of pyret-parley issue #21
 #
-# Shape: build code.pyret.org + the extension ONCE, then fan out the four
+# Shape: build code.pyret.org + the extension ONCE, then fan out the five
 # environments as a parallel matrix (each on its own runner, so chart rendering
 # doesn't contend for CPU).
 
@@ -69,14 +72,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [cpo, embed, vscode, vscode-ovsx]
+        env: [cpo, embed, embed-static, vscode, vscode-ovsx]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
 
-      # cpo + embed load /editor from the CPO server; vscode does not.
+      # cpo + embed + embed-static need the CPO build; only cpo + embed need
+      # the CPO *server* (embed-static serves the built artifact itself).
       - name: Restore cpo build
         if: ${{ !startsWith(matrix.env, 'vscode') }}
         uses: actions/download-artifact@v4
@@ -100,13 +104,22 @@ jobs:
           npm ci --ignore-scripts
           npx playwright install --with-deps chromium
 
+      - name: Build pyret-embed library
+        if: ${{ matrix.env == 'embed-static' }}
+        working-directory: ./embed
+        # --ignore-scripts: the code.pyret.org file: devDep would otherwise try
+        # to build all of CPO; webpack only needs embed/src + its own deps.
+        run: |
+          npm ci --ignore-scripts
+          npx webpack
+
       - name: Install CPO server runtime deps
-        if: ${{ !startsWith(matrix.env, 'vscode') }}
+        if: ${{ matrix.env == 'cpo' || matrix.env == 'embed' }}
         working-directory: ./code.pyret.org
         run: npm ci --ignore-scripts
 
       - name: Start CPO server
-        if: ${{ !startsWith(matrix.env, 'vscode') }}
+        if: ${{ matrix.env == 'cpo' || matrix.env == 'embed' }}
         working-directory: ./code.pyret.org
         env:
           BASE_URL: http://localhost:4999
