@@ -23,6 +23,7 @@ const SUITES = {
   "charts": "chart.js",
   "type-check": "type-check.js",
   "tables": "tables.js",
+  "url-imports": "url-imports.js",
 };
 
 if (!ENV || !["cpo", "embed", "embed-static", "vscode", "vscode-ovsx"].includes(ENV)) {
