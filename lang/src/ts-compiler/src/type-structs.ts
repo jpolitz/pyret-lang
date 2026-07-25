@@ -331,6 +331,31 @@ export abstract class TypeBase {
           return self;
         }
       }
+      case 't-col-name':
+        return self;
+      case 't-schema': {
+        const newCols = self.cols.map((c): SchemaCol =>
+          ({ name: c.name.substitute(newType, typeVar), sort: c.sort.substitute(newType, typeVar) }));
+        if (self.base === undefined) {
+          return new TSchema(undefined, newCols, self.l, self.inferred);
+        }
+        const newBase = self.base.substitute(newType, typeVar);
+        // Substituting a schema for a schema variable splices its columns in
+        // front of the ones this schema adds, keeping the flat representation.
+        if (newBase.$name === 't-schema') {
+          return new TSchema(newBase.base, [...newBase.cols, ...newCols], self.l, self.inferred);
+        }
+        return new TSchema(newBase, newCols, self.l, self.inferred);
+      }
+      case 't-table':
+        return new TTable(self.schema.substitute(newType, typeVar), self.l, self.inferred);
+      case 't-row':
+        return new TRow(self.schema.substitute(newType, typeVar), self.l, self.inferred);
+      case 't-column':
+        return new TColumn(self.schema.substitute(newType, typeVar),
+          self.name.substitute(newType, typeVar),
+          self.sort.substitute(newType, typeVar),
+          self.present, self.l, self.inferred);
       case 't-existential': {
         if (typeVar.$name === 't-existential') {
           if (self.id.key() === typeVar.id.key()) {
@@ -398,6 +423,23 @@ export abstract class TypeBase {
         return self.dataType.freeVariables();
       case 't-var':
         return new Map();
+      case 't-col-name':
+        return new Map();
+      case 't-schema': {
+        let free: TypeSet = self.base === undefined ? new Map() : self.base.freeVariables();
+        for (const c of self.cols) {
+          free = typeSetUnion(free, c.name.freeVariables());
+          free = typeSetUnion(free, c.sort.freeVariables());
+        }
+        return free;
+      }
+      case 't-table':
+        return self.schema.freeVariables();
+      case 't-row':
+        return self.schema.freeVariables();
+      case 't-column':
+        return typeSetUnion(typeSetUnion(self.schema.freeVariables(), self.name.freeVariables()),
+          self.sort.freeVariables());
       case 't-existential':
         return new Map([[self.key(), self as Type]]);
     }
@@ -435,6 +477,18 @@ export abstract class TypeBase {
         }
         return true;
       }
+      case 't-col-name':
+        return true;
+      case 't-schema':
+        return (self.base === undefined || self.base.hasVariableFree(varType))
+          && self.cols.every((c) => c.name.hasVariableFree(varType) && c.sort.hasVariableFree(varType));
+      case 't-table':
+        return self.schema.hasVariableFree(varType);
+      case 't-row':
+        return self.schema.hasVariableFree(varType);
+      case 't-column':
+        return self.schema.hasVariableFree(varType) && self.name.hasVariableFree(varType)
+          && self.sort.hasVariableFree(varType);
       case 't-existential': {
         if (varType.$name === 't-existential') {
           return self.id.key() === varType.id.key() ? false : true;
@@ -489,6 +543,18 @@ export abstract class TypeBase {
           + ')';
       case 't-var':
         return self.id.key();
+      case 't-col-name':
+        return 'colname:' + JSON.stringify(self.name);
+      case 't-schema':
+        return 'schema(' + (self.base === undefined ? '' : self.base.key()) + '|'
+          + self.cols.map((c) => c.name.key() + '::' + c.sort.key()).join(', ') + ')';
+      case 't-table':
+        return 'Table<' + self.schema.key() + '>';
+      case 't-row':
+        return 'Row<' + self.schema.key() + '>';
+      case 't-column':
+        return (self.present ? 'Column<' : 'NewColumn<') + self.schema.key() + ', '
+          + self.name.key() + ', ' + self.sort.key() + '>';
       case 't-existential':
         return self.id.key();
     }
@@ -519,6 +585,16 @@ export abstract class TypeBase {
         return new TDataRefinement(self.dataType, self.variantName, self.l, inferred);
       case 't-var':
         return new TVar(self.id, self.l, inferred);
+      case 't-col-name':
+        return new TColName(self.name, self.l, inferred);
+      case 't-schema':
+        return new TSchema(self.base, self.cols, self.l, inferred);
+      case 't-table':
+        return new TTable(self.schema, self.l, inferred);
+      case 't-row':
+        return new TRow(self.schema, self.l, inferred);
+      case 't-column':
+        return new TColumn(self.schema, self.name, self.sort, self.present, self.l, inferred);
       case 't-existential':
         return new TExistential(self.id, self.l, inferred);
     }
@@ -550,6 +626,17 @@ export abstract class TypeBase {
         return new TDataRefinement(sl(self.dataType), self.variantName, loc, self.inferred);
       case 't-var':
         return new TVar(self.id, loc, self.inferred);
+      case 't-col-name':
+        return new TColName(self.name, loc, self.inferred);
+      case 't-schema':
+        return new TSchema(self.base === undefined ? undefined : sl(self.base),
+          self.cols.map((c): SchemaCol => ({ name: sl(c.name), sort: sl(c.sort) })), loc, self.inferred);
+      case 't-table':
+        return new TTable(sl(self.schema), loc, self.inferred);
+      case 't-row':
+        return new TRow(sl(self.schema), loc, self.inferred);
+      case 't-column':
+        return new TColumn(sl(self.schema), sl(self.name), sl(self.sort), self.present, loc, self.inferred);
       case 't-existential':
         return new TExistential(self.id, loc, self.inferred);
     }
@@ -630,6 +717,24 @@ export abstract class TypeBase {
         }
         return false;
       }
+      case 't-col-name':
+        return other.$name === 't-col-name' && self.name === other.name;
+      case 't-schema': {
+        if (other.$name !== 't-schema') { return false; }
+        if ((self.base === undefined) !== (other.base === undefined)) { return false; }
+        if (self.base !== undefined && other.base !== undefined && !self.base.equals(other.base)) { return false; }
+        if (self.cols.length !== other.cols.length) { return false; }
+        return self.cols.every((c, i) =>
+          c.name.equals(other.cols[i].name) && c.sort.equals(other.cols[i].sort));
+      }
+      case 't-table':
+        return other.$name === 't-table' && self.schema.equals(other.schema);
+      case 't-row':
+        return other.$name === 't-row' && self.schema.equals(other.schema);
+      case 't-column':
+        return other.$name === 't-column' && self.present === other.present
+          && self.schema.equals(other.schema) && self.name.equals(other.name)
+          && self.sort.equals(other.sort);
       case 't-existential': {
         if (other.$name === 't-existential') {
           return self.id.key() === other.id.key();
@@ -703,6 +808,21 @@ export abstract class TypeBase {
             return id.toname();
           }
         }
+        case 't-col-name':
+          return JSON.stringify(typ.name);
+        case 't-schema': {
+          const cols = typ.cols.map((c) => h(c.name) + ' :: ' + h(c.sort));
+          if (typ.base === undefined) { return '{' + cols.join(', ') + '}'; }
+          if (typ.base.$name === 't-top') { return cols.length === 0 ? '...' : '..., ' + cols.join(', '); }
+          return [h(typ.base), ...(cols.length === 0 ? [] : ['{' + cols.join(', ') + '}'])].join(', ');
+        }
+        case 't-table':
+          return 'Table<' + h(typ.schema) + '>';
+        case 't-row':
+          return 'Row<' + h(typ.schema) + '>';
+        case 't-column':
+          return (typ.present ? 'Column<' : 'NewColumn<') + h(typ.schema) + ', '
+            + h(typ.name) + ', ' + h(typ.sort) + '>';
         case 't-existential':
           return '?-' + mapGetValue(freeVarsMapping, typ.key());
       }
@@ -819,6 +939,77 @@ export class TVar extends TypeBase {
   ) { super(); }
 }
 
+// ---------- Table types ----------
+//
+// See DESIGN.md. The four new constructors are:
+//
+//   t-col-name(s)                 the singleton type of the column name "s"
+//   t-schema(base, cols)          an (ordered) table schema
+//   t-table(schema) / t-row(schema)
+//   t-column(schema, name, sort, present)
+//                                 the type of a *column name* of `schema`
+//
+// A schema is `base`'s columns followed by `cols`. `base` is
+//   * undefined            -- the schema is closed: exactly `cols`
+//   * t-top                -- opaque: an unknown sequence of unknown columns
+//                             (this is what the bare annotation `Table` means)
+//   * a t-var/t-existential -- a schema variable (row polymorphism, with the
+//                             variable part always a *prefix*, which is what
+//                             Pyret's column-appending operations produce)
+
+export class TColName extends TypeBase {
+  get $name(): 't-col-name' { return 't-col-name'; }
+  constructor(
+    public name: string,
+    public l: Loc,
+    public inferred: boolean,
+  ) { super(); }
+}
+
+export type SchemaCol = { name: Type; sort: Type };
+
+export class TSchema extends TypeBase {
+  get $name(): 't-schema' { return 't-schema'; }
+  constructor(
+    public base: Type | undefined,
+    public cols: SchemaCol[],
+    public l: Loc,
+    public inferred: boolean,
+  ) { super(); }
+  isClosed(): boolean { return this.base === undefined; }
+  isOpaque(): boolean { return this.base !== undefined && this.base.$name === 't-top'; }
+}
+
+export class TTable extends TypeBase {
+  get $name(): 't-table' { return 't-table'; }
+  constructor(
+    public schema: Type,
+    public l: Loc,
+    public inferred: boolean,
+  ) { super(); }
+}
+
+export class TRow extends TypeBase {
+  get $name(): 't-row' { return 't-row'; }
+  constructor(
+    public schema: Type,
+    public l: Loc,
+    public inferred: boolean,
+  ) { super(); }
+}
+
+export class TColumn extends TypeBase {
+  get $name(): 't-column' { return 't-column'; }
+  constructor(
+    public schema: Type,
+    public name: Type,
+    public sort: Type,
+    public present: boolean,
+    public l: Loc,
+    public inferred: boolean,
+  ) { super(); }
+}
+
 export class TExistential extends TypeBase {
   get $name(): 't-existential' { return 't-existential'; }
   constructor(
@@ -840,7 +1031,12 @@ export type Type =
   | TRef
   | TDataRefinement
   | TVar
-  | TExistential;
+  | TExistential
+  | TColName
+  | TSchema
+  | TTable
+  | TRow
+  | TColumn;
 
 export function isTName(x: any): x is TName { return x instanceof TName; }
 export function isTArrow(x: any): x is TArrow { return x instanceof TArrow; }
@@ -854,6 +1050,11 @@ export function isTRef(x: any): x is TRef { return x instanceof TRef; }
 export function isTDataRefinement(x: any): x is TDataRefinement { return x instanceof TDataRefinement; }
 export function isTVar(x: any): x is TVar { return x instanceof TVar; }
 export function isTExistential(x: any): x is TExistential { return x instanceof TExistential; }
+export function isTColName(x: any): x is TColName { return x instanceof TColName; }
+export function isTSchema(x: any): x is TSchema { return x instanceof TSchema; }
+export function isTTable(x: any): x is TTable { return x instanceof TTable; }
+export function isTRow(x: any): x is TRow { return x instanceof TRow; }
+export function isTColumn(x: any): x is TColumn { return x instanceof TColumn; }
 
 // ---------- Helper constructors and constants ----------
 
@@ -878,4 +1079,113 @@ export const tSrcloc = (l: Loc): Type => new TName(builtinUri, new A.STypeGlobal
 export const tArray = (v: Type, l: Loc): Type => new TApp(tArrayName.setLoc(l), [v], l, false);
 export const tOption = (v: Type, l: Loc): Type =>
   new TApp(new TName(new ModuleUri('builtin://option'), new A.STypeGlobal('Option'), l, false), [v], l, false);
-export const tTable = (l: Loc): Type => new TName(builtinUri, new A.STypeGlobal('Table'), l, false);
+// The completely unknown schema: what the bare annotations `Table` and `Row`
+// denote. Every table type is a subtype of `Table<opaque>`.
+export const opaqueSchema = (l: Loc): TSchema => new TSchema(new TTop(l, false), [], l, false);
+export const closedSchema = (cols: SchemaCol[], l: Loc): TSchema => new TSchema(undefined, cols, l, false);
+// Build a schema, splicing when the prefix is itself a schema (which happens
+// whenever a schema variable is substituted away). Keeps the representation
+// flat: exactly one optional prefix followed by a list of columns.
+export function mkSchema(base: Type | undefined, cols: SchemaCol[], l: Loc, inferred: boolean): TSchema {
+  if (base !== undefined && base.$name === 't-schema') {
+    return new TSchema(base.base, [...base.cols, ...cols], l, inferred);
+  }
+  return new TSchema(base, cols, l, inferred);
+}
+
+// ---------- Schema algebra ----------
+//
+// All of these are *partial*: a schema whose hidden prefix (`base`) is opaque
+// or a variable does not determine whether a name is one of its columns, and a
+// column whose name is a type variable does not determine its own name. The
+// helpers say so ('unknown') instead of guessing, and callers must stay
+// conservative when they do.
+
+export type ColLookup =
+  | { status: 'found'; sort: Type; index: number }
+  | { status: 'absent' }
+  | { status: 'unknown' };
+
+export function asSchema(t: Type): TSchema | undefined {
+  return t.$name === 't-schema' ? t : undefined;
+}
+
+// Does this schema list every one of its column names concretely?
+export function schemaNamesKnown(sch: TSchema): boolean {
+  return sch.cols.every((c) => c.name.$name === 't-col-name');
+}
+
+// Are all the column names settled -- either literal names or rigid name
+// variables? (An existential name may still turn into something else.)
+export function schemaNamesSettled(sch: TSchema): boolean {
+  return sch.cols.every((c) => c.name.$name === 't-col-name' || c.name.$name === 't-var');
+}
+
+// Is the full column list known (no hidden prefix, all names concrete)?
+export function schemaFullyKnown(sch: TSchema): boolean {
+  return sch.isClosed() && schemaNamesKnown(sch);
+}
+
+export function schemaColNames(sch: TSchema): string[] | undefined {
+  if (!schemaFullyKnown(sch)) { return undefined; }
+  return sch.cols.map((c) => (c.name as TColName).name);
+}
+
+// Look a column up by its *name type* rather than by a string. `C` inside a
+// polymorphic function is a type variable, and a schema written `{C; T}`
+// mentions that same variable, so equality of name types is the right test.
+export function schemaLookupType(sch: TSchema, nameType: Type): ColLookup {
+  if (nameType.$name === 't-col-name') { return schemaLookup(sch, nameType.name); }
+  const nameIsConcrete = nameType.$name === 't-var';
+  let sawUnknownName = false;
+  for (let i = 0; i < sch.cols.length; i++) {
+    const cn = sch.cols[i].name;
+    if (cn.equals(nameType)) { return { status: 'found', sort: sch.cols[i].sort, index: i }; }
+    if (!(cn.$name === 't-col-name' || cn.$name === 't-var')) { sawUnknownName = true; }
+  }
+  if (!nameIsConcrete || sawUnknownName || !sch.isClosed()) { return { status: 'unknown' }; }
+  return { status: 'absent' };
+}
+
+export function schemaLookup(sch: TSchema, name: string): ColLookup {
+  let sawUnknownName = false;
+  for (let i = 0; i < sch.cols.length; i++) {
+    const cn = sch.cols[i].name;
+    if (cn.$name === 't-col-name') {
+      if (cn.name === name) { return { status: 'found', sort: sch.cols[i].sort, index: i }; }
+    } else {
+      sawUnknownName = true;
+    }
+  }
+  if (sawUnknownName || !sch.isClosed()) { return { status: 'unknown' }; }
+  return { status: 'absent' };
+}
+
+export function schemaExtend(sch: TSchema, name: Type, sort: Type, l: Loc): TSchema {
+  return new TSchema(sch.base, [...sch.cols, { name, sort }], l, false);
+}
+
+// Drop a column.  Only defined when the column is one of the *explicitly*
+// listed ones -- a name that might live in the unknown prefix cannot be
+// removed from a schema we cannot see.  Removing an explicit column is exact
+// because column names in a schema are distinct (b2t2 section 3.1, and every
+// Pyret operation that appends a column rejects a name that already exists),
+// so the unknown prefix cannot hold a second copy of it.
+export function schemaDrop(sch: TSchema, name: string, l: Loc): TSchema | undefined {
+  const found = schemaLookup(sch, name);
+  if (found.status !== 'found') { return undefined; }
+  return new TSchema(sch.base, sch.cols.filter((_, i) => i !== found.index), l, false);
+}
+
+export function schemaRename(sch: TSchema, from: string, to: string, l: Loc): TSchema | undefined {
+  const found = schemaLookup(sch, from);
+  if (found.status !== 'found') { return undefined; }
+  return new TSchema(sch.base,
+    sch.cols.map((c, i) => (i === found.index ? { name: new TColName(to, l, false), sort: c.sort } : c)),
+    l, false);
+}
+
+export const tTable = (l: Loc): Type => new TTable(opaqueSchema(l), l, false);
+export const tRow = (l: Loc): Type => new TRow(opaqueSchema(l), l, false);
+export const tList = (v: Type, l: Loc): Type =>
+  new TApp(new TName(new ModuleUri('builtin://lists'), new A.STypeGlobal('List'), l, false), [v], l, false);

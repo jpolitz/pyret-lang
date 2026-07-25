@@ -1156,7 +1156,15 @@ export function annToTyp(a: A.Ann, uri: URI, compileEnv: CS.CompileEnvironment):
             return raise('Name not found in globals.types: ' + id.s);
           } else {
             // ```include from string-dict: type StringDict as SD end```
-            return new T.TName(new T.ModuleUri(origin.uriOfDefinition), origin.originalName, a.l, false);
+            // NOTE(table-types): `origin.originalName` is an `s-name`, while
+            // every other route to a global t-name (typeFromRaw, and
+            // getTypedProvides' canonicalizer) produces an `s-type-global`.
+            // Since t-name identity is `id.key()`, the two spellings of the
+            // same builtin type compared unequal, so a type coming from a
+            // module compiled *without* type checking never matched the same
+            // type written locally. Normalize here.
+            return new T.TName(new T.ModuleUri(origin.uriOfDefinition),
+              new A.STypeGlobal(origin.originalName.toname()), a.l, false);
           }
         }
         case 's-atom': return new T.TName(new T.ModuleUri(uri), id, a.l, false);
@@ -1551,6 +1559,14 @@ export function canonicalizeNames(typ: T.Type, uri: URI, transformName: NameChan
     case 't-data-refinement':
       return new T.TDataRefinement(c(typ.dataType), typ.variantName, typ.l, typ.inferred);
     case 't-existential': return typ;
+    case 't-col-name': return typ;
+    case 't-schema':
+      return T.mkSchema(typ.base === undefined ? undefined : c(typ.base),
+        typ.cols.map((col) => ({ name: c(col.name), sort: c(col.sort) })), typ.l, typ.inferred);
+    case 't-table': return new T.TTable(c(typ.schema), typ.l, typ.inferred);
+    case 't-row': return new T.TRow(c(typ.schema), typ.l, typ.inferred);
+    case 't-column':
+      return new T.TColumn(c(typ.schema), c(typ.name), c(typ.sort), typ.present, typ.l, typ.inferred);
     default:
       throw raise('Unknown Type in canonicalizeNames: ' + (typ as any).$name);
   }

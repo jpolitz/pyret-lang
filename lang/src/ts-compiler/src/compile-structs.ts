@@ -20,6 +20,9 @@ import * as CL from './concat-lists';
 import { InternalCompilerError, mapGetValue, toRepr } from './shared';
 import type { CompileError } from './compile-errors';
 
+// Type-level-only global type names (see type-check.ts).
+export const tableOnlyTypeNames: Set<string> = new Set(["Column", "NewColumn"]);
+
 export type URI = string;
 export type Loc = SL.Loc;
 
@@ -409,6 +412,13 @@ export abstract class CompileEnvironmentBase {
   }
 
   typeByUri(uri: string, name: string): T.Type | undefined {
+    // `Column` / `NewColumn` are type-level-only names introduced by the type
+    // checker's table types (see type-check.ts). They are globals for name
+    // resolution but have no counterpart in the builtin://global module, so
+    // resolve them here rather than adding a fake runtime datatype.
+    if (uri === "builtin://global" && tableOnlyTypeNames.has(name)) {
+      return new T.TName(new T.ModuleUri(uri), new A.STypeGlobal(name), new SL.Builtin("global"), false);
+    }
     const providesOfAliased = mapGetValue(this.allModules, uri).provides;
     const remoteDatatype = providesOfAliased.dataDefinitions.get(name);
     if (remoteDatatype !== undefined) {
@@ -1299,6 +1309,12 @@ export const runtimeProvides: Provides = new Provides("builtin://global",
     ["String", tStr],
     ["Table", tTop],
     ["Row", tTop],
+    // Type-level only: `Column<Schema, Sort>` / `Column<Schema, Name, Sort>`
+    // and `NewColumn<Schema>` / `NewColumn<Schema, Name>` name the *column
+    // names* of a schema. They have no runtime counterpart, and the type
+    // checker recognizes them structurally (see type-check.ts).
+    ["Column", tTop],
+    ["NewColumn", tTop],
     ["Function", tTop],
     ["Boolean", tTop],
     ["Object", tTop],

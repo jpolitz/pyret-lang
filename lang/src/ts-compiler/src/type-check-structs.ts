@@ -434,6 +434,17 @@ export class ConstraintSolution {
         return new TS.TDataRefinement(app(typ.dataType), typ.variantName, typ.l, typ.inferred);
       case 't-var':
         return typ;
+      case 't-col-name':
+        return typ;
+      case 't-schema':
+        return TS.mkSchema(typ.base === undefined ? undefined : app(typ.base),
+          typ.cols.map((c) => ({ name: app(c.name), sort: app(c.sort) })), typ.l, typ.inferred);
+      case 't-table':
+        return new TS.TTable(app(typ.schema), typ.l, typ.inferred);
+      case 't-row':
+        return new TS.TRow(app(typ.schema), typ.l, typ.inferred);
+      case 't-column':
+        return new TS.TColumn(app(typ.schema), app(typ.name), app(typ.sort), typ.present, typ.l, typ.inferred);
       case 't-existential': {
         const found = substitutions.get(typ.key());
         if (found === undefined) {
@@ -538,6 +549,37 @@ export class ConstraintSolution {
         }
         case 't-var':
           return [typ2, varMapping];
+        case 't-col-name':
+          return [typ2, varMapping];
+        case 't-schema': {
+          let m = varMapping;
+          let newBase: Type | undefined = undefined;
+          if (typ2.base !== undefined) {
+            const [b, bm] = collectVars(typ2.base, m);
+            newBase = b; m = bm;
+          }
+          const newCols: TS.SchemaCol[] = [];
+          for (const c of typ2.cols) {
+            const [n, nm] = collectVars(c.name, m); m = nm;
+            const [srt, sm] = collectVars(c.sort, m); m = sm;
+            newCols.push({ name: n, sort: srt });
+          }
+          return [TS.mkSchema(newBase, newCols, typ2.l, typ2.inferred), m];
+        }
+        case 't-table': {
+          const [sc, m] = collectVars(typ2.schema, varMapping);
+          return [new TS.TTable(sc, typ2.l, typ2.inferred), m];
+        }
+        case 't-row': {
+          const [sc, m] = collectVars(typ2.schema, varMapping);
+          return [new TS.TRow(sc, typ2.l, typ2.inferred), m];
+        }
+        case 't-column': {
+          const [sc, m1] = collectVars(typ2.schema, varMapping);
+          const [n, m2] = collectVars(typ2.name, m1);
+          const [srt, m3] = collectVars(typ2.sort, m2);
+          return [new TS.TColumn(sc, n, srt, typ2.present, typ2.l, typ2.inferred), m3];
+        }
         case 't-existential': {
           if (this.variables.has(typ2.key())) {
             const mappedTyp = varMapping.get(typ2.key());
@@ -795,6 +837,135 @@ export function addSubstitution(newType: Type, typeVar: Type, system: Constraint
   };
 }
 
+
+// ---------- Table/schema constraints ----------
+//
+// `Schemas`, column names and the `Column<...>` "name of a column of S"
+// types are decomposed into ordinary constraints here, so that the rest of
+// the solver (existential substitution, levels, generalization) is unchanged.
+// Everything that cannot be *decided* becomes either an error or a
+// conservative `Any`; nothing is assumed.
+
+type SchemaSolve = { system: AnyConstraintSystem } | { errors: C.CompileError[] };
+// A column-membership constraint whose schema is not settled yet is deferred
+// to the enclosing level rather than guessed at.
+type ColumnSolve = SchemaSolve | { defer: true };
+
+// Is `sup.schema` as determined as it is ever going to get at this level?
+function columnConstraintSettled(name: Type, sup: TS.TColumn): boolean {
+  const sch = TS.asSchema(sup.schema);
+  if (sch === undefined) { return false; }
+  if (TS.schemaLookupType(sch, name).status === 'found') { return true; }
+  const hiddenPrefixPending = sch.base !== undefined && sch.base.$name === 't-existential';
+  return !hiddenPrefixPending && TS.schemaNamesKnown(sch);
+}
+
+function schemaMismatch(sub: Type, sup: Type): SchemaSolve {
+  return { errors: [new C.TypeMismatch(sub, sup)] };
+}
+
+// Force two column *names* to be the same. When one side is an existential
+// this solves it; when both are concrete this is an equality check.
+function constrainName(system: AnyConstraintSystem, n1: Type, n2: Type): AnyConstraintSystem {
+  return system.addConstraint(n1, n2);
+}
+
+function constrainColPairs(system: AnyConstraintSystem, subCols: TS.SchemaCol[], supCols: TS.SchemaCol[]): AnyConstraintSystem {
+  let sys = system;
+  for (let i = 0; i < subCols.length; i++) {
+    sys = constrainName(sys, subCols[i].name, supCols[i].name);
+    // Cells are immutable, so a schema is covariant in its sorts.
+    sys = sys.addConstraint(subCols[i].sort, supCols[i].sort);
+  }
+  return sys;
+}
+
+// sub <: sup for schemas. The variable part of a schema is always a *prefix*
+// (Pyret only ever appends columns), so matching is done from the right.
+export function constrainSchema(system: AnyConstraintSystem, subT: Type, supT: Type): SchemaSolve {
+  const sub = TS.asSchema(subT);
+  const sup = TS.asSchema(supT);
+  if (sub === undefined || sup === undefined) {
+    // one side is still an existential/variable: fall back to the ordinary
+    // constraint machinery, which will substitute or fail.
+    return { system: system.addConstraint(subT, supT) };
+  }
+  // `Table` (opaque, no listed columns) accepts every schema.
+  if (sup.isOpaque() && sup.cols.length === 0) { return { system }; }
+
+  const nSub = sub.cols.length;
+  const nSup = sup.cols.length;
+  const isExists = (t: Type | undefined): boolean => t !== undefined && t.$name === 't-existential';
+  const samePrefix = sub.base !== undefined && sup.base !== undefined && sub.base.equals(sup.base);
+
+  // Same (or no) hidden prefix: the visible columns must line up one for one.
+  if (samePrefix || (sub.isClosed() && sup.isClosed())) {
+    if (nSub !== nSup) { return schemaMismatch(subT, supT); }
+    return { system: constrainColPairs(system, sub.cols, sup.cols) };
+  }
+  if (isExists(sup.base)) {
+    // subBase (+) subCols  <:  ?B (+) supCols
+    if (nSub < nSup) { return schemaMismatch(subT, supT); }
+    const split = nSub - nSup;
+    const prefixCols = sub.cols.slice(0, split);
+    const prefix: Type = (split === 0 && sub.base !== undefined)
+      ? sub.base
+      : TS.mkSchema(sub.base, prefixCols, sub.l, false);
+    const sys = system.addConstraint(prefix, sup.base!);
+    return { system: constrainColPairs(sys, sub.cols.slice(split), sup.cols) };
+  }
+  if (isExists(sub.base)) {
+    // ?B (+) subCols  <:  supBase (+) supCols
+    if (nSup < nSub) { return schemaMismatch(subT, supT); }
+    const split = nSup - nSub;
+    const supPrefix: Type = (split === 0 && sup.base !== undefined)
+      ? sup.base
+      : TS.mkSchema(sup.base, sup.cols.slice(0, split), sup.l, false);
+    const sys = system.addConstraint(sub.base!, supPrefix);
+    return { system: constrainColPairs(sys, sub.cols, sup.cols.slice(split)) };
+  }
+  if (sup.isOpaque() && nSub >= nSup) {
+    // `Table` with some columns pinned down: they must be the trailing ones.
+    return { system: constrainColPairs(system, sub.cols.slice(nSub - nSup), sup.cols) };
+  }
+  return schemaMismatch(subT, supT);
+}
+
+// A column name `nameT` used where a `Column<schema, name, sort>` is expected.
+export function constrainColumnMembership(system: AnyConstraintSystem, sub: Type, sup: TS.TColumn): ColumnSolve {
+  if (!columnConstraintSettled(sub, sup)) { return { defer: true }; }
+  let sys = constrainName(system, sub, sup.name);
+  const sch = TS.asSchema(sup.schema);
+  if (sch === undefined) {
+    // schema not yet known: stay sound by learning nothing about the sort
+    return { system: sys.addConstraint(new TS.TTop(sup.l, false), sup.sort) };
+  }
+  const found = TS.schemaLookupType(sch, sub);
+  if (sup.present) {
+    switch (found.status) {
+      case 'found':
+        return { system: sys.addConstraint(found.sort, sup.sort) };
+      case 'absent':
+        return { errors: [new C.CantTypecheck(
+          'The table does not have a column named ' + sub.toString()
+          + '. Its columns are: ' + (TS.schemaColNames(sch) ?? []).map((n) => JSON.stringify(n)).join(', '),
+          sub.l)] };
+      case 'unknown':
+        return { system: sys.addConstraint(new TS.TTop(sup.l, false), sup.sort) };
+    }
+  } else {
+    switch (found.status) {
+      case 'found':
+        return { errors: [new C.CantTypecheck(
+          'The table already has a column named ' + sub.toString()
+          + ', so it cannot be added again.', sub.l)] };
+      default:
+        sys = sys.addConstraint(new TS.TTop(sup.l, false), sup.sort);
+        return { system: sys };
+    }
+  }
+}
+
 export function solveHelperConstraints(system: AnyConstraintSystem, solution: ConstraintSolution, context: Context): AnyFoldResult<[AnyConstraintSystem, ConstraintSolution]> {
   const addSubstitutionAndContinue = (newType: Type, typeVar: Type, system2: ConstraintSystem, solution2: ConstraintSolution, context2: Context): AnyFoldResult<[AnyConstraintSystem, ConstraintSolution]> => {
     const newSolutionAndSystem = addSubstitution(newType, typeVar, system2, solution2);
@@ -881,9 +1052,18 @@ export function solveHelperConstraints(system: AnyConstraintSystem, solution: Co
                 } else {
                   return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
                 }
-              } else {
-                return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
               }
+              // An arbitrary String may be used where a column name is wanted
+              // (this is how code annotated `col :: String` keeps working).
+              // Nothing is then known about which column it is, so its sort is
+              // Any and its name stays unknown.
+              if (supertype.$name === 't-column' && subtype.id.toname() === 'String') {
+                const sys = shadowSystem
+                  .addConstraint(new TS.TTop(supertype.l, false), supertype.name)
+                  .addConstraint(new TS.TTop(supertype.l, false), supertype.sort);
+                return solveHelperConstraints(sys, solution, context);
+              }
+              return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
             }
             case 't-arrow': {
               if (supertype.$name === 't-arrow') {
@@ -988,13 +1168,136 @@ export function solveHelperConstraints(system: AnyConstraintSystem, solution: Co
                 } else {
                   return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
                 }
-              } else {
-                return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
               }
+              if (supertype.$name === 't-schema') {
+                const res = constrainSchema(shadowSystem,
+                  new TS.TSchema(subtype, [], subtype.l, false), supertype);
+                if ('errors' in res) { return new FoldErrors(res.errors); }
+                return solveHelperConstraints(res.system, solution, context);
+              }
+              return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
             }
             case 't-existential': {
               const system2 = shadowSystem.addConstraint(supertype, subtype);
               return solveHelperConstraints(system2, solution, context);
+            }
+            case 't-col-name': {
+              if (supertype.$name === 't-col-name') {
+                if (subtype.name === supertype.name) {
+                  return solveHelperConstraints(shadowSystem, solution, context);
+                }
+                return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+              }
+              if (supertype.$name === 't-name' && supertype.id.toname() === 'String') {
+                return solveHelperConstraints(shadowSystem, solution, context);
+              }
+              if (supertype.$name === 't-column') {
+                const res = constrainColumnMembership(shadowSystem, subtype, supertype);
+                if ('errors' in res) { return new FoldErrors(res.errors); }
+                if ('defer' in res) {
+                  // The schema is still being inferred; re-post this constraint
+                  // at the enclosing level, where it will be settled.
+                  if (isConstraintSystem(shadowSystem.nextSystem)) {
+                    return solveHelperConstraints(
+                      new ConstraintSystem(shadowSystem.variables, shadowSystem.constraints,
+                        shadowSystem.refinementConstraints, shadowSystem.fieldConstraints,
+                        shadowSystem.exampleTypes,
+                        shadowSystem.nextSystem.addConstraint(subtype, supertype)),
+                      solution, context);
+                  }
+                  // Nothing further will be learned: stay sound by learning
+                  // nothing about the column's sort.
+                  return solveHelperConstraints(
+                    shadowSystem.addConstraint(subtype, supertype.name)
+                      .addConstraint(new TS.TTop(supertype.l, false), supertype.sort),
+                    solution, context);
+                }
+                return solveHelperConstraints(res.system, solution, context);
+              }
+              return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+            }
+            case 't-column': {
+              if (supertype.$name === 't-name' && supertype.id.toname() === 'String') {
+                return solveHelperConstraints(shadowSystem, solution, context);
+              }
+              if (supertype.$name === 't-col-name') {
+                return solveHelperConstraints(shadowSystem.addConstraint(subtype.name, supertype), solution, context);
+              }
+              if (supertype.$name === 't-column' && subtype.present === supertype.present) {
+                const sameTable = subtype.schema.equals(supertype.schema);
+                // Deciding between "same table" and "a column of some other
+                // table" needs both schemas settled; wait if either is still
+                // being inferred.
+                const pending = (t: Type): boolean => {
+                  const sch = TS.asSchema(t);
+                  return sch === undefined || (sch.base !== undefined && sch.base.$name === 't-existential');
+                };
+                if (!sameTable && (pending(subtype.schema) || pending(supertype.schema))
+                    && isConstraintSystem(shadowSystem.nextSystem)) {
+                  return solveHelperConstraints(
+                    new ConstraintSystem(shadowSystem.variables, shadowSystem.constraints,
+                      shadowSystem.refinementConstraints, shadowSystem.fieldConstraints,
+                      shadowSystem.exampleTypes,
+                      shadowSystem.nextSystem.addConstraint(subtype, supertype)),
+                    solution, context);
+                }
+                if (sameTable || TS.asSchema(subtype.schema) === undefined
+                    || TS.asSchema(supertype.schema) === undefined) {
+                  // The two types talk about the same table: names and sorts
+                  // line up directly.
+                  const res = constrainSchema(shadowSystem, subtype.schema, supertype.schema);
+                  if ('errors' in res) { return new FoldErrors(res.errors); }
+                  const sys = res.system.addConstraint(subtype.name, supertype.name)
+                    .addConstraint(subtype.sort, supertype.sort);
+                  return solveHelperConstraints(sys, solution, context);
+                }
+                // Different tables: this name has to be a column of the target
+                // schema, and its sort there is what counts.
+                const res = constrainColumnMembership(shadowSystem, subtype.name, supertype);
+                if ('errors' in res) { return new FoldErrors(res.errors); }
+                if ('defer' in res) {
+                  if (isConstraintSystem(shadowSystem.nextSystem)) {
+                    return solveHelperConstraints(
+                      new ConstraintSystem(shadowSystem.variables, shadowSystem.constraints,
+                        shadowSystem.refinementConstraints, shadowSystem.fieldConstraints,
+                        shadowSystem.exampleTypes,
+                        shadowSystem.nextSystem.addConstraint(subtype, supertype)),
+                      solution, context);
+                  }
+                  return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+                }
+                return solveHelperConstraints(res.system, solution, context);
+              }
+              return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+            }
+            case 't-schema': {
+              // A lone schema variable `S` and the schema `S (+) []` are the
+              // same thing; the solver can meet either form.
+              if (supertype.$name === 't-schema' || supertype.$name === 't-var') {
+                const sup = supertype.$name === 't-schema'
+                  ? supertype
+                  : new TS.TSchema(supertype, [], supertype.l, false);
+                const res = constrainSchema(shadowSystem, subtype, sup);
+                if ('errors' in res) { return new FoldErrors(res.errors); }
+                return solveHelperConstraints(res.system, solution, context);
+              }
+              return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+            }
+            case 't-table': {
+              if (supertype.$name === 't-table') {
+                const res = constrainSchema(shadowSystem, subtype.schema, supertype.schema);
+                if ('errors' in res) { return new FoldErrors(res.errors); }
+                return solveHelperConstraints(res.system, solution, context);
+              }
+              return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
+            }
+            case 't-row': {
+              if (supertype.$name === 't-row') {
+                const res = constrainSchema(shadowSystem, subtype.schema, supertype.schema);
+                if ('errors' in res) { return new FoldErrors(res.errors); }
+                return solveHelperConstraints(res.system, solution, context);
+              }
+              return new FoldErrors([new C.TypeMismatch(subtype, supertype)]);
             }
             default:
               throw new InternalCompilerError('Unknown Type in solve-helper-constraints');
@@ -1275,6 +1578,17 @@ export function removeRefinementsAndForalls(typ: Type): Type {
       return typ;
     case 't-existential':
       return typ;
+    case 't-col-name':
+      return typ;
+    case 't-schema':
+      return TS.mkSchema(typ.base === undefined ? undefined : rraf(typ.base),
+        typ.cols.map((c) => ({ name: rraf(c.name), sort: rraf(c.sort) })), typ.l, typ.inferred);
+    case 't-table':
+      return new TS.TTable(rraf(typ.schema), typ.l, typ.inferred);
+    case 't-row':
+      return new TS.TRow(rraf(typ.schema), typ.l, typ.inferred);
+    case 't-column':
+      return new TS.TColumn(rraf(typ.schema), rraf(typ.name), rraf(typ.sort), typ.present, typ.l, typ.inferred);
     default:
       throw new InternalCompilerError('Unknown Type in remove-refinements-and-foralls');
   }
@@ -1366,6 +1680,37 @@ export function generalizeType(currentType: Type, nextType: Type): Type {
     }
     case 't-existential':
       return currentType;
+    case 't-col-name':
+      return (nextType.$name === 't-col-name' && nextType.name === currentType.name) ? currentType : newVar();
+    case 't-schema': {
+      if (nextType.$name === 't-schema'
+          && currentType.cols.length === nextType.cols.length
+          && (currentType.base === undefined) === (nextType.base === undefined)) {
+        const newBase = currentType.base === undefined ? undefined
+          : generalizeType(currentType.base, nextType.base!);
+        const newCols = currentType.cols.map((c, i) => ({
+          name: generalizeType(c.name, nextType.cols[i].name),
+          sort: generalizeType(c.sort, nextType.cols[i].sort),
+        }));
+        return new TS.TSchema(newBase, newCols, currentType.l, currentType.inferred);
+      }
+      return newVar();
+    }
+    case 't-table':
+      return nextType.$name === 't-table'
+        ? new TS.TTable(generalizeType(currentType.schema, nextType.schema), currentType.l, currentType.inferred)
+        : newVar();
+    case 't-row':
+      return nextType.$name === 't-row'
+        ? new TS.TRow(generalizeType(currentType.schema, nextType.schema), currentType.l, currentType.inferred)
+        : newVar();
+    case 't-column':
+      return (nextType.$name === 't-column' && nextType.present === currentType.present)
+        ? new TS.TColumn(generalizeType(currentType.schema, nextType.schema),
+          generalizeType(currentType.name, nextType.name),
+          generalizeType(currentType.sort, nextType.sort),
+          currentType.present, currentType.l, currentType.inferred)
+        : newVar();
     default:
       throw new InternalCompilerError('Unknown Type in generalize-type');
   }
@@ -1460,6 +1805,14 @@ export function flattenTreeWithPaths(typ: Type): [Type, Path][] {
         return [[typ2, currentPath]];
       case 't-existential':
         return [[typ2, currentPath]];
+      // Table types take part in structure sharing only as leaves: their
+      // components are not addressable by a Path, so they are not traversed.
+      case 't-col-name':
+      case 't-schema':
+      case 't-table':
+      case 't-row':
+      case 't-column':
+        return [[typ2, currentPath]];
       default:
         throw new InternalCompilerError('Unknown Type in flatten-tree-with-paths');
     }
@@ -1521,6 +1874,12 @@ export function maintainCommonStructure(struct: Structure, typ: Type): Type {
           }
         }
       }
+      case 't-col-name':
+      case 't-schema':
+      case 't-table':
+      case 't-row':
+      case 't-column':
+        return typ2;
       default:
         throw new InternalCompilerError('Unknown Type in maintain-common-structure');
     }

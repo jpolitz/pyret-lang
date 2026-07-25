@@ -428,8 +428,15 @@ $(TS_SUITE_CACHE_WARM): $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
 ts-pyret-test: tests/pyret/main2-ts.jarr $(TS_SUITE_CACHE_WARM)
 	$(NODE) tests/pyret/main2-ts.jarr
 
+# Type checking tests for the table types (TS compiler only): the programs in
+# src/ts-compiler/tests/table-types/{good,bad} plus the delivered examples in
+# /app/typed-examples.
+.PHONY : ts-table-type-test
+ts-table-type-test: ts-compiler
+	$(NODE) $(TS_COMP_DIR)/tests/table-type-test.js
+
 .PHONY : ts-test
-ts-test: ts-unit-test ts-parity-test ts-repl-test ts-pyret-test ts-type-check-test ts-regression-test ts-io-test
+ts-test: ts-unit-test ts-parity-test ts-repl-test ts-pyret-test ts-type-check-test ts-regression-test ts-io-test ts-table-type-test
 
 .PHONY : ts-clean
 ts-clean:

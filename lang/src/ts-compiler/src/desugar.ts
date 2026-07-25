@@ -318,6 +318,10 @@ export function desugarLetBinds(binds: A.LetBind[]): A.LetBind[] {
   });
 }
 
+export function desugarColumnBinds(cb: A.ColumnBinds): A.ColumnBinds {
+  return new A.SColumnBinds(cb.l, cb.binds.map(desugarBind), desugarExpr(cb.table));
+}
+
 export function desugarLetrecBinds(binds: A.LetrecBind[]): A.LetrecBind[] {
   return binds.map((bind) =>
     new A.SLetrecBind(bind.l, desugarBind(bind.b), desugarExpr(bind.value)));
@@ -585,18 +589,10 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       }
       return new A.SPrimApp(l, 'makeReactor', [desugarExpr(init), new A.SObj(l, optionFields)], flatPrimApp);
     }
-    case 's-table': {
-      const l = dummyLoc; // shadow l = A.dummy-loc
-      const columnNames = expr.headers.map((header) => new A.SStr(header.l, header.name));
-      const anns = expr.headers.map((header) => desugarAnn(header.ann));
-      const rows = expr.rows.map((row) => {
-        const elems = row.elems.map((elem, n) => checkAnn(elem.l, desugarExpr(elem), anns[n]));
-        return new A.SArray(l, elems);
-      });
-      return new A.SPrimApp(l, 'makeTable',
-        [new A.SArray(l, columnNames),
-          new A.SArray(l, rows)], flatPrimApp);
-    }
+    case 's-table':
+      return new A.STable(expr.l,
+        expr.headers.map((h) => new A.SFieldName(h.l, h.name, desugarAnn(h.ann))),
+        expr.rows.map((r) => new A.STableRow(r.l, r.elems.map(desugarExpr))));
     case 's-paren': return desugarExpr(expr.expr);
     // NOTE(john): see preconditions; desugar-scope should have already happened
     case 's-let': return raise('s-let should have already been desugared');
@@ -607,6 +603,91 @@ export function desugarExpr(expr: A.Expr): A.Expr {
     case 's-check-test':
       return new A.SCheckTest(expr.l, expr.op, desugarOpt(desugarExpr, expr.refinement),
         desugarExpr(expr.left), desugarOpt(desugarExpr, expr.right), desugarOpt(desugarExpr, expr.cause));
+    case 's-load-table':
+      return new A.SLoadTable(expr.l,
+        expr.headers.map((h) => new A.SFieldName(h.l, h.name, desugarAnn(h.ann))),
+        expr.spec.map((s) => {
+          switch (s.$name) {
+            case 's-sanitize': return new A.SSanitize(s.l, s.name, desugarExpr(s.sanitizer));
+            case 's-table-src': return new A.STableSrc(s.l, desugarExpr(s.src));
+          }
+        }));
+    case 's-table-extend':
+      return new A.STableExtend(expr.l, desugarColumnBinds(expr.columnBinds),
+        expr.extensions.map((ext) => {
+          switch (ext.$name) {
+            case 's-table-extend-field':
+              return new A.STableExtendField(ext.l, ext.name, desugarExpr(ext.value), desugarAnn(ext.ann));
+            case 's-table-extend-reducer':
+              return new A.STableExtendReducer(ext.l, ext.name, desugarExpr(ext.reducer), ext.col, desugarAnn(ext.ann));
+          }
+        }));
+    case 's-table-update':
+      return new A.STableUpdate(expr.l, desugarColumnBinds(expr.columnBinds),
+        expr.updates.map((u) => desugarMember(u)));
+    case 's-table-select':
+      return new A.STableSelect(expr.l, expr.columns, desugarExpr(expr.table));
+    case 's-table-extract':
+      return new A.STableExtract(expr.l, expr.column, desugarExpr(expr.table));
+    case 's-table-order':
+      return new A.STableOrder(expr.l, desugarExpr(expr.table), expr.ordering);
+    case 's-table-filter':
+      return new A.STableFilter(expr.l, desugarColumnBinds(expr.columnBinds), desugarExpr(expr.predicate));
+    case 's-spy-block': {
+      const l = expr.l;
+      const dsMessage = expr.message === undefined ? new A.SStr(l, '') : desugarExpr(expr.message);
+      const dsContentsList: [A.Expr, A.Expr, A.Expr][] = expr.contents.map((spyExp) =>
+        [new A.SSrcloc(spyExp.l, spyExp.l), new A.SStr(spyExp.l, spyExp.name), desugarExpr(spyExp.value)] as [A.Expr, A.Expr, A.Expr]);
+      // foldr that conses each component onto the front == forward order
+      const locs: A.Expr[] = [];
+      const nms: A.Expr[] = [];
+      const vals: A.Expr[] = [];
+      for (const dsContent of dsContentsList) {
+        locs.push(dsContent[0]);
+        nms.push(dsContent[1]);
+        vals.push(dsContent[2]);
+      }
+      return new A.SApp(l, bid(l, 'spy'),
+        [new A.SSrcloc(l, l), dsMessage,
+          new A.SArray(l, locs), new A.SArray(l, nms), new A.SArray(l, vals)]);
+    }
+    case 's-prim-val': return expr;
+    case 's-array': return new A.SArray(expr.l, expr.values.map(desugarExpr));
+    default:
+      return raise('NYI (desugar): ' + (expr as any).$name);
+  }
+}
+
+
+// ---------- Table forms ----------
+//
+// The table surface forms (table:, load-table:, extend/update/select/
+// extract/order/filter) are *not* desugared by `desugarExpr`; it only
+// desugars their subexpressions and leaves the node in place so that the
+// type checker can see column names and header annotations. The real
+// desugaring below runs in desugar-post-tc, with `ds`/`dsAnn` as the
+// identity (subexpressions are already desugared by then). Passing the
+// recursive desugarers in as parameters keeps a single copy of the
+// (delicate) expansion.
+export function desugarTableForm(
+  expr: A.STable | A.SLoadTable | A.STableExtend | A.STableUpdate
+    | A.STableSelect | A.STableExtract | A.STableOrder | A.STableFilter,
+  ds: (e: A.Expr) => A.Expr,
+  dsAnn: (a: A.Ann) => A.Ann,
+): A.Expr {
+  switch (expr.$name) {
+    case 's-table': {
+      const l = dummyLoc; // shadow l = A.dummy-loc
+      const columnNames = expr.headers.map((header) => new A.SStr(header.l, header.name));
+      const anns = expr.headers.map((header) => dsAnn(header.ann));
+      const rows = expr.rows.map((row) => {
+        const elems = row.elems.map((elem, n) => checkAnn(elem.l, ds(elem), anns[n]));
+        return new A.SArray(l, elems);
+      });
+      return new A.SPrimApp(l, 'makeTable',
+        [new A.SArray(l, columnNames),
+          new A.SArray(l, rows)], flatPrimApp);
+    }
     case 's-load-table': {
       const l = expr.l;
       const dummy = dummyLoc;
@@ -627,7 +708,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
           }
           case 's-table-src':
             // Well-formedness ensures that this matches exactly once
-            src = desugarExpr(s.src);
+            src = ds(s.src);
             break;
         }
       }
@@ -696,7 +777,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
           const acc = accs.get(ext.name)!;
           const nothingExpr = new A.SId(l2, new A.SGlobal('nothing'));
           reducersAcc = [
-            new A.SLetBind(l2, reducer.idB, desugarExpr(ext.reducer)),
+            new A.SLetBind(l2, reducer.idB, ds(ext.reducer)),
             new A.SVarBind(l2, acc.idB, nothingExpr),
             ...reducersAcc
           ];
@@ -709,7 +790,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
 
       const processExtension = (isFirst: boolean) => (extension: A.TableExtendField): A.Expr => {
         switch (extension.$name) {
-          case 's-table-extend-field': return desugarExpr(extension.value);
+          case 's-table-extend-field': return ds(extension.value);
           case 's-table-extend-reducer': {
             const l2 = extension.l;
             const name = extension.name;
@@ -761,7 +842,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
 
       const binds: A.LetBind[] = [
         new A.SLetBind(dummyLoc, tbl.idB,
-          checkTable(columnBinds.table.l, desugarExpr(columnBinds.table), (t) => t)),
+          checkTable(columnBinds.table.l, ds(columnBinds.table), (t) => t)),
         // Column Index Bindings
         ...columns.map((column) =>
           new A.SLetBind(dummyLoc, column.idx.idB,
@@ -803,12 +884,12 @@ export function desugarExpr(expr: A.Expr): A.Expr {
         name: new A.SStr(dummyLoc, u.name),
         l: u.l,
         idx: mkId(dummyLoc, u.name),
-        val: desugarExpr((u as A.SDataField).value)
+        val: ds((u as A.SDataField).value)
       }));
 
       const binds: A.LetBind[] = [
         new A.SLetBind(dummyLoc, tbl.idB,
-          checkTable(columnBinds.table.l, desugarExpr(columnBinds.table), (t) => t)),
+          checkTable(columnBinds.table.l, ds(columnBinds.table), (t) => t)),
         // Column Index Bindings
         ...columns.map((column) =>
           new A.SLetBind(dummyLoc, column.idx.idB,
@@ -855,7 +936,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       }));
       const binds: A.LetBind[] = [
         new A.SLetBind(dummyLoc, tbl.idB,
-          checkTable(expr.table.l, desugarExpr(expr.table), (t) => t)),
+          checkTable(expr.table.l, ds(expr.table), (t) => t)),
         // Column Index Bindings
         ...columns.map((column) =>
           new A.SLetBind(dummyLoc, column.idx.idB,
@@ -884,7 +965,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       const row = mkId(dummyLoc, (column as A.SName).s);
       return new A.SLetExpr(dummyLoc, [
         new A.SLetBind(dummyLoc, tbl.idB,
-          checkTable(table.l, desugarExpr(table), (t) => t)),
+          checkTable(table.l, ds(table), (t) => t)),
         new A.SLetBind(dummyLoc, col.idB,
           getTableColumn(l, table.l, tbl.idE, { l: (column as A.SName).l, name: new A.SStr(dummyLoc, (column as A.SName).s) }))],
         // Table Construction
@@ -899,7 +980,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       const orderingRawArr = expr.ordering.map((o) =>
         new A.SArray(o.l, [new A.SBool(o.l, A.isASCENDING(o.direction)), new A.SStr(o.l, (o.column as A.SName).s)]));
       return new A.SApp(l,
-        new A.SDot(dummyLoc, desugarExpr(expr.table), 'multi-order'),
+        new A.SDot(dummyLoc, ds(expr.table), 'multi-order'),
         [new A.SArray(dummyLoc, orderingRawArr)]);
     }
     case 's-table-filter': {
@@ -919,7 +1000,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
 
       const binds: A.LetBind[] = [
         new A.SLetBind(dummyLoc, tbl.idB,
-          checkTable(columnBinds.table.l, desugarExpr(columnBinds.table), (t) => t)),
+          checkTable(columnBinds.table.l, ds(columnBinds.table), (t) => t)),
         // Column Index Bindings
         ...columns.map((column) =>
           new A.SLetBind(dummyLoc, column.idx.idB,
@@ -938,33 +1019,11 @@ export function desugarExpr(expr: A.Expr): A.Expr {
                   new A.SPrimApp(dummyLoc, 'raw_array_get',
                     [row.idE, column.idx.idE], flatPrimApp))),
               new A.SLetExpr(dummyLoc,
-                [new A.SLetBind(predicate.l, predRes.idB, desugarExpr(predicate))],
+                [new A.SLetBind(predicate.l, predRes.idB, ds(predicate))],
                 predRes.idE, true), true), undefined, undefined, true),
           new A.SDot(dummyLoc, tbl.idE, '_rows-raw-array')])],
       flatPrimApp);
       return new A.SLetExpr(dummyLoc, binds, body, true);
     }
-    case 's-spy-block': {
-      const l = expr.l;
-      const dsMessage = expr.message === undefined ? new A.SStr(l, '') : desugarExpr(expr.message);
-      const dsContentsList: [A.Expr, A.Expr, A.Expr][] = expr.contents.map((spyExp) =>
-        [new A.SSrcloc(spyExp.l, spyExp.l), new A.SStr(spyExp.l, spyExp.name), desugarExpr(spyExp.value)] as [A.Expr, A.Expr, A.Expr]);
-      // foldr that conses each component onto the front == forward order
-      const locs: A.Expr[] = [];
-      const nms: A.Expr[] = [];
-      const vals: A.Expr[] = [];
-      for (const dsContent of dsContentsList) {
-        locs.push(dsContent[0]);
-        nms.push(dsContent[1]);
-        vals.push(dsContent[2]);
-      }
-      return new A.SApp(l, bid(l, 'spy'),
-        [new A.SSrcloc(l, l), dsMessage,
-          new A.SArray(l, locs), new A.SArray(l, nms), new A.SArray(l, vals)]);
-    }
-    case 's-prim-val': return expr;
-    case 's-array': return new A.SArray(expr.l, expr.values.map(desugarExpr));
-    default:
-      return raise('NYI (desugar): ' + (expr as any).$name);
   }
 }

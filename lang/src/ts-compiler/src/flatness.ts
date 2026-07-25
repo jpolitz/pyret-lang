@@ -580,6 +580,10 @@ export function makeProgFlatnessEnv(
     if (provides.dataDefinitions.has(name)) {
       // NOTE(joe): Datatypes _must_ just be flat brand checks
       ad.set(tb.atom.key(), 0);
+    } else if (C.tableOnlyTypeNames.has(name) && tb.origin.uriOfDefinition === 'builtin://global') {
+      // Type-level-only names (`Column`, `NewColumn`): they never appear in a
+      // checked annotation position, so treat them as untrusted like an alias.
+      ad.set(tb.atom.key(), undefined);
     } else if (provides.aliases.has(name)) {
       // NOTE(joe): Right now we don't trust any cross-module aliases. We need to
       // get either a representation of flatness for annotations in provides, or

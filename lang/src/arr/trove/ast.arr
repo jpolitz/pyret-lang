@@ -1237,15 +1237,38 @@ data Expr:
           | link(_,_) => self.column-binds.table.tosource()
         end
       header = PP.flow([list: str-extend, tbl-src] + maybe-using)
+      # NOTE(table-types): the grammar separates extension fields with commas
+      # (table-extend-fields), so this must be commabreak, not hardline;
+      # otherwise pretty-printing an `extend` with more than one extension
+      # produces something that does not re-parse.
       PP.surround(INDENT, 1,
         header,
-        PP.flow-map(PP.hardline, _.tosource(), self.extensions),
+        PP.flow-map(PP.commabreak, _.tosource(), self.extensions),
         str-end)
     end
-    # s-table-update not yet implemented
   | s-table-update(l :: Loc,
       column-binds :: ColumnBinds,
-      updates :: List<Member>)
+      updates :: List<Member>) with:
+    method label(self): "s-table-update" end,
+    method tosource(self):
+      maybe-using =
+        cases(List) self.column-binds.binds:
+          | empty => empty
+          | link(_, _) => link(str-using,
+              [list: PP.flow-map(PP.commabreak, _.tosource(),
+                  self.column-binds.binds) + str-colon])
+        end
+      tbl-src =
+        cases(List) maybe-using:
+          | empty => self.column-binds.table.tosource() + str-colon
+          | link(_,_) => self.column-binds.table.tosource()
+        end
+      header = PP.flow([list: str-transform, tbl-src] + maybe-using)
+      PP.surround(INDENT, 1,
+        header,
+        PP.flow-map(PP.commabreak, _.tosource(), self.updates),
+        str-end)
+    end
   | s-table-select(l :: Loc,
       columns :: List<Name>,
       table   :: Expr) with:

@@ -44,6 +44,23 @@ class DesugarVisitor extends DefaultMapVisitor {
   sCheck(node: A.SCheck): A.Expr {
     return new A.SId(node.l, new A.SGlobal('nothing'));
   }
+
+  // The table surface forms survive `desugar` (so that the type checker can
+  // see column names and header annotations) and are expanded here instead.
+  // `super.sX` re-builds the node with its subexpressions visited; the
+  // expansion itself then runs with the identity desugarers, since everything
+  // underneath is already fully desugared.
+  private table(node: A.Expr): A.Expr {
+    return D.desugarTableForm(node as any, (e) => e, (a) => a);
+  }
+  sTable(node: A.STable): A.Expr { return this.table(super.sTable(node)); }
+  sLoadTable(node: A.SLoadTable): A.Expr { return this.table(super.sLoadTable(node)); }
+  sTableExtend(node: A.STableExtend): A.Expr { return this.table(super.sTableExtend(node)); }
+  sTableUpdate(node: A.STableUpdate): A.Expr { return this.table(super.sTableUpdate(node)); }
+  sTableSelect(node: A.STableSelect): A.Expr { return this.table(super.sTableSelect(node)); }
+  sTableExtract(node: A.STableExtract): A.Expr { return this.table(super.sTableExtract(node)); }
+  sTableOrder(node: A.STableOrder): A.Expr { return this.table(super.sTableOrder(node)); }
+  sTableFilter(node: A.STableFilter): A.Expr { return this.table(super.sTableFilter(node)); }
 }
 
 export const desugarVisitor = new DesugarVisitor();

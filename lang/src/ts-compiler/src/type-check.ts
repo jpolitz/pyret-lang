@@ -175,8 +175,9 @@ export function typeCheck(program: A.Program, compileEnv: C.CompileEnvironment, 
       // context unchanged
     } else {
       const origin = mapGetValue(globts, g);
-      if (g === '_') {
-        // context unchanged
+      if (g === '_' || C.tableOnlyTypeNames.has(g)) {
+        // context unchanged: `Column`/`NewColumn` are recognized structurally
+        // in to-type, and have no runtime counterpart to look up
       } else {
         const provs = compileEnv.providesByUri(origin.uriOfDefinition);
         if (provs !== undefined) {
@@ -605,8 +606,15 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
             return checkSynthesis(e, expectType, topLevel, context);
           case 's-bool':
             return checkSynthesis(e, expectType, topLevel, context);
-          case 's-str':
+          case 's-str': {
+            // A string literal used where a column name is expected gets its
+            // singleton type, which is how a name reaches the schema.
+            if (expectType.$name === 't-column' || expectType.$name === 't-col-name') {
+              const nameType = new TS.TColName(e.s, e.l, false);
+              return new TCS.TypingResult(e, expectType, context.addConstraint(nameType, expectType));
+            }
             return checkSynthesis(e, expectType, topLevel, context);
+          }
           case 's-dot':
             return checkSynthesis(e, expectType, topLevel, context);
           case 's-get-bang':
@@ -621,6 +629,15 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
             return raise('s-for should have already been desugared');
           case 's-check':
             return new TCS.TypingResult(e, expectType, context);
+          case 's-table':
+          case 's-load-table':
+          case 's-table-select':
+          case 's-table-extract':
+          case 's-table-order':
+          case 's-table-filter':
+          case 's-table-extend':
+          case 's-table-update':
+            return checkSynthesis(e, expectType, topLevel, context);
           default:
             throw new InternalCompilerError('No cases matched in checking for ' + e.$name);
         }
@@ -852,12 +869,44 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
         return raise('synthesis for s-construct not implemented');
       case 's-app': {
         const { l, _fun, args } = e;
+        // `t.drop("c")` and `t.rename-column("c", "d")` have result schemas
+        // that depend on the column *name*; when the object is a table with a
+        // known schema and the name is a literal we can compute it exactly.
+        if (_fun.$name === 's-dot') {
+          const dot = _fun;
+          return synthesis(dot.obj, false, context).bind((newObj, objType, ctx0) =>
+            synthesisField(dot.l, newObj, objType, dot.field,
+              (l2, o2, f2) => new A.SDot(l2, o2, f2), ctx0)
+              .bind((newFun, funType, ctx) =>
+                synthesisSpine(funType, (exprs) => new A.SApp(l, newFun, exprs), args, l, ctx)
+                  .bind((newApp, resultType, ctx2) => {
+                    const refined = refineTableMethodResult(dot.field, TCS.resolveAlias(objType, ctx2),
+                      args, resultType, l, ctx2);
+                    if (typeof refined === 'object' && 'error' in refined) {
+                      return tcErr(refined.error, refined.l);
+                    }
+                    return new TCS.TypingResult(newApp, refined, ctx2);
+                  })));
+        }
         return synthesisAppFun(l, _fun, args, context)
           .typingBind((funType, ctx) =>
             synthesisSpine(funType, (exprs) => new A.SApp(l, _fun, exprs), args, l, ctx));
       }
       case 's-prim-app': {
         const { l, _fun, args, appInfo } = e;
+        // `r["c"]` desugars to getBracket(loc, r, "c"); on a row this is
+        // exactly `r.get-value("c")`.
+        if (_fun === 'getBracket' && args.length === 3) {
+          const objArg = args[1];
+          const probe = synthesis(objArg, false, context);
+          if (probe.$name === 'typing-result' && TCS.resolveAlias(probe.typ, probe.outContext).$name === 't-row') {
+            const rowType = TCS.resolveAlias(probe.typ, probe.outContext) as TS.TRow;
+            const getValue = tableMethodType(rowType, 'get-value', l)!;
+            return synthesisSpine(getValue, (exprs) =>
+              new A.SPrimApp(l, _fun, [args[0], probe.ast, exprs[0]], appInfo),
+            [args[2]], l, probe.outContext).mapType((t) => t.setLoc(l));
+          }
+        }
         return lookupId(l, _fun, e, context).typingBind((arrowType, ctx) =>
           synthesisSpine(arrowType, (exprs) => new A.SPrimApp(l, _fun, exprs, appInfo), args, l, ctx)
             .mapType((t) => t.setLoc(l)));
@@ -963,6 +1012,22 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
         const ctx = context.addVariable(resultType);
         return new TCS.TypingResult(e, resultType, ctx);
       }
+      case 's-table':
+        return synthesisTable(e, context);
+      case 's-load-table':
+        return synthesisLoadTable(e, context);
+      case 's-table-select':
+        return synthesisTableSelect(e, context);
+      case 's-table-extract':
+        return synthesisTableExtract(e, context);
+      case 's-table-order':
+        return synthesisTableOrder(e, context);
+      case 's-table-filter':
+        return synthesisTableFilter(e, context);
+      case 's-table-extend':
+        return synthesisTableExtend(e, context);
+      case 's-table-update':
+        return synthesisTableUpdate(e, context);
       default:
         throw new InternalCompilerError('No cases matched in synthesis for ' + e.$name);
     }
@@ -1638,6 +1703,14 @@ export function trackBranches(dataType: DataType): { remove: (b: TypeVariant) =>
 }
 
 export function synthesisField(accessLoc: Loc, obj: Expr, objType: Type, fieldName: string, recreate: (l: Loc, obj: Expr, field: string) => Expr, context: Context): AnyTypingResult {
+  const resolvedObj = TCS.resolveAlias(objType, context);
+  if (resolvedObj.$name === 't-table' || resolvedObj.$name === 't-row') {
+    const methodType = tableMethodType(resolvedObj, fieldName, accessLoc);
+    if (methodType === undefined) {
+      return new TCS.TypingError([new C.ObjectMissingField(fieldName, resolvedObj.toString(), resolvedObj.l, accessLoc)]);
+    }
+    return new TCS.TypingResult(recreate(accessLoc, obj, fieldName), methodType, context);
+  }
   return TCS.instantiateObjectType(objType, context).typingBind((objType2, ctx) => {
     switch (objType2.$name) {
       case 't-record': {
@@ -2479,6 +2552,16 @@ export function toType(inAnn: A.Ann, context: Context): AnyFoldResult<Type | und
       return new TCS.FoldResult<Type | undefined>(new TS.TTop(inAnn.l, false), context);
     case 'a-name': {
       const { l, id } = inAnn;
+      // `Table` / `Row` with no schema mean "some table/row, columns unknown";
+      // every table type is a subtype of these. `Column`/`NewColumn` only
+      // make sense applied to a schema.
+      const tableHead = isTableAnnName(inAnn);
+      if (tableHead === 'Table') { return new TCS.FoldResult<Type | undefined>(TS.tTable(l), context); }
+      if (tableHead === 'Row') { return new TCS.FoldResult<Type | undefined>(TS.tRow(l), context); }
+      if (tableHead !== undefined) {
+        return ctErr<Type | undefined>(tableHead + ' must be applied to a schema, e.g. '
+          + tableHead + '<S, Number>', l);
+      }
       const typ = context.aliases.get(id.key());
       if (typ !== undefined) {
         const resultType = TCS.resolveAlias(typ, context).setLoc(l);
@@ -2548,6 +2631,10 @@ export function toType(inAnn: A.Ann, context: Context): AnyFoldResult<Type | und
     }
     case 'a-app': {
       const { l, ann, args } = inAnn;
+      const tableHead = isTableAnnName(ann);
+      if (tableHead !== undefined) {
+        return tableAnnToType(l, tableHead, args, context);
+      }
       return toType(ann, context).bind((maybeTyp, ctx) => {
         if (maybeTyp === undefined) {
           return new TCS.FoldErrors<Type | undefined>([new C.CantTypecheck('no annotation provided on ' + toRepr(ann), l)]);
@@ -2918,3 +3005,643 @@ export function miscCollectExample(e: Expr, context: Context): Context {
 }
 
 // #######################################################
+
+// ============================================================
+// Table types
+// ============================================================
+//
+// See /app/DESIGN.md. Summary of what is added here:
+//
+//  * `toType` understands the annotation forms `Table<Sch>`, `Row<Sch>`,
+//    `Column<Sch, Sort>`, `Column<Sch, Name, Sort>`, `NewColumn<Sch>` and
+//    `NewColumn<Sch, Name>`, plus bare `Table`/`Row` (fully unknown schema).
+//  * `synthesisField` gives precise, schema-indexed types to the table and
+//    row *methods*, so `t.column("age")` etc. flow through the ordinary
+//    application/constraint machinery.
+//  * the table *syntax* forms (`table:`, `load-table:`, `extend`, `update`,
+//    `select`, `extract`, `order`, `sieve`) are type checked directly; they
+//    survive `desugar` and are expanded in `desugar-post-tc`.
+
+const TABLE_ANN_NAMES = new Set(['Table', 'Row', 'Column', 'NewColumn']);
+
+export function isTableAnnName(ann: A.Ann): string | undefined {
+  if (ann.$name === 'a-name' && A.isSTypeGlobal(ann.id) && TABLE_ANN_NAMES.has(ann.id.toname())) {
+    return ann.id.toname();
+  }
+  return undefined;
+}
+
+function ctErr<X>(msg: string, l: Loc): TCS.FoldErrors<X> {
+  return new TCS.FoldErrors<X>([new C.CantTypecheck(msg, l)]);
+}
+
+function tcErr(msg: string, l: Loc): TCS.TypingError {
+  return new TCS.TypingError([new C.CantTypecheck(msg, l)]);
+}
+
+// ---------- annotations ----------
+
+// `Sch` is a non-empty sequence of annotations:
+//
+//   * a record annotation `{name :: Sort, ...}` contributes those columns, in
+//     order, with literal names;
+//   * a 2-tuple annotation `{Name; Sort}` contributes one column whose *name*
+//     is itself a type (a column-name variable, or a name found by
+//     inference) -- this is how a function says "one more column, named by my
+//     second argument";
+//   * anything else is only allowed as the very first argument, and is the
+//     schema's unknown prefix (a schema variable).
+//
+// So `Table<{name :: String, age :: Number}>` is a closed two-column schema,
+// `Table<S>` is "some table", `Table<S, {gender :: String}>` is S with a
+// `gender` column appended, and `Table<S, {C; Number}>` is S with one more
+// numeric column whose name is C.
+function schemaAnnToType(l: Loc, args: A.Ann[], context: Context): AnyFoldResult<Type> {
+  if (args.length === 0) {
+    return ctErr('A table schema needs at least one argument, e.g. Table<{name :: String}>', l);
+  }
+  let ctx = context;
+  let base: Type | undefined = undefined;
+  let cols: TS.SchemaCol[] = [];
+  let start = 0;
+  const isColumnArg = (a: A.Ann): boolean => a.$name === 'a-record' || a.$name === 'a-tuple';
+  if (!isColumnArg(args[0])) {
+    const first = toType(args[0], ctx);
+    if (first.$name === 'fold-errors') { return first as AnyFoldResult<Type>; }
+    ctx = first.context;
+    const t = first.v;
+    if (t === undefined) {
+      return ctErr('A table schema cannot contain a blank annotation', l);
+    }
+    if (t.$name === 't-schema') {
+      base = t.base;
+      cols = [...t.cols];
+    } else if (t.$name === 't-table' || t.$name === 't-row') {
+      // `type Students = Table<{...}>` then `Table<Students>` / `Row<Students>`
+      const inner = t.schema;
+      if (inner.$name === 't-schema') { base = inner.base; cols = [...inner.cols]; } else { base = inner; }
+    } else if (t.$name === 't-record') {
+      // Record *types* have no column order, and a schema does; make the user
+      // name the schema itself instead of guessing an order.
+      return ctErr('A schema alias has to be written as a table type, e.g. '
+        + '`type Students = Table<{name :: String, age :: Number}>`, and then used as '
+        + '`Table<Students>` or `Row<Students>`', l);
+    } else {
+      base = t;
+    }
+    start = 1;
+  }
+  for (let i = start; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.$name === 'a-record') {
+      for (const field of arg.fields) {
+        const ft = toType(field.ann, ctx);
+        if (ft.$name === 'fold-errors') { return ft as AnyFoldResult<Type>; }
+        ctx = ft.context;
+        if (ft.v === undefined) {
+          return ctErr('The column ' + JSON.stringify(field.name) + ' needs a sort annotation', l);
+        }
+        cols.push({ name: new TS.TColName(field.name, field.l, false), sort: ft.v });
+      }
+    } else if (arg.$name === 'a-tuple' && arg.fields.length === 2) {
+      const nameR = toType(arg.fields[0], ctx);
+      if (nameR.$name === 'fold-errors') { return nameR as AnyFoldResult<Type>; }
+      ctx = nameR.context;
+      const sortR = toType(arg.fields[1], ctx);
+      if (sortR.$name === 'fold-errors') { return sortR as AnyFoldResult<Type>; }
+      ctx = sortR.context;
+      if (nameR.v === undefined || sortR.v === undefined) {
+        return ctErr('A {Name; Sort} column needs both a name and a sort', l);
+      }
+      cols.push({ name: nameR.v, sort: sortR.v });
+    } else {
+      return ctErr('A table schema is made of record annotations like {name :: String} and '
+        + '2-tuple annotations like {C; Number}; only the first argument may be a schema variable', l);
+    }
+  }
+  return new TCS.FoldResult<Type>(TS.mkSchema(base, cols, l, false), ctx);
+}
+
+export function tableAnnToType(l: Loc, head: string, args: A.Ann[], context: Context): AnyFoldResult<Type | undefined> {
+  const asType = (r: AnyFoldResult<Type>): AnyFoldResult<Type | undefined> => r as AnyFoldResult<Type | undefined>;
+  switch (head) {
+    case 'Table':
+      return asType(schemaAnnToType(l, args, context).bind((sch, ctx) =>
+        new TCS.FoldResult<Type>(new TS.TTable(sch, l, false), ctx)));
+    case 'Row':
+      return asType(schemaAnnToType(l, args, context).bind((sch, ctx) =>
+        new TCS.FoldResult<Type>(new TS.TRow(sch, l, false), ctx)));
+    case 'Column':
+    case 'NewColumn': {
+      const present = head === 'Column';
+      const minArgs = present ? 2 : 1;
+      const maxArgs = present ? 3 : 2;
+      if (args.length < minArgs || args.length > maxArgs) {
+        return ctErr(head + ' takes ' + (present ? '2 or 3' : '1 or 2') + ' type arguments; '
+          + 'write ' + head + (present ? '<Schema, Sort> or Column<Schema, Name, Sort>' : '<Schema> or NewColumn<Schema, Name>'), l);
+      }
+      return asType(schemaAnnToType(l, [args[0]], context).bind((sch, ctx) => {
+        const rest = args.slice(1);
+        // name slot: t-top means "we do not name this column"
+        const anyT = (): Type => new TS.TTop(l, false);
+        const conv = (a: A.Ann, ctx2: Context): AnyFoldResult<Type> =>
+          toType(a, ctx2).bind((t, ctx3) => t === undefined
+            ? ctErr<Type>('A blank annotation is not allowed here', l)
+            : new TCS.FoldResult<Type>(t, ctx3));
+        if (present) {
+          if (rest.length === 1) {
+            return conv(rest[0], ctx).bind((sort, ctx2) =>
+              new TCS.FoldResult<Type>(new TS.TColumn(sch, anyT(), sort, true, l, false), ctx2));
+          }
+          return conv(rest[0], ctx).bind((nameT, ctx2) =>
+            conv(rest[1], ctx2).bind((sort, ctx3) =>
+              new TCS.FoldResult<Type>(new TS.TColumn(sch, nameT, sort, true, l, false), ctx3)));
+        }
+        if (rest.length === 0) {
+          return new TCS.FoldResult<Type>(new TS.TColumn(sch, anyT(), anyT(), false, l, false), ctx);
+        }
+        return conv(rest[0], ctx).bind((nameT, ctx2) =>
+          new TCS.FoldResult<Type>(new TS.TColumn(sch, nameT, anyT(), false, l, false), ctx2));
+      }));
+    }
+    default:
+      throw new InternalCompilerError('Unknown table annotation head ' + head);
+  }
+}
+
+// ---------- method types ----------
+
+function schemaOf(t: TS.TTable | TS.TRow): Type { return t.schema; }
+
+// Build `forall <vars> . typ`
+function poly(vars: TS.TVar[], typ: Type, l: Loc): Type {
+  return vars.length === 0 ? typ : new TS.TForall(vars as Type[], typ, l, false);
+}
+
+// The sort shared by every column, when the schema is fully known and
+// homogeneous; `Any` otherwise.
+function commonSort(sch: Type, l: Loc): Type {
+  const s = TS.asSchema(sch);
+  if (s === undefined || !s.isClosed() || s.cols.length === 0) { return new TS.TTop(l, false); }
+  const first = s.cols[0].sort;
+  return s.cols.every((c) => c.sort.equals(first)) ? first : new TS.TTop(l, false);
+}
+
+export function tableMethodType(objType: TS.TTable | TS.TRow, fieldName: string, l: Loc): Type | undefined {
+  const sch = schemaOf(objType);
+  const top = (): Type => new TS.TTop(l, false);
+  const arrow = (args: Type[], ret: Type): Type => new TS.TArrow(args, ret, l, false);
+  const table = (s: Type): Type => new TS.TTable(s, l, false);
+  const row = (s: Type): Type => new TS.TRow(s, l, false);
+  const col = (n: Type, s: Type): Type => new TS.TColumn(sch, n, s, true, l, false);
+  const fresh = (n: Type): Type => new TS.TColumn(sch, n, top(), false, l, false);
+  const num = TS.tNumber(l);
+  const str = TS.tString(l);
+  const bool = TS.tBoolean(l);
+  const list = (v: Type): Type => TS.tList(v, l);
+  const tv = (): TS.TVar => TS.newTypeVar(l);
+  // `S (+) (C :: T)`: the schema with one more column on the right.
+  const extended = (n: Type, s: Type): Type =>
+    sch.$name === 't-schema'
+      ? TS.schemaExtend(sch, n, s, l)
+      : new TS.TSchema(sch, [{ name: n, sort: s }], l, false);
+
+  if (objType.$name === 't-row') {
+    switch (fieldName) {
+      case 'get-value': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s)], s), l); }
+      case 'get': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s)], TS.tOption(s, l)), l); }
+      case 'get-column-names': return arrow([], list(str));
+      default: return undefined;
+    }
+  }
+
+  switch (fieldName) {
+    case 'length': return arrow([], num);
+    case 'column-names': return arrow([], list(str));
+    case 'all-rows': return arrow([], list(row(sch)));
+    case 'row-n': return arrow([num], row(sch));
+    case 'empty': return arrow([], table(sch));
+    // Index-based column access cannot know *which* column it gets, but when
+    // every column of a known schema has the same sort (the b2t2 "jellyAnon"
+    // shape) that sort is still the right answer.
+    case 'all-columns': return arrow([], list(list(commonSort(sch, l))));
+    case 'column-n': return arrow([num], list(commonSort(sch, l)));
+    case 'column':
+    case 'get-column': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s)], list(s)), l); }
+    case 'filter': return arrow([arrow([row(sch)], bool)], table(sch));
+    case 'filter-by': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s), arrow([s], bool)], table(sch)), l); }
+    case 'order-by': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s), bool], table(sch)), l); }
+    case 'increasing-by':
+    case 'decreasing-by': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s)], table(sch)), l); }
+    case 'order-by-columns':
+      return arrow([list(new TS.TTuple([str, bool], l, false))], table(sch));
+    case 'stack': return arrow([table(sch)], table(sch));
+    case 'add-row': return arrow([row(sch)], table(sch));
+    case 'add-column': {
+      const c = tv(); const s = tv();
+      return poly([c, s], arrow([fresh(c), list(s)], table(extended(c, s))), l);
+    }
+    case 'build-column': {
+      const c = tv(); const s = tv();
+      return poly([c, s], arrow([fresh(c), arrow([row(sch)], s)], table(extended(c, s))), l);
+    }
+    // A sort-preserving transform: the general (sort-changing) version would
+    // need a schema *update* at a column name that is only known later.
+    case 'transform-column': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s), arrow([s], s)], table(sch)), l); }
+    // The result schemas of these depend on a column name that is not known
+    // until the argument is checked; `synthesisTableMethodApp` recovers the
+    // precise answer when the name is a literal, and this is the sound
+    // fallback otherwise.
+    case 'drop': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s)], TS.tTable(l)), l); }
+    case 'rename-column': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s), str], TS.tTable(l)), l); }
+    case 'select-columns': return arrow([list(str)], TS.tTable(l));
+    case 'reduce': { const c = tv(); const s = tv(); return poly([c, s], arrow([col(c, s), top()], top()), l); }
+    default: return undefined;
+  }
+}
+
+// `t.drop("c")` / `t.rename-column("c", "d")` are the two operations whose
+// result schema is a *function* of the column name. When the name is a string
+// literal and the schema is fully known we can compute it exactly; otherwise
+// the (sound but opaque) type from `tableMethodType` stands.
+// The elements of a literal `[list: ...]`, if that is what this expression is.
+// `[list: a, b]` desugars to `getMaker2(list, "make2", ...)(a, b)`.
+function literalListElements(e: Expr): Expr[] | undefined {
+  if (e.$name !== 's-app') { return undefined; }
+  const f = e._fun;
+  if (f.$name !== 's-prim-app') { return undefined; }
+  if (!/^getMaker[0-5]$/.test(f._fun)) { return undefined; }
+  return e.args;
+}
+
+// `t.select-columns([list: "a", "b"])` keeps its exact schema when the names
+// are known; the general `List<String>` case has to fall back to `Table`.
+function refineSelectColumns(sch: TS.TSchema, argExpr: Expr, l: Loc, context: Context): Type | { error: string; l: Loc } | undefined {
+  const elements = literalListElements(argExpr);
+  if (elements === undefined) { return undefined; }
+  const cols: TS.SchemaCol[] = [];
+  for (const e of elements) {
+    let nameType: Type | undefined = undefined;
+    if (e.$name === 's-str') {
+      nameType = new TS.TColName(e.s, e.l, false);
+    } else if (e.$name === 's-id' || e.$name === 's-id-letrec') {
+      const looked = lookupId(e.l, e.id.key(), e, context);
+      if (looked.$name === 'fold-result' && looked.v !== undefined) {
+        nameType = TCS.resolveAlias(looked.v, context);
+      }
+    }
+    if (nameType === undefined) { return undefined; }
+    if (nameType.$name === 't-col-name') {
+      const found = TS.schemaLookup(sch, nameType.name);
+      if (found.status === 'absent') {
+        return { error: 'There is no column named ' + JSON.stringify(nameType.name)
+          + ' in this table. Its columns are: '
+          + (TS.schemaColNames(sch) ?? []).map((n) => JSON.stringify(n)).join(', '), l: e.l };
+      }
+      if (found.status !== 'found') { return undefined; }
+      cols.push({ name: nameType, sort: found.sort });
+    } else if (nameType.$name === 't-column' && nameType.present
+               && TCS.resolveAlias(nameType.schema, context).equals(sch)) {
+      cols.push({ name: nameType.name, sort: nameType.sort });
+    } else {
+      return undefined;
+    }
+  }
+  return new TS.TTable(TS.closedSchema(cols, l), l, false);
+}
+
+export function refineTableMethodResult(fieldName: string, objType: Type, args: Expr[], resultType: Type, l: Loc, context: Context): Type | { error: string; l: Loc } {
+  if (objType.$name !== 't-table') { return resultType; }
+  const sch = TS.asSchema(objType.schema);
+  if (sch === undefined) { return resultType; }
+  if (fieldName === 'select-columns' && args.length === 1) {
+    const refined = refineSelectColumns(sch, args[0], l, context);
+    return refined === undefined ? resultType : refined;
+  }
+  // `drop` / `rename-column` only need the *listed* names, not the whole
+  // column list: an unknown prefix cannot contain a second copy of a listed
+  // name (schemas have distinct column names).
+  const lit = (e: Expr | undefined): string | undefined => (e !== undefined && e.$name === 's-str') ? e.s : undefined;
+  // `build-column("c", f)` / `add-column("c", vs)` produce `S (+) (?C :: ?T)`,
+  // where `?C` is only solved when the argument constraint is solved. Pin it
+  // down now, so that a later `.drop("c")` in the same expression can see it.
+  if ((fieldName === 'build-column' || fieldName === 'add-column') && resultType.$name === 't-table') {
+    const c = lit(args[0]);
+    const rsch = TS.asSchema(resultType.schema);
+    if (c !== undefined && rsch !== undefined && rsch.cols.length > 0) {
+      const last = rsch.cols[rsch.cols.length - 1];
+      if (last.name.$name === 't-existential') {
+        return new TS.TTable(new TS.TSchema(rsch.base,
+          [...rsch.cols.slice(0, rsch.cols.length - 1), { name: new TS.TColName(c, l, false), sort: last.sort }],
+          rsch.l, false), resultType.l, resultType.inferred);
+      }
+    }
+    return resultType;
+  }
+  if (!TS.schemaNamesSettled(sch)) { return resultType; }
+  switch (fieldName) {
+    case 'drop': {
+      const c = lit(args[0]);
+      if (c === undefined) { return resultType; }
+      const dropped = TS.schemaDrop(sch, c, l);
+      return dropped === undefined ? resultType : new TS.TTable(dropped, l, false);
+    }
+    case 'rename-column': {
+      const from = lit(args[0]);
+      const to = lit(args[1]);
+      if (from === undefined || to === undefined) { return resultType; }
+      if (TS.schemaLookup(sch, to).status === 'found') { return resultType; }
+      const renamed = TS.schemaRename(sch, from, to, l);
+      return renamed === undefined ? resultType : new TS.TTable(renamed, l, false);
+    }
+    default:
+      return resultType;
+  }
+}
+
+// ---------- syntax forms ----------
+
+// Every table form starts by demanding an actual table; this reports a good
+// error when it is not one, and hands back the schema when it is.
+function asTableType(typ: Type, l: Loc, context: Context): AnyFoldResult<TS.TSchema> {
+  const resolved = TCS.resolveAlias(typ, context);
+  if (resolved.$name === 't-table') {
+    const sch = TS.asSchema(resolved.schema);
+    if (sch !== undefined) { return new TCS.FoldResult(sch, context); }
+    return new TCS.FoldResult(new TS.TSchema(resolved.schema, [], l, false), context);
+  }
+  return new TCS.FoldErrors<TS.TSchema>([new C.IncorrectType(resolved.toString(), resolved.l, 'a Table', l)]);
+}
+
+function columnSortFor(sch: TS.TSchema, name: string, l: Loc): { sort: Type } | { error: string } {
+  const found = TS.schemaLookup(sch, name);
+  switch (found.status) {
+    case 'found': return { sort: found.sort };
+    case 'unknown': return { sort: new TS.TTop(l, false) };
+    case 'absent':
+      return { error: 'There is no column named ' + JSON.stringify(name) + ' in this table. Its columns are: '
+        + (TS.schemaColNames(sch) ?? []).map((n) => JSON.stringify(n)).join(', ') };
+  }
+}
+
+// The binder list of `extend t using a, b:` / `sieve t using a:`: each bound
+// name must be a column of `t`, and is bound to that column's sort.
+function bindColumnBinds(binds: A.Bind[], sch: TS.TSchema, context: Context): AnyFoldResult<undefined> {
+  let ctx = context;
+  for (const b of binds) {
+    const bind = b as A.SBind;
+    const name = (bind.id as A.SAtom).base;
+    const res = columnSortFor(sch, name, bind.l);
+    if ('error' in res) { return ctErr<undefined>(res.error, bind.l); }
+    let bound = res.sort;
+    const annResult = toType(bind.ann, ctx);
+    if (annResult.$name === 'fold-errors') { return annResult as unknown as AnyFoldResult<undefined>; }
+    ctx = annResult.context;
+    if (annResult.v !== undefined) {
+      ctx = ctx.addConstraint(bound, annResult.v);
+      bound = annResult.v;
+    }
+    ctx = ctx.addBinding(bind.id.key(), bound);
+  }
+  return new TCS.FoldResult<undefined>(undefined, ctx);
+}
+
+function unbindColumnBinds(binds: A.Bind[], context: Context): Context {
+  let ctx = context;
+  for (let i = binds.length - 1; i >= 0; i--) {
+    ctx = ctx.removeBinding(((binds[i] as A.SBind).id).key());
+  }
+  return ctx;
+}
+
+// `table: c1 :: T1, c2 :: T2 row: ... end`
+export function synthesisTable(e: A.STable, context: Context): AnyTypingResult {
+  const { l, headers, rows } = e;
+  // header annotations first (a missing one means "infer from the cells")
+  return TCS.mapFoldResult((h: A.FieldName, ctx: Context) => toType(h.ann, ctx), headers, context)
+    .typingBind((annTypes, ctx0) => {
+      const nCols = headers.length;
+      const cellTypes: Type[][] = headers.map(() => []);
+      return TCS.mapFoldResult((rowNode: A.TableRow, ctx: Context): AnyFoldResult<A.TableRow> => {
+        if (rowNode.elems.length !== nCols) {
+          // well-formedness already reports this; be defensive anyway
+          return ctErr<A.TableRow>('This row has ' + rowNode.elems.length + ' cells but the table has '
+            + nCols + ' columns', rowNode.l);
+        }
+        return TCS.mapFoldResult((idx: number, ctx2: Context): AnyFoldResult<Expr> => {
+          const elem = rowNode.elems[idx];
+          const ann = annTypes[idx];
+          if (ann === undefined) {
+            return synthesis(elem, false, ctx2).foldBind((newElem, typ, ctx3) => {
+              cellTypes[idx].push(typ);
+              return new TCS.FoldResult(newElem, ctx3);
+            });
+          }
+          return checking(elem, ann, false, ctx2).foldBind((newElem, _t, ctx3) =>
+            new TCS.FoldResult(newElem, ctx3));
+        }, headers.map((_h, i) => i), ctx).bind((newElems, ctx2) =>
+          new TCS.FoldResult(new A.STableRow(rowNode.l, newElems), ctx2));
+      }, rows, ctx0).typingBind((newRows, ctx) => {
+        // infer the un-annotated column sorts from their cells
+        return TCS.mapFoldResult((idx: number, ctx2: Context): AnyFoldResult<Type> => {
+          const ann = annTypes[idx];
+          if (ann !== undefined) { return new TCS.FoldResult(ann, ctx2); }
+          if (cellTypes[idx].length === 0) { return new TCS.FoldResult<Type>(new TS.TTop(l, false), ctx2); }
+          return meetBranchTypes(cellTypes[idx], headers[idx].l, ctx2);
+        }, headers.map((_h, i) => i), ctx).typingBind((sorts, ctx2) => {
+          const cols = headers.map((h, i): TS.SchemaCol =>
+            ({ name: new TS.TColName(h.name, h.l, false), sort: sorts[i] }));
+          const tableType = new TS.TTable(TS.closedSchema(cols, l), l, false);
+          return new TCS.TypingResult(new A.STable(l, headers, newRows), tableType, ctx2);
+        });
+      });
+    });
+}
+
+// `load-table: c1 :: T1, ... source: ... end`
+// The sorts of a table from an outside source cannot be known, so an
+// un-annotated column gets sort `Any`.
+export function synthesisLoadTable(e: A.SLoadTable, context: Context): AnyTypingResult {
+  const { l, headers, spec } = e;
+  return TCS.mapFoldResult((s: A.LoadTableSpec, ctx: Context): AnyFoldResult<A.LoadTableSpec> => {
+    switch (s.$name) {
+      case 's-table-src':
+        return checking(s.src, new TS.TTop(s.l, false), false, ctx)
+          .foldBind((newSrc, _t, ctx2) => new TCS.FoldResult<A.LoadTableSpec>(new A.STableSrc(s.l, newSrc), ctx2));
+      case 's-sanitize':
+        return checking(s.sanitizer, new TS.TTop(s.l, false), false, ctx)
+          .foldBind((newSan, _t, ctx2) => new TCS.FoldResult<A.LoadTableSpec>(new A.SSanitize(s.l, s.name, newSan), ctx2));
+    }
+  }, spec, context).typingBind((newSpec, ctx) =>
+    TCS.mapFoldResult((h: A.FieldName, ctx2: Context): AnyFoldResult<TS.SchemaCol> =>
+      toType(h.ann, ctx2).bind((t, ctx3) =>
+        new TCS.FoldResult<TS.SchemaCol>({
+          name: new TS.TColName(h.name, h.l, false),
+          sort: t === undefined ? new TS.TTop(h.l, false) : t,
+        }, ctx3)), headers, ctx)
+      .typingBind((cols, ctx2) =>
+        new TCS.TypingResult(new A.SLoadTable(l, headers, newSpec),
+          new TS.TTable(TS.closedSchema(cols, l), l, false), ctx2)));
+}
+
+export function synthesisTableSelect(e: A.STableSelect, context: Context): AnyTypingResult {
+  const { l, columns, table } = e;
+  return synthesis(table, false, context).bind((newTable, tblType, ctx) =>
+    asTableType(tblType, table.l, ctx).typingBind((sch, ctx2) => {
+      const cols: TS.SchemaCol[] = [];
+      for (const c of columns) {
+        const name = c.toname();
+        const res = columnSortFor(sch, name, l);
+        if ('error' in res) { return tcErr(res.error, l); }
+        cols.push({ name: new TS.TColName(name, l, false), sort: res.sort });
+      }
+      return new TCS.TypingResult(new A.STableSelect(l, columns, newTable),
+        new TS.TTable(TS.closedSchema(cols, l), l, false), ctx2);
+    }));
+}
+
+export function synthesisTableExtract(e: A.STableExtract, context: Context): AnyTypingResult {
+  const { l, column, table } = e;
+  return synthesis(table, false, context).bind((newTable, tblType, ctx) =>
+    asTableType(tblType, table.l, ctx).typingBind((sch, ctx2) => {
+      const res = columnSortFor(sch, column.toname(), l);
+      if ('error' in res) { return tcErr(res.error, l); }
+      return new TCS.TypingResult(new A.STableExtract(l, column, newTable), TS.tList(res.sort, l), ctx2);
+    }));
+}
+
+export function synthesisTableOrder(e: A.STableOrder, context: Context): AnyTypingResult {
+  const { l, table, ordering } = e;
+  return synthesis(table, false, context).bind((newTable, tblType, ctx) =>
+    asTableType(tblType, table.l, ctx).typingBind((sch, ctx2) => {
+      for (const o of ordering) {
+        const res = columnSortFor(sch, o.column.toname(), o.l);
+        if ('error' in res) { return tcErr(res.error, o.l); }
+      }
+      return new TCS.TypingResult(new A.STableOrder(l, newTable, ordering),
+        new TS.TTable(sch, l, false), ctx2);
+    }));
+}
+
+export function synthesisTableFilter(e: A.STableFilter, context: Context): AnyTypingResult {
+  const { l, columnBinds, predicate } = e;
+  return synthesis(columnBinds.table, false, context).bind((newTable, tblType, ctx) =>
+    asTableType(tblType, columnBinds.table.l, ctx).typingBind((sch, ctx1) =>
+      bindColumnBinds(columnBinds.binds, sch, ctx1).typingBind((_n, ctx2) =>
+        checking(predicate, TS.tBoolean(predicate.l), false, ctx2).bind((newPred, _t, ctx3) =>
+          new TCS.TypingResult(
+            new A.STableFilter(l, new A.SColumnBinds(columnBinds.l, columnBinds.binds, newTable), newPred),
+            new TS.TTable(sch, l, false),
+            unbindColumnBinds(columnBinds.binds, ctx3))))));
+}
+
+// The record type a `Reducer<Acc, In, Out>` must have, given the sort of the
+// column it reduces over. `acc`/`out` are the caller's fresh existentials.
+function reducerRecordType(inSort: Type, acc: Type, out: Type, l: Loc): Type {
+  const pair = new TS.TTuple([acc, out], l, false);
+  return new TS.TRecord(new Map<string, Type>([
+    ['one', new TS.TArrow([inSort], pair, l, false)],
+    ['reduce', new TS.TArrow([acc, inSort], pair, l, false)],
+  ]), l, false);
+}
+
+export function synthesisTableExtend(e: A.STableExtend, context: Context): AnyTypingResult {
+  const { l, columnBinds, extensions } = e;
+  return synthesis(columnBinds.table, false, context).bind((newTable, tblType, ctx) =>
+    asTableType(tblType, columnBinds.table.l, ctx).typingBind((sch, ctx1) =>
+      bindColumnBinds(columnBinds.binds, sch, ctx1).typingBind((_n, ctx2) => {
+        const newCols: TS.SchemaCol[] = [];
+        return TCS.mapFoldResult((ext: A.TableExtendField, ctxE: Context): AnyFoldResult<A.TableExtendField> => {
+          if (TS.schemaLookup(sch, ext.name).status === 'found') {
+            return ctErr<A.TableExtendField>('This table already has a column named '
+              + JSON.stringify(ext.name) + ', so `extend` cannot add it again.', ext.l);
+          }
+          return toType(ext.ann, ctxE).bind((annType, ctxA) => {
+            switch (ext.$name) {
+              case 's-table-extend-field': {
+                const check = annType === undefined
+                  ? synthesis(ext.value, false, ctxA)
+                  : checking(ext.value, annType, false, ctxA);
+                return check.foldBind((newValue, valType, ctxB) => {
+                  newCols.push({
+                    name: new TS.TColName(ext.name, ext.l, false),
+                    sort: annType === undefined ? valType : annType,
+                  });
+                  return new TCS.FoldResult<A.TableExtendField>(
+                    new A.STableExtendField(ext.l, ext.name, newValue, ext.ann), ctxB);
+                });
+              }
+              case 's-table-extend-reducer': {
+                const colRes = columnSortFor(sch, ext.col.toname(), ext.l);
+                if ('error' in colRes) { return ctErr<A.TableExtendField>(colRes.error, ext.l); }
+                const acc = newExistential(ext.l, false);
+                const out = newExistential(ext.l, false);
+                let ctxR = ctxA.addVariable(acc).addVariable(out);
+                if (annType !== undefined) {
+                  // the desugaring checks the reducer's *pair* against this
+                  ctxR = ctxR.addConstraint(new TS.TTuple([acc, out], ext.l, false), annType);
+                }
+                // `Reducer<Acc, In, Out>` is a (parameterized) alias for a
+                // record type in the `tables` trove, so instantiate the
+                // reducer's own type down to a record before matching.
+                return synthesis(ext.reducer, false, ctxR).foldBind((newReducer, reducerType, ctxB) =>
+                  TCS.instantiateObjectType(reducerType, ctxB).bind((reducerRecord, ctxC) => {
+                    const ctxD = ctxC.addConstraint(reducerRecord,
+                      reducerRecordType(colRes.sort, acc, out, ext.l));
+                    newCols.push({ name: new TS.TColName(ext.name, ext.l, false), sort: out });
+                    return new TCS.FoldResult<A.TableExtendField>(
+                      new A.STableExtendReducer(ext.l, ext.name, newReducer, ext.col, ext.ann), ctxD);
+                  }));
+              }
+            }
+          });
+        }, extensions, ctx2).typingBind((newExts, ctx3) => {
+          let resultSchema = sch;
+          for (const c of newCols) { resultSchema = TS.schemaExtend(resultSchema, c.name, c.sort, l); }
+          return new TCS.TypingResult(
+            new A.STableExtend(l, new A.SColumnBinds(columnBinds.l, columnBinds.binds, newTable), newExts),
+            new TS.TTable(resultSchema, l, false),
+            unbindColumnBinds(columnBinds.binds, ctx3));
+        });
+      })));
+}
+
+export function synthesisTableUpdate(e: A.STableUpdate, context: Context): AnyTypingResult {
+  const { l, columnBinds, updates } = e;
+  return synthesis(columnBinds.table, false, context).bind((newTable, tblType, ctx) =>
+    asTableType(tblType, columnBinds.table.l, ctx).typingBind((sch, ctx1) =>
+      bindColumnBinds(columnBinds.binds, sch, ctx1).typingBind((_n, ctx2) => {
+        const updated = new Map<string, Type>();
+        let anyUnknown = false;
+        return TCS.mapFoldResult((u: A.Member, ctxU: Context): AnyFoldResult<A.Member> => {
+          const field = u as A.SDataField;
+          const found = TS.schemaLookup(sch, field.name);
+          if (found.status === 'absent') {
+            return ctErr<A.Member>('There is no column named ' + JSON.stringify(field.name)
+              + ' in this table, so `transform` cannot update it.', field.l);
+          }
+          if (found.status === 'unknown') { anyUnknown = true; }
+          return synthesis(field.value, false, ctxU).foldBind((newValue, valType, ctxV) => {
+            updated.set(field.name, valType);
+            return new TCS.FoldResult<A.Member>(new A.SDataField(field.l, field.name, newValue), ctxV);
+          });
+        }, updates, ctx2).typingBind((newUpdates, ctx3) => {
+          // If a column being updated lives in the unknown part of the schema
+          // we cannot say what the result schema is; `Table` (all unknown) is
+          // the sound answer.
+          const resultType: Type = anyUnknown
+            ? TS.tTable(l)
+            : new TS.TTable(new TS.TSchema(sch.base, sch.cols.map((c) => {
+              const cn = c.name;
+              if (cn.$name === 't-col-name' && updated.has(cn.name)) {
+                return { name: c.name, sort: mapGetValue(updated, cn.name) };
+              }
+              return c;
+            }), l, false), l, false);
+          return new TCS.TypingResult(
+            new A.STableUpdate(l, new A.SColumnBinds(columnBinds.l, columnBinds.binds, newTable), newUpdates),
+            resultType,
+            unbindColumnBinds(columnBinds.binds, ctx3));
+        });
+      })));
+}
