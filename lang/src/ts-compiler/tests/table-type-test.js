@@ -10,7 +10,7 @@
   `#:expect <substring>` comment on its first line, which must appear in the
   reported error.
 
-  The programs in /app/typed-examples are checked here too, so the delivered
+  The programs in table-types/examples are checked here too, so the delivered
   examples cannot silently rot.
 
   Each program is checked in a child process (`--one FILE`): the compiler
@@ -112,7 +112,7 @@ if (process.argv[2] === '--one') {
 
 function runAll() {
 const HERE = path.join(LANG, 'src', 'ts-compiler', 'tests', 'table-types');
-const EXAMPLES = '/app/typed-examples';
+const EXAMPLES = path.join(HERE, 'examples');
 
 let passed = 0;
 const failures = [];

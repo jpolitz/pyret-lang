@@ -1,0 +1,103 @@
+#!/usr/bin/env node
+/*
+  typecheck-example FILE.arr
+
+  Type checks one Pyret program with the modified TypeScript compiler
+  (build/ts-compiler).  Exits 0 when the program has no type error and
+  non-zero (printing the errors) when it does.
+
+  This is the same type checking the programs in table-types/examples rely on:
+  the ordinary compiler pipeline with `-type-check` turned on, stopped after
+  compilation (no standalone is assembled and nothing is run).
+*/
+
+'use strict';
+
+const path = require('path');
+const fs = require('fs');
+
+const LANG = path.resolve(__dirname, '..', '..', '..');
+const OUT = path.join(LANG, 'build', 'ts-compiler');
+
+if (!fs.existsSync(path.join(OUT, 'pyret.js'))) {
+  console.error('The TypeScript compiler is not built. Run `make ts-compiler` in ' + LANG + '.');
+  process.exit(2);
+}
+
+const args = process.argv.slice(2);
+if (args.length !== 1) {
+  console.error('usage: typecheck-example FILE.arr');
+  process.exit(2);
+}
+const file = path.resolve(args[0]);
+if (!fs.existsSync(file)) {
+  console.error('No such file: ' + file);
+  process.exit(2);
+}
+
+const load = (m) => require(path.join(OUT, m));
+
+// The compiler resolves `builtin://` modules and its own cache relative to
+// the pyret-lang lang/ directory, so run from there.
+process.chdir(LANG);
+
+const B = load('locators/builtin.js');
+B.setBuiltinJsDirs(['src/js/trove/']);
+B.setBuiltinArrDirs(['src/arr/trove/']);
+
+const CS = load('compile-structs.js');
+const CL = load('compile-lib.js');
+const CLI = load('cli-module-loader.js');
+const RED = load('render-error-display.js');
+const shared = load('shared.js');
+
+
+// The compiled-module cache is keyed on source mtimes, not on the compiler's,
+// so drop it whenever the compiler itself is newer than the cache.
+function freshCache(cacheDir, compilerFile) {
+  const stamp = path.join(cacheDir, '.compiler-stamp');
+  const compilerTime = fs.statSync(compilerFile).mtimeMs;
+  const stale = !fs.existsSync(stamp) || fs.readFileSync(stamp, 'utf8').trim() !== String(compilerTime);
+  if (stale) {
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(cacheDir, { recursive: true });
+  fs.writeFileSync(stamp, String(compilerTime));
+}
+
+// A shared, persistent cache for the builtin modules; without it every run
+// recompiles the whole trove.
+const cacheDir = path.join(OUT, 'typecheck-example-cache');
+freshCache(cacheDir, path.join(OUT, 'pyret.js'));
+
+const errorText = [];
+const options = {
+  ...CS.makeDefaultCompileOptions(LANG),
+  typeCheck: true,
+  checks: 'none',
+  compiledCache: cacheDir,
+  compiledReadOnly: [],
+  displayProgress: false,
+  collectAll: false,
+  baseDir: path.dirname(file),
+  depsFile: path.join(LANG, 'build', 'phaseA', 'bundled-node-compile-deps.js'),
+  log: () => {},
+  logError: (s) => { errorText.push(s); },
+};
+
+CLI.compile(file, options).then((result) => {
+  const failures = result.loadables.filter(CL.isErrorCompilation);
+  if (failures.length === 0) {
+    process.exit(0);
+  }
+  for (const f of failures) {
+    for (const p of f.resultPrinter.problems) {
+      process.stdout.write(RED.displayToString(p.renderReason(), shared.toRepr, []) + '\n');
+    }
+  }
+  process.exit(1);
+}).catch((e) => {
+  if (errorText.length > 0) { process.stdout.write(errorText.join('')); }
+  process.stdout.write(String((e && e.stack) || e) + '\n');
+  process.exit(1);
+});

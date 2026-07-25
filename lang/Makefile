@@ -430,7 +430,7 @@ ts-pyret-test: tests/pyret/main2-ts.jarr $(TS_SUITE_CACHE_WARM)
 
 # Type checking tests for the table types (TS compiler only): the programs in
 # src/ts-compiler/tests/table-types/{good,bad} plus the delivered examples in
-# /app/typed-examples.
+# table-types/examples.
 .PHONY : ts-table-type-test
 ts-table-type-test: ts-compiler
 	$(NODE) $(TS_COMP_DIR)/tests/table-type-test.js
