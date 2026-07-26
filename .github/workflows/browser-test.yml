@@ -1,17 +1,20 @@
 name: browser-test (embed + vscode webviews)
 
-# Runs code.pyret.org's editor assertions against four environments via the
-# single Playwright runner in browser-test/:
-#   cpo         -- the reference (/editor)
+# Runs code.pyret.org's editor assertions against several environments via the
+# single runner in browser-test/:
+#   cpo         -- the reference (/editor, Chromium)
+#   webkit      -- /editor in Playwright's bundled WebKit (Linux, fast smoke)
 #   embed       -- the embed API's embedded instance
 #   vscode      -- the pyret-parley.cpo webview (headless VS Code for the Web)
 #   vscode-ovsx -- the same webview, but with its assets served the way Open VSX
 #                  / the GitLab Web IDE serve them (text/plain + nosniff + size
 #                  cap) -- the reproduction of pyret-parley issue #21
+#   ios-safari  -- /editor in REAL Safari on a pinned iOS Simulator (macos-14)
 #
-# Shape: build code.pyret.org + the extension ONCE, then fan out the four
+# Shape: build code.pyret.org + the extension ONCE, then fan out the Linux
 # environments as a parallel matrix (each on its own runner, so chart rendering
-# doesn't contend for CPU).
+# doesn't contend for CPU), with ios-safari as its own macOS job off the same
+# build.
 
 on:
   push:
@@ -69,7 +72,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        env: [cpo, embed, vscode, vscode-ovsx]
+        env: [cpo, webkit, embed, vscode, vscode-ovsx]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -90,15 +93,17 @@ jobs:
           name: vscode-dist
           path: vscode/dist
 
-      - name: Install browser-test deps + Chromium
+      - name: Install browser-test deps + browser
         working-directory: ./browser-test
         # --ignore-scripts skips the implicit @playwright/browser-chromium and
         # playwright browser downloads from npm ci; we then install exactly one
-        # Chromium (with OS deps) explicitly. The vscode env runs @vscode/test-web
+        # browser (with OS deps) explicitly. The vscode env runs @vscode/test-web
         # in browserType:'none' and launches that Chromium itself.
+        env:
+          PW_BROWSER: ${{ matrix.env == 'webkit' && 'webkit' || 'chromium' }}
         run: |
           npm ci --ignore-scripts
-          npx playwright install --with-deps chromium
+          npx playwright install --with-deps "$PW_BROWSER"
 
       - name: Install CPO server runtime deps
         if: ${{ !startsWith(matrix.env, 'vscode') }}
@@ -129,3 +134,125 @@ jobs:
         working-directory: ./browser-test
         env: { BASE_URL: 'http://localhost:4999' }
         run: node run.js --env=${{ matrix.env }}
+
+  # The old-Safari authority. Runs the same specs as `cpo` against Apple's real
+  # shipped WebKit/JavaScriptCore, which is the only tier that catches "JSC
+  # hasn't implemented this" and "JSC gets this wrong" before a teacher on an old
+  # iPad does. Needs macOS (simulators) but NOT nested virtualization, so it runs
+  # on a stock GitHub-hosted runner with no secrets -- which also means it works
+  # on pull requests from forks.
+  test-ios-safari:
+    needs: build
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      # Pin the OLDEST iOS worth supporting, not the newest available. macos-14
+      # ships 17.0 / 17.2 / 17.4 / 17.5 runtimes preinstalled, and the bugs this
+      # job exists to catch were fixed partway through that range:
+      #   - iterator helpers (Iterator.prototype.map) landed in Safari 18.4
+      #   - WebKit #223533 (a `var` redeclaring a parameter in an async function
+      #     reads as undefined) was fixed in 17.4
+      # Pinning 17.5 here would pass and prove nothing.
+      IOS_VERSION: '17.0'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Restore cpo build
+        uses: actions/download-artifact@v4
+        with:
+          name: cpo-build
+          path: code.pyret.org/build
+
+      # Resolve the runtime and an iPad device type from simctl rather than
+      # hardcoding identifiers, which change between Xcode releases. iPad (not
+      # iPhone) so /editor gets the wide layout the CPO editor expects -- and it
+      # matches what Bootstrap classrooms actually use.
+      - name: Boot iOS ${{ env.IOS_VERSION }} simulator
+        run: |
+          set -euo pipefail
+          xcrun simctl list runtimes
+          RUNTIMES=$(xcrun simctl list runtimes -j)
+          RUNTIME_ID=$(echo "$RUNTIMES" | jq -r --arg v "$IOS_VERSION" \
+            '.runtimes[] | select(.version == $v and .isAvailable) | .identifier' | head -1)
+          if [ -z "$RUNTIME_ID" ]; then
+            echo "no available iOS $IOS_VERSION runtime on this image" >&2
+            exit 1
+          fi
+          DEVTYPE=$(echo "$RUNTIMES" | jq -r --arg id "$RUNTIME_ID" \
+            '.runtimes[] | select(.identifier == $id) | .supportedDeviceTypes[]
+             | select(.productFamily == "iPad") | .identifier' | head -1)
+          DEVNAME=$(echo "$RUNTIMES" | jq -r --arg id "$RUNTIME_ID" --arg dt "$DEVTYPE" \
+            '.runtimes[] | select(.identifier == $id) | .supportedDeviceTypes[]
+             | select(.identifier == $dt) | .name' | head -1)
+          echo "runtime=$RUNTIME_ID device=$DEVNAME ($DEVTYPE)"
+          UDID=$(xcrun simctl create pyret-safari "$DEVTYPE" "$RUNTIME_ID")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
+          echo "IOS_DEVICE_NAME=$DEVNAME" >> "$GITHUB_ENV"
+
+      # webdriverio is installed --no-save on purpose: it is a macOS-only
+      # dependency of one env, and putting it in package.json would make every
+      # ubuntu matrix job install it. See browser-test/envs/ios-safari.js.
+      - name: Install browser-test deps + Appium
+        working-directory: ./browser-test
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          npm i --no-save webdriverio
+          npm i -g appium
+          appium driver install xcuitest
+
+      - name: Start Appium
+        working-directory: ./browser-test
+        run: |
+          set -euo pipefail
+          appium --port 4723 --log-timestamp > appium.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -fs -o /dev/null http://127.0.0.1:4723/status && break
+            sleep 1
+          done
+          curl -f http://127.0.0.1:4723/status
+
+      - name: Install CPO server runtime deps
+        working-directory: ./code.pyret.org
+        run: npm ci --ignore-scripts
+
+      - name: Start CPO server
+        working-directory: ./code.pyret.org
+        env:
+          BASE_URL: http://localhost:4999
+          PORT: '4999'
+          PYRET: http://localhost:4999/js/cpo-main.jarr
+          POSTMESSAGE_ORIGIN: '*'
+          NODE_ENV: development
+          SESSION_SECRET: not-so-secret
+          REDISCLOUD_URL: ''
+          URL_FILE_MODE: all-remote
+          IMAGE_PROXY_BYPASS: 'true'
+          SHARED_FETCH_SERVER: https://code.pyret.org
+          CURRENT_PYRET_RELEASE: ''
+        run: |
+          node src/run.js &
+          for _ in $(seq 1 30); do curl -fs -o /dev/null http://localhost:4999/editor && break; sleep 1; done
+          curl -f http://localhost:4999/editor
+
+      # The simulator shares the host network stack, so localhost:4999 resolves
+      # to the CPO server above with no tunnel.
+      - name: Run ios-safari
+        working-directory: ./browser-test
+        env:
+          BASE_URL: 'http://localhost:4999'
+          IOS_PLATFORM_VERSION: ${{ env.IOS_VERSION }}
+        run: node run.js --env=ios-safari
+
+      - name: Upload Appium log
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: appium-log
+          path: browser-test/appium.log
+          retention-days: 7

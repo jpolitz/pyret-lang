@@ -13,6 +13,7 @@ const path = require("path");
 const { open } = require("@vscode/test-web");
 const { launchChromium } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
+const { makePlaywrightPage } = require("../shared/playwright-page");
 
 const VSCODE_DIR = path.resolve(__dirname, "..", "..", "vscode");
 const WORKSPACE = path.resolve(__dirname, "..", "vscode", "fixture-workspace");
@@ -52,8 +53,7 @@ async function setup() {
 
   const frame = await findEditorFrame(page);
   return {
-    page,
-    frame,
+    page: makePlaywrightPage(frame),
     cleanup: async () => { await browser.close(); server.dispose(); },
   };
 }

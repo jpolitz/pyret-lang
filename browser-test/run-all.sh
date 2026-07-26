@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 #
-# run-all.sh -- run code.pyret.org's editor assertions against all three
-# environments, via the single Playwright runner (run.js):
+# run-all.sh -- run code.pyret.org's editor assertions against the environments
+# that need nothing beyond this repo, via the single runner (run.js):
 #
 #   cpo    -- the reference: reproduces upstream's outcomes on /editor
+#   webkit -- the same page in Playwright's bundled WebKit
 #   embed  -- the embed API's embedded instance
 #   vscode -- the pyret-parley.cpo webview (headless VS Code for the Web)
+#
+# ios-safari is deliberately NOT here: it is macOS-only and needs a booted
+# simulator plus an Appium server (see README). CI runs it as its own job.
 #
 # Strictly additive: only reads code.pyret.org / vscode, writes under results/.
 #
@@ -42,7 +46,7 @@ fi
 curl -fs -o /dev/null "$BASE_URL/editor" || { echo "CPO server not reachable at $BASE_URL"; exit 1; }
 
 rc=0
-for ENVNAME in cpo embed vscode; do
+for ENVNAME in cpo webkit embed vscode; do
   echo "=== $ENVNAME ==="
   node "$HERE/run.js" --env="$ENVNAME" | tee "$RESULTS/$ENVNAME-full.txt"
   test "${PIPESTATUS[0]}" -eq 0 || rc=1

@@ -18,6 +18,7 @@
  */
 const path = require("path");
 const { spawn } = require("child_process");
+const { ENVS } = require("./shared/envs");
 
 function arg(name) {
   // supports "--name=value" and "--name value"
@@ -30,8 +31,8 @@ function arg(name) {
 }
 
 const env = arg("env");
-if (!env || !["cpo", "embed", "vscode", "vscode-ovsx"].includes(env)) {
-  console.error("usage: node run.js --env=cpo|embed|vscode|vscode-ovsx [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]");
+if (!env || !ENVS.includes(env)) {
+  console.error("usage: node run.js --env=" + ENVS.join("|") + " [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]");
   process.exit(2);
 }
 const grep = arg("grep");

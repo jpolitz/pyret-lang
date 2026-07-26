@@ -5,10 +5,13 @@
   "description": "Run code.pyret.org's editor assertions (node:test + node:assert) against the embed API's embedded instances and the vscode extension's webviews, via one Playwright runner.",
   "scripts": {
     "cpo": "node run.js --env=cpo",
+    "webkit": "node run.js --env=webkit",
+    "ios-safari": "node run.js --env=ios-safari",
     "embed": "node run.js --env=embed",
     "vscode": "node run.js --env=vscode",
     "all": "./run-all.sh"
   },
+  "//ios-safari": "macOS only, and needs `npm i --no-save webdriverio` plus a booted simulator and a running Appium server -- see envs/ios-safari.js.",
   "//": "Filter with --grep (regex over suite + test names), e.g. `npm run embed -- --grep tables`.",
   "devDependencies": {
     "@vscode/test-web": "^0.0.81",

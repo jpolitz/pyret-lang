@@ -7,6 +7,7 @@
  */
 const { launchChromium } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
+const { makePlaywrightPage } = require("../shared/playwright-page");
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:4999";
 
@@ -16,7 +17,7 @@ async function setup() {
   page.setDefaultTimeout(60000);
   await page.goto(BASE_URL + "/editor", { waitUntil: "domcontentloaded", timeout: 120000 });
   const frame = await findEditorFrame(page);
-  return { page, frame, cleanup: () => browser.close() };
+  return { page: makePlaywrightPage(frame), cleanup: () => browser.close() };
 }
 
 module.exports = { setup, label: "code.pyret.org /editor (reference)" };
