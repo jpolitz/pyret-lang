@@ -98,6 +98,16 @@ async function setup() {
       "appium:webviewConnectTimeout": 120000,
       "appium:safariInitialUrl": BASE_URL + "/editor",
       "appium:newCommandTimeout": 0,
+      // The driver builds WebDriverAgent with xcodebuild on first use, and a
+      // cold build on a CI runner takes minutes -- well past the 60s default,
+      // which fails with a misleading "ECONNREFUSED 127.0.0.1:8100" while the
+      // build is still running. One retry rather than the default two, so a
+      // genuine failure doesn't sit through the long timeout twice.
+      "appium:wdaLaunchTimeout": parseInt(process.env.WDA_LAUNCH_TIMEOUT || "360000", 10),
+      "appium:wdaStartupRetries": 1,
+      // Without this, xcodebuild output is swallowed unless the driver decides
+      // an error is present -- so a real build failure looks like a timeout.
+      "appium:showXcodeLog": true,
     },
   });
 
