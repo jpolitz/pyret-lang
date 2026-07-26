@@ -1,3 +1,4 @@
+#:no-run  (defines a stub data source that raises; type checked only)
 #|
    Tables from outside the program.
 

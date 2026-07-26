@@ -45,6 +45,47 @@ class DesugarVisitor extends DefaultMapVisitor {
     return new A.SId(node.l, new A.SGlobal('nothing'));
   }
 
+  // ---- Type-checker-only annotations --------------------------------------
+  //
+  // `Column<S, C, T>` / `NewColumn<S, C>` and the schema arguments of
+  // `Table<...>` / `Row<...>` exist only for the type checker: there is no
+  // runtime annotation object for them.  Left in place they still reach
+  // codegen, which emits a `_checkAnn` against `undefined` and dies with
+  // "Abstraction breaking: Uncaught JavaScript error ... reading 'flat'" the
+  // moment such a function is *called* -- so every schema-polymorphic function
+  // type checked and then crashed on entry.  Erase them to the annotation that
+  // describes the runtime value: a column name is a `String`, and a table/row
+  // of any schema is just `Table`/`Row`.
+  //
+  // Matching is by name rather than by `s-type-global` alone because under
+  // `use context ...` these arrive as context-bound aliases (the same reason
+  // the type checker resolves through the alias table); the cost is that a
+  // user-defined type sharing one of these names loses its runtime check.
+  private static readonly ERASED_TO_STRING = new Set(['Column', 'NewColumn']);
+  private static readonly ERASED_TO_HEAD = new Set(['Table', 'Row']);
+
+  private annName(ann: A.Ann): string | undefined {
+    return ann.$name === 'a-name' ? ann.id.toname() : undefined;
+  }
+  aName(node: A.AName): A.Ann {
+    if (DesugarVisitor.ERASED_TO_STRING.has(node.id.toname())) {
+      return new A.AName(node.l, new A.STypeGlobal('String'));
+    }
+    return new A.AName(node.l, node.id);
+  }
+  aApp(node: A.AApp): A.Ann {
+    const head = this.annName(node.ann);
+    if (head !== undefined && DesugarVisitor.ERASED_TO_STRING.has(head)) {
+      return new A.AName(node.l, new A.STypeGlobal('String'));
+    }
+    // `Table<S, {C; Number}>` -> `Table`: the schema is type-level only, and
+    // dropping the arguments also drops the `{C; T}` tuple form with it.
+    if (head !== undefined && DesugarVisitor.ERASED_TO_HEAD.has(head)) {
+      return node.ann.visit(this);
+    }
+    return new A.AApp(node.l, node.ann.visit(this), node.args.map((a: A.Ann) => a.visit(this)));
+  }
+
   // The table surface forms survive `desugar` (so that the type checker can
   // see column names and header annotations) and are expanded here instead.
   // `super.sX` re-builds the node with its subexpressions visited; the

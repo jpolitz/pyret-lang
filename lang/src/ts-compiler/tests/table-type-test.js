@@ -103,6 +103,49 @@ function expectation(file) {
   return m === null ? undefined : m[1].trim();
 }
 
+// Executing a program (not just type checking it) is the only way to catch
+// annotations that are type-checker-only and have no runtime counterpart: the
+// program compiles, and then `_checkAnn` dies on `undefined` the moment the
+// function is called.  Type checking alone reports success for those.
+// Build a standalone with the TS compiler and execute it, the same way the
+// Makefile's ts test targets do (TS_TEST_BUILD).
+const RUN_DIR = path.join(LANG, 'build', 'table-run');
+const RUN_CACHE = path.join(RUN_DIR, 'compiled');
+
+// The run cache is keyed on source mtimes, not the compiler's, so a stale entry
+// can resurrect an old compilation and report an error that no longer exists.
+// Clear it once per suite run, the same way freshCache does for type checking.
+let runCacheCleared = false;
+function runFile(file) {
+  if (!runCacheCleared) {
+    fs.rmSync(RUN_DIR, { recursive: true, force: true });
+    runCacheCleared = true;
+  }
+  fs.mkdirSync(RUN_CACHE, { recursive: true });
+  const jarr = path.join(RUN_DIR, path.basename(file, '.arr') + '.jarr');
+  const opts = { encoding: 'utf8', cwd: LANG, maxBuffer: 32 * 1024 * 1024 };
+  const build = spawnSync(process.execPath, [
+    path.join(OUT, 'pyret.js'),
+    '--builtin-js-dir', 'src/js/trove/',
+    '--builtin-arr-dir', 'src/arr/trove/',
+    '--require-config', 'src/scripts/standalone-configA.json',
+    '--compiled-dir', RUN_CACHE,
+    '--outfile', jarr,
+    '--build-runnable', file,
+  ], opts);
+  if (build.status !== 0) {
+    return { ok: false, message: 'build failed:\n' + (build.stdout || '') + (build.stderr || '') };
+  }
+  const ran = spawnSync(process.execPath, [jarr], opts);
+  return { ok: ran.status === 0, message: (ran.stdout || '') + (ran.stderr || '') };
+}
+
+// First line `#:no-run` opts a program out of the execution phase (for programs
+// that deliberately raise, e.g. a stub data source).
+function noRun(file) {
+  return /^#:no-run\b/.test(fs.readFileSync(file, 'utf8').split('\n')[0].trim());
+}
+
 if (process.argv[2] === '--one') {
   // child mode: checkOne exits the process itself
   checkOne(path.resolve(process.argv[3]));
@@ -147,6 +190,23 @@ for (const file of listArr(path.join(HERE, 'bad'))) {
   }
   passed++;
   console.log('ok   bad/' + path.basename(file));
+}
+
+// Execution phase: every program that is supposed to type check must also
+// actually run.  This is what a type-check-only suite cannot tell you.
+for (const file of [...listArr(path.join(HERE, 'good')), ...listArr(EXAMPLES)]) {
+  if (noRun(file)) {
+    console.log('skip run/' + path.basename(file) + ' (#:no-run)');
+    continue;
+  }
+  const r = runFile(file);
+  if (r.ok) {
+    passed++;
+    console.log('ok   run/' + path.basename(file));
+  } else {
+    failures.push(path.basename(file) + ' (run)');
+    console.log('FAIL ' + file + ' type checks but does not run:\n' + r.message);
+  }
 }
 
 console.log('');
