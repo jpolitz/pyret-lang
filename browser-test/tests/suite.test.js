@@ -20,6 +20,7 @@ const { loadSpecsFromFile } = require("../shared/load-cpo-specs");
 const { runSpec, specTimeout } = require("../shared/dispatch");
 const { warmUp } = require("../shared/cpo-assertions");
 const { ENVS } = require("../shared/envs");
+const { runProbes, checkExpectations } = require("../shared/engine-probes");
 
 const ENV = process.env.PYRET_ENV;
 const SUITES = {
@@ -43,7 +44,7 @@ const chosen =
 // on a cold runner has to build WebDriverAgent, which takes minutes, and if this
 // hook fires first it aborts the driver mid-wait and reports a generic client
 // timeout instead of the driver's own diagnosis.
-const { setup, label, setupTimeout } = require("../envs/" + ENV);
+const { setup, label, setupTimeout, engineExpectations } = require("../envs/" + ENV);
 
 // One editor frame for the whole run (specs share it, sequentially).
 let session = null;
@@ -55,6 +56,22 @@ before(async () => {
     const page = s.page;
     await page.inject();
     await page.waitFor("window.PA.editorReady()", 120000);
+
+    // Confirm the engine is the one this env claims BEFORE trusting any result.
+    // An env that advertises an old engine but runs a new one turns a green run
+    // into a false belief, which is worse than having no such env at all.
+    const probes = await runProbes(page);
+    console.log("engine probes: " + JSON.stringify(probes));
+    const problems = checkExpectations(probes, engineExpectations);
+    if (problems.length) {
+      throw new Error(
+        "engine fidelity check failed for --env=" + ENV + ":\n  " +
+          problems.join("\n  ") +
+          "\nThis env is running a newer engine than it advertises, so passing " +
+          "specs here would prove nothing about the version it claims to test."
+      );
+    }
+
     // Absorb the one-time runtime/render warmup so no actual test pays it.
     await warmUp(page);
     session = { page, cleanup: s.cleanup };

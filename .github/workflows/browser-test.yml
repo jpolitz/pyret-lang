@@ -156,9 +156,23 @@ jobs:
       IOS_VERSION: '17.0'
     steps:
       - uses: actions/checkout@v7
+      # npm on a macOS runner is slow enough to dominate this job: `npm ci` for
+      # code.pyret.org alone took 16 minutes uncached, against a ~2.5 minute
+      # total for the same suite on ubuntu.
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: |
+            browser-test/package-lock.json
+            code.pyret.org/package-lock.json
+
+      # The xcuitest driver download is another ~6 minutes.
+      - name: Cache Appium drivers
+        uses: actions/cache@v4
+        with:
+          path: ~/.appium
+          key: appium-${{ runner.os }}-xcuitest-v1
 
       - name: Restore cpo build
         uses: actions/download-artifact@v4
@@ -261,12 +275,16 @@ jobs:
 
       # The simulator shares the host network stack, so localhost:4999 resolves
       # to the CPO server above with no tunnel.
+      # --suites=charts, not the full corpus: this tier exists to catch engine
+      # bugs, and 236 specs took 13.5 minutes here (every eval is an HTTP round
+      # trip through Appium) versus 2.5 minutes in Chromium. The engine fidelity
+      # probes in suite.test.js's before() hook run regardless of --suites.
       - name: Run ios-safari
         working-directory: ./browser-test
         env:
           BASE_URL: 'http://localhost:4999'
           IOS_PLATFORM_VERSION: ${{ env.IOS_ACTUAL_VERSION }}
-        run: node run.js --env=ios-safari
+        run: node run.js --env=ios-safari --suites=charts
 
       - name: Upload Appium log
         if: ${{ failure() }}

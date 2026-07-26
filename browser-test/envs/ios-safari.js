@@ -141,4 +141,17 @@ async function setup() {
 const label =
   "code.pyret.org /editor (real Safari, iOS " + PLATFORM_VERSION + " simulator)";
 
-module.exports = { setup, label, setupTimeout: SETUP_TIMEOUT };
+// What running "Safari 17" is supposed to mean. The iOS Simulator runs against
+// the HOST's frameworks, so on a runner whose own Safari is 26.x the simulator
+// can hand you a modern engine wearing an iOS 17 label -- which is exactly what
+// happened the first time this env went green on a branch with a known
+// Safari-17 bug in it. Hold the tier to its claim.
+const engineExpectations = {
+  // Shipped in Safari 18.4. A 17.x engine must NOT have these.
+  "iterator-helpers": false,
+  // Sanity: shipped in Safari 15.4, so any engine we test here has it. If this
+  // comes back false, suspect the probe plumbing rather than the engine.
+  "array-at": true,
+};
+
+module.exports = { setup, label, setupTimeout: SETUP_TIMEOUT, engineExpectations };
