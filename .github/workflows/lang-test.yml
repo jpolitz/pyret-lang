@@ -29,6 +29,36 @@ jobs:
     - name: run tests
       run: make all-pyret-test
 
+  ts-test:
+    name: TypeScript compiler suites (make ts-test)
+
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./lang
+
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 24
+
+    - name: install
+      run: make install
+
+    - name: build TypeScript compiler
+      run: make ts-compiler
+
+    # ts-unit / ts-parity / ts-repl / ts-pyret / ts-type-check / ts-regression /
+    # ts-io / ts-table-type.  None of these ran in CI before: `build` covers
+    # `make all-pyret-test` (the .arr compiler) and `bootstrap-converge` covers
+    # byte-identical output, but the TS compiler's own suites -- including
+    # ts-type-check-test, the must-reject corpus that is the main defense
+    # against a gutted type checker -- were only ever run by hand.
+    - name: run tests
+      run: make ts-test
+
   bootstrap-converge:
     name: bootstrap convergence (.arr == TS, byte-identical)
 
