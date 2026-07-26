@@ -39,22 +39,31 @@ const APPIUM_PORT = parseInt(process.env.APPIUM_PORT || "4723", 10);
 const PLATFORM_VERSION = process.env.IOS_PLATFORM_VERSION || "17.0";
 const DEVICE_NAME = process.env.IOS_DEVICE_NAME || "iPad (10th generation)";
 
+// getContext/getContexts return either a plain context name or a detailed
+// { id, title, url, bundleId } object depending on the driver and the options
+// in play, so always go through this rather than comparing a value directly --
+// an object is never === "NATIVE_APP", which would silently look like success
+// while the session was still in the native context and every executeScript
+// came back null.
+function contextId(c) {
+  if (!c) return undefined;
+  return typeof c === "string" ? c : c.id;
+}
+
 // With browserName: Safari the XCUITest driver normally lands in the web
 // context already, but it can come back in NATIVE_APP if the page is still
 // loading when the session is created. Switching explicitly makes the failure
-// mode a clear error rather than every executeScript returning null.
+// mode a clear error rather than a hang.
 async function ensureWebContext(driver) {
   const deadline = Date.now() + 60000;
+  let contexts = [];
   for (;;) {
-    const current = await driver.getContext();
+    const current = contextId(await driver.getContext());
     if (current && current !== "NATIVE_APP") return current;
-    const contexts = await driver.getContexts();
-    const web = contexts.find((c) => {
-      const name = typeof c === "string" ? c : c.id;
-      return name && name !== "NATIVE_APP";
-    });
+    contexts = await driver.getContexts();
+    const web = contexts.map(contextId).find((id) => id && id !== "NATIVE_APP");
     if (web) {
-      await driver.switchContext(typeof web === "string" ? web : web.id);
+      await driver.switchContext(web);
       return web;
     }
     if (Date.now() > deadline) {
