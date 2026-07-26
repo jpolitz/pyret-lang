@@ -227,6 +227,17 @@ jobs:
           # Appium matches on the version the runtime reports (17.0.1), not the pin.
           echo "IOS_ACTUAL_VERSION=$ACTUAL_VERSION" >> "$GITHUB_ENV"
 
+      # Answer "is this actually an old engine?" BEFORE spending ten minutes on
+      # Appium and WebDriverAgent. No driver involved -- it opens a page with
+      # simctl and the page reports back -- so it still works when the driver
+      # stack is broken, which is precisely when you want to know whether this
+      # tier is worth debugging at all. Non-fatal: it reports either way, and
+      # the in-session check in suite.test.js is what fails the build.
+      - name: Probe the simulator's JS engine
+        continue-on-error: true
+        working-directory: ./browser-test
+        run: node tools/simulator-engine-probe.js --udid="$SIM_UDID" --expect-old
+
       # webdriverio is installed --no-save on purpose: it is a macOS-only
       # dependency of one env, and putting it in package.json would make every
       # ubuntu matrix job install it. See browser-test/envs/ios-safari.js.
