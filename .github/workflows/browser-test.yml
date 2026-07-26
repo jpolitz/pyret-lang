@@ -166,33 +166,52 @@ jobs:
           name: cpo-build
           path: code.pyret.org/build
 
-      # Resolve the runtime and an iPad device type from simctl rather than
-      # hardcoding identifiers, which change between Xcode releases. iPad (not
-      # iPhone) so /editor gets the wide layout the CPO editor expects -- and it
-      # matches what Bootstrap classrooms actually use.
+      # Select the runtime by IDENTIFIER, not by .version. Two traps there:
+      # tvOS 17.0 also reports version "17.0" (and sorts first), and the iOS
+      # 17.0 runtime actually reports 17.0.1 -- so a version match picks the
+      # wrong platform AND misses the right one. The identifier is exact.
+      #
+      # The device type is resolved from simctl rather than hardcoded, since
+      # those identifiers change between Xcode releases. iPad (not iPhone) so
+      # /editor gets the wide layout the CPO editor expects -- and it matches
+      # what Bootstrap classrooms actually use.
       - name: Boot iOS ${{ env.IOS_VERSION }} simulator
         run: |
           set -euo pipefail
           xcrun simctl list runtimes
           RUNTIMES=$(xcrun simctl list runtimes -j)
-          RUNTIME_ID=$(echo "$RUNTIMES" | jq -r --arg v "$IOS_VERSION" \
-            '.runtimes[] | select(.version == $v and .isAvailable) | .identifier' | head -1)
-          if [ -z "$RUNTIME_ID" ]; then
-            echo "no available iOS $IOS_VERSION runtime on this image" >&2
+          RUNTIME_ID="com.apple.CoreSimulator.SimRuntime.iOS-${IOS_VERSION//./-}"
+          if ! echo "$RUNTIMES" | jq -e --arg id "$RUNTIME_ID" \
+              '.runtimes[] | select(.identifier == $id and .isAvailable)' > /dev/null; then
+            echo "runtime $RUNTIME_ID is not available on this image. iOS runtimes present:" >&2
+            echo "$RUNTIMES" | jq -r '.runtimes[]
+              | select(.identifier | startswith("com.apple.CoreSimulator.SimRuntime.iOS-"))
+              | "  \(.identifier)  version=\(.version)  available=\(.isAvailable)"' >&2
             exit 1
           fi
+          ACTUAL_VERSION=$(echo "$RUNTIMES" | jq -r --arg id "$RUNTIME_ID" \
+            '.runtimes[] | select(.identifier == $id) | .version')
           DEVTYPE=$(echo "$RUNTIMES" | jq -r --arg id "$RUNTIME_ID" \
-            '.runtimes[] | select(.identifier == $id) | .supportedDeviceTypes[]
+            '.runtimes[] | select(.identifier == $id) | (.supportedDeviceTypes // [])[]
              | select(.productFamily == "iPad") | .identifier' | head -1)
-          DEVNAME=$(echo "$RUNTIMES" | jq -r --arg id "$RUNTIME_ID" --arg dt "$DEVTYPE" \
-            '.runtimes[] | select(.identifier == $id) | .supportedDeviceTypes[]
-             | select(.identifier == $dt) | .name' | head -1)
-          echo "runtime=$RUNTIME_ID device=$DEVNAME ($DEVTYPE)"
+          if [ -z "$DEVTYPE" ]; then
+            DEVTYPE=$(xcrun simctl list devicetypes -j | jq -r \
+              '.devicetypes[] | select(.productFamily == "iPad") | .identifier' | head -1)
+          fi
+          if [ -z "$DEVTYPE" ]; then
+            echo "could not resolve any iPad device type" >&2
+            exit 1
+          fi
+          DEVNAME=$(xcrun simctl list devicetypes -j | jq -r --arg dt "$DEVTYPE" \
+            '.devicetypes[] | select(.identifier == $dt) | .name')
+          echo "runtime=$RUNTIME_ID (reports $ACTUAL_VERSION) device=$DEVNAME ($DEVTYPE)"
           UDID=$(xcrun simctl create pyret-safari "$DEVTYPE" "$RUNTIME_ID")
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
           echo "SIM_UDID=$UDID" >> "$GITHUB_ENV"
           echo "IOS_DEVICE_NAME=$DEVNAME" >> "$GITHUB_ENV"
+          # Appium matches on the version the runtime reports (17.0.1), not the pin.
+          echo "IOS_ACTUAL_VERSION=$ACTUAL_VERSION" >> "$GITHUB_ENV"
 
       # webdriverio is installed --no-save on purpose: it is a macOS-only
       # dependency of one env, and putting it in package.json would make every
@@ -246,7 +265,7 @@ jobs:
         working-directory: ./browser-test
         env:
           BASE_URL: 'http://localhost:4999'
-          IOS_PLATFORM_VERSION: ${{ env.IOS_VERSION }}
+          IOS_PLATFORM_VERSION: ${{ env.IOS_ACTUAL_VERSION }}
         run: node run.js --env=ios-safari
 
       - name: Upload Appium log
