@@ -2555,7 +2555,7 @@ export function toType(inAnn: A.Ann, context: Context): AnyFoldResult<Type | und
       // `Table` / `Row` with no schema mean "some table/row, columns unknown";
       // every table type is a subtype of these. `Column`/`NewColumn` only
       // make sense applied to a schema.
-      const tableHead = isTableAnnName(inAnn);
+      const tableHead = resolveTableAnnName(inAnn, context);
       if (tableHead === 'Table') { return new TCS.FoldResult<Type | undefined>(TS.tTable(l), context); }
       if (tableHead === 'Row') { return new TCS.FoldResult<Type | undefined>(TS.tRow(l), context); }
       if (tableHead !== undefined) {
@@ -2631,7 +2631,7 @@ export function toType(inAnn: A.Ann, context: Context): AnyFoldResult<Type | und
     }
     case 'a-app': {
       const { l, ann, args } = inAnn;
-      const tableHead = isTableAnnName(ann);
+      const tableHead = resolveTableAnnName(ann, context);
       if (tableHead !== undefined) {
         return tableAnnToType(l, tableHead, args, context);
       }
@@ -3027,6 +3027,30 @@ const TABLE_ANN_NAMES = new Set(['Table', 'Row', 'Column', 'NewColumn']);
 export function isTableAnnName(ann: A.Ann): string | undefined {
   if (ann.$name === 'a-name' && A.isSTypeGlobal(ann.id) && TABLE_ANN_NAMES.has(ann.id.toname())) {
     return ann.id.toname();
+  }
+  return undefined;
+}
+
+// The syntactic check above only fires when the annotation *is* written as the
+// builtin global.  Under `use context ...` (starter2024, dcic2024, essentials*,
+// ...) the context binds `Table` to an alias that merely *resolves* to that
+// global, so the check misses and the annotation falls through to ordinary type
+// application -- reporting "Table expected 0 type arguments, but it received 1"
+// for every schema-carrying annotation.  Since `core.arr`-style table code is
+// exactly the code that runs under a context, resolve through the alias table
+// and recognize the builtin global we land on.  Only a genuine
+// `builtin://global` Table/Row/Column/NewColumn is accepted, so a user type
+// that happens to share the name is still treated as its own type.
+export function resolveTableAnnName(ann: A.Ann, context: Context): string | undefined {
+  const direct = isTableAnnName(ann);
+  if (direct !== undefined) { return direct; }
+  if (ann.$name !== 'a-name') { return undefined; }
+  const aliased = context.aliases.get(ann.id.key());
+  if (aliased === undefined) { return undefined; }
+  const resolved = TCS.resolveAlias(aliased, context);
+  if (resolved.$name === 't-name' && A.isSTypeGlobal(resolved.id)
+      && TABLE_ANN_NAMES.has(resolved.id.toname())) {
+    return resolved.id.toname();
   }
   return undefined;
 }
