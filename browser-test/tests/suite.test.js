@@ -38,20 +38,38 @@ const chosen =
     ? Object.keys(SUITES)
     : process.env.PYRET_SUITES.split(",").map((s) => s.trim());
 
+// Required at registration time (not inside before()) so an env can declare its
+// own setupTimeout. Booting a browser takes seconds; ios-safari's first session
+// on a cold runner has to build WebDriverAgent, which takes minutes, and if this
+// hook fires first it aborts the driver mid-wait and reports a generic client
+// timeout instead of the driver's own diagnosis.
+const { setup, label, setupTimeout } = require("../envs/" + ENV);
+
 // One editor frame for the whole run (specs share it, sequentially).
 let session = null;
 
 before(async () => {
-  const { setup, label } = require("../envs/" + ENV);
   console.log("environment: " + label);
-  const s = await setup();
-  const page = s.page;
-  await page.inject();
-  await page.waitFor("window.PA.editorReady()", 120000);
-  // Absorb the one-time runtime/render warmup so no actual test pays it.
-  await warmUp(page);
-  session = { page, cleanup: s.cleanup };
-}, { timeout: 240000 });
+  try {
+    const s = await setup();
+    const page = s.page;
+    await page.inject();
+    await page.waitFor("window.PA.editorReady()", 120000);
+    // Absorb the one-time runtime/render warmup so no actual test pays it.
+    await warmUp(page);
+    session = { page, cleanup: s.cleanup };
+  } catch (e) {
+    // node:test cancels every registered test when this hook fails, which buries
+    // the one real error under hundreds of "did not finish before its parent"
+    // lines. Say so up front.
+    console.error(
+      "\n==== ENVIRONMENT SETUP FAILED (" + ENV + ") ====\n" +
+        ((e && e.stack) || e) +
+        "\n==== every test failure below is a cascade from this ====\n"
+    );
+    throw e;
+  }
+}, { timeout: setupTimeout || 240000 });
 
 after(async () => {
   if (session) await session.cleanup();

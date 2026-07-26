@@ -39,6 +39,19 @@ const APPIUM_PORT = parseInt(process.env.APPIUM_PORT || "4723", 10);
 const PLATFORM_VERSION = process.env.IOS_PLATFORM_VERSION || "17.0";
 const DEVICE_NAME = process.env.IOS_DEVICE_NAME || "iPad (10th generation)";
 
+// Three nested waits guard session creation, and they MUST be ordered
+// innermost-shortest or the outer one aborts the inner mid-flight and you get a
+// generic client-side timeout instead of the driver's own diagnosis -- which is
+// exactly what happened on the first attempt: WebDriverAgent built fine, wdio
+// gave up at its 5-minute default, and the useful error never got written.
+//
+//   WDA_LAUNCH_TIMEOUT   Appium waits for WebDriverAgent (builds it if cold)
+//   CONNECTION_RETRY     wdio waits for POST /session to come back
+//   SETUP_TIMEOUT        node:test waits for the before() hook
+const WDA_LAUNCH_TIMEOUT = parseInt(process.env.WDA_LAUNCH_TIMEOUT || "360000", 10);
+const CONNECTION_RETRY_TIMEOUT = WDA_LAUNCH_TIMEOUT + 180000;
+const SETUP_TIMEOUT = CONNECTION_RETRY_TIMEOUT + 180000;
+
 // getContext/getContexts return either a plain context name or a detailed
 // { id, title, url, bundleId } object depending on the driver and the options
 // in play, so always go through this rather than comparing a value directly --
@@ -83,9 +96,8 @@ async function setup() {
     port: APPIUM_PORT,
     path: "/",
     logLevel: "warn",
-    // The suite's own per-spec timeouts do the real waiting; this only needs to
-    // outlast session creation, which includes WebDriverAgent's first launch.
-    connectionRetryTimeout: 300000,
+    // Must outlast Appium's own WDA wait -- see the timeout ladder above.
+    connectionRetryTimeout: CONNECTION_RETRY_TIMEOUT,
     capabilities: {
       platformName: "iOS",
       browserName: "Safari",
@@ -103,7 +115,7 @@ async function setup() {
       // which fails with a misleading "ECONNREFUSED 127.0.0.1:8100" while the
       // build is still running. One retry rather than the default two, so a
       // genuine failure doesn't sit through the long timeout twice.
-      "appium:wdaLaunchTimeout": parseInt(process.env.WDA_LAUNCH_TIMEOUT || "360000", 10),
+      "appium:wdaLaunchTimeout": WDA_LAUNCH_TIMEOUT,
       "appium:wdaStartupRetries": 1,
       // Without this, xcodebuild output is swallowed unless the driver decides
       // an error is present -- so a real build failure looks like a timeout.
@@ -129,4 +141,4 @@ async function setup() {
 const label =
   "code.pyret.org /editor (real Safari, iOS " + PLATFORM_VERSION + " simulator)";
 
-module.exports = { setup, label };
+module.exports = { setup, label, setupTimeout: SETUP_TIMEOUT };
