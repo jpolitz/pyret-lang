@@ -16,11 +16,12 @@ name: browser-test (embed + vscode webviews)
 # environments as a parallel matrix (each on its own runner, so chart rendering
 # doesn't contend for CPU).
 #
-# cpo/embed/vscode each run twice: once per compiler flavor (the stock
-# Pyret-hosted compiler and the TypeScript port, run.js's --compiler knob).
-# embed-static drives the built editor.embed.html artifact whose flavor is
-# baked at build time, and vscode-ovsx's hostile (nosniff) serving refuses
-# the ts-compiler.js <script src> by design, so both stay pyret-only.
+# cpo/embed/vscode/vscode-ovsx each run twice: once per compiler flavor (the
+# stock Pyret-hosted compiler and the TypeScript port, run.js's --compiler
+# knob); vscode-ovsx x ts covers the pyret-parley.compiler=ts setting under
+# hostile (nosniff) serving, where the compiler bundle must load via
+# beforePyret's fetch path. embed-static drives the built editor.embed.html
+# artifact whose flavor is baked at build time, so it stays pyret-only.
 
 on:
   push:
@@ -85,9 +86,6 @@ jobs:
         exclude:
           # editor.embed.html's flavor is baked at build time (pyret)
           - env: embed-static
-            compiler: ts
-          # hostile OVSX serving refuses the ts-compiler.js script load
-          - env: vscode-ovsx
             compiler: ts
     steps:
       - uses: actions/checkout@v7

@@ -1491,7 +1491,32 @@ $(function() {
     // MIME, so pull the .gz.js and inflate it in-page with the native
     // DecompressionStream, then run it from a Blob URL. The `error` handler
     // registered below (synchronously) fires before this async append resolves.
-    fetch(window.PYRET)
+    //
+    // In the ts flavor the compiler bundle has the same MIME problem (its
+    // <script src> in editor.html is skipped under PYRET_GZIPPED), so fetch
+    // and Blob-execute it FIRST -- the jarr expects window.PyretTSCompiler,
+    // matching the synchronous script order of the un-gzipped page.
+    var tsCompilerLoad = Promise.resolve();
+    if (window.CPO_COMPILER === "ts" && window.PYRET_TS_COMPILER) {
+      tsCompilerLoad = fetch(window.PYRET_TS_COMPILER)
+        .then(function (resp) {
+          if (!resp.ok) { throw new Error("status " + resp.status); }
+          return resp.blob();
+        })
+        .then(function (blob) {
+          return new Promise(function (resolve, reject) {
+            var tsLoad = document.createElement('script');
+            tsLoad.onload = resolve;
+            tsLoad.onerror = function () { reject(new Error("executing ts-compiler bundle failed")); };
+            tsLoad.src = URL.createObjectURL(new Blob([blob], { type: "application/javascript" }));
+            document.body.appendChild(tsLoad);
+          });
+        });
+    }
+    tsCompilerLoad
+      .then(function () {
+        return fetch(window.PYRET);
+      })
       .then(function (resp) {
         if (!resp.ok) { throw new Error("status " + resp.status); }
         return new Response(resp.body.pipeThrough(new DecompressionStream("gzip"))).blob();
