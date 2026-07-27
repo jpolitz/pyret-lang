@@ -12,7 +12,6 @@
  */
 const { test, describe, before, after } = require("node:test");
 const { loadSpecsFromFile } = require("../shared/load-cpo-specs");
-const { makePlaywrightPage } = require("../shared/playwright-page");
 const { runSpec, specTimeout } = require("../shared/dispatch");
 const { warmUp } = require("../shared/cpo-assertions");
 
@@ -54,7 +53,10 @@ before(async () => {
   const { setup, label } = require("../envs/" + ENV);
   console.log("environment: " + label);
   const s = await setup();
-  const page = makePlaywrightPage(s.frame);
+  // setup() hands back a ready `page` adapter (inject/eval/waitFor) rather than a
+  // driver object, which is what lets --env=cpo run under Safari as well as
+  // Chromium -- see shared/browser.js.
+  const page = s.editor;
   await page.inject();
   await page.waitFor("window.PA.editorReady()", 120000);
   // Absorb the one-time runtime/render warmup so no actual test pays it.

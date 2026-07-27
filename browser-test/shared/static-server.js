@@ -38,10 +38,22 @@ function contentType(p) {
 /*
  * opts:
  *   roots  - array of directories to serve, searched in order
+ *   host   - address to advertise in `origin` (default 127.0.0.1). Anything
+ *            other than 127.0.0.1 also widens the bind to 0.0.0.0, because the
+ *            point of overriding it is to be reachable from another machine.
  * returns { origin, close }
+ *
+ * PYRET_STATIC_HOST is the env-var form of `host`. It exists for running the
+ * browser somewhere other than this machine -- notably Safari in a VM
+ * (PYRET_BROWSER=safari): a loopback-bound fixture server is unreachable from
+ * the guest, whose 127.0.0.1 is its own, so url-file fixtures fetched from here
+ * hang rather than fail, and the specs time out. Same-machine runs (Chromium,
+ * and Safari on a macOS CI runner) need none of this and keep the default.
  */
 async function startStaticServer(opts) {
   const roots = opts.roots.map((r) => path.resolve(r));
+  const host = opts.host || process.env.PYRET_STATIC_HOST || "127.0.0.1";
+  const bind = host === "127.0.0.1" ? "127.0.0.1" : "0.0.0.0";
 
   const server = http.createServer((req, res) => {
     let pathname;
@@ -82,9 +94,9 @@ async function startStaticServer(opts) {
     }).end("not found: " + pathname);
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(0, bind, resolve));
   return {
-    origin: "http://127.0.0.1:" + server.address().port,
+    origin: "http://" + host + ":" + server.address().port,
     close: () => new Promise((resolve) => server.close(() => resolve())),
   };
 }

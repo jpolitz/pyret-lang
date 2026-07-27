@@ -12,6 +12,7 @@
  */
 const { launchChromium } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
+const { makePlaywrightPage } = require("../shared/playwright-page");
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:4999";
 
@@ -40,7 +41,7 @@ async function setup() {
   );
 
   const frame = await findEditorFrame(page);
-  return { page, frame, cleanup: () => browser.close() };
+  return { editor: makePlaywrightPage(frame), cleanup: () => browser.close() };
 }
 
 module.exports = { setup, label: "embed API embedded instance (#embed1 iframe)" };

@@ -6,6 +6,10 @@
 #   make embed SUITES=url-imports
 #   make cpo   SUITES=tables,url-imports GREP='url-file'
 #
+#   make cpo-safari BASE_URL=http://192.168.64.1:4999 SAFARI_EXPECT_VERSION=17
+#     ^ the same cpo specs against REAL Safari over WebDriver, for checking an
+#       old Safari (e.g. 17.0 in a VM). See browser-test/README.md.
+#
 # Freshness of the big builds is delegated to the real Makefiles in lang/ and
 # code.pyret.org/, which are already incremental -- this file only encodes
 # WHICH prerequisites each environment needs, and starts/stops the CPO server.
@@ -34,6 +38,15 @@ PORT     ?= 4999
 SUITES   ?= all
 GREP     ?=
 
+# Where safaridriver is listening, for `make cpo-safari`. safaridriver has no
+# --host flag, so for a VM this is the local end of an ssh -L tunnel.
+SAFARI_WEBDRIVER_URL ?= http://127.0.0.1:4444
+
+# Fail the run unless the browser that answers is this major version. Worth
+# setting whenever the point of the run is an OLD Safari -- see the port-
+# collision trap in README.md ("Which Safari actually answered?").
+SAFARI_EXPECT_VERSION ?=
+
 RUNFLAGS := --suites=$(SUITES)
 ifneq ($(strip $(GREP)),)
 RUNFLAGS += --grep=$(GREP)
@@ -49,11 +62,11 @@ SERVER_ENV := BASE_URL=$(BASE_URL) PORT=$(PORT) \
   URL_FILE_MODE=all-remote IMAGE_PROXY_BYPASS=true \
   SHARED_FETCH_SERVER=https://code.pyret.org CURRENT_PYRET_RELEASE=
 
-.PHONY: help cpo embed embed-static vscode vscode-ovsx all-envs \
+.PHONY: help cpo cpo-safari embed embed-static vscode vscode-ovsx all-envs \
         cpo-build embed-build vscode-build deps server stop-server clean-stamps
 
 help:
-	@sed -n '2,20p' $(firstword $(MAKEFILE_LIST))
+	@sed -n '2,24p' $(firstword $(MAKEFILE_LIST))
 
 # ---------------------------------------------------------------- prerequisites
 
@@ -133,6 +146,25 @@ cpo: server deps
 
 embed: server deps
 	cd $(HERE) && BASE_URL=$(BASE_URL) node run.js --env=embed $(RUNFLAGS)
+
+# Same specs, same env adapter, real Safari instead of Chromium. Deliberately
+# depends on node_modules but NOT on deps: the WebDriver backend has no npm
+# dependencies of its own, so there is no reason to make this target wait on a
+# ~150MB Playwright Chromium download.
+#
+# Two things have to be true before this works, and neither is make's business:
+#   - safaridriver is reachable at SAFARI_WEBDRIVER_URL. For a VM:
+#       ssh -L 4444:127.0.0.1:4444 admin@$$(tart ip <vm>) 'safaridriver -p 4444'
+#   - BASE_URL is an address the BROWSER can reach, and the server was STARTED
+#     with it (it is baked into the served page as PYRET=.../cpo-main.jarr).
+#     For a VM that is the host's address on the VM subnet -- 192.168.64.1 with
+#     tart's default NAT (read it off `ifconfig bridge100`, NOT
+#     `ipconfig getifaddr bridge100`, which returns empty for a bridge).
+#     `make stop-server` first if one is already up on localhost.
+cpo-safari: server | node_modules
+	cd $(HERE) && BASE_URL=$(BASE_URL) PYRET_BROWSER=safari \
+	  SAFARI_WEBDRIVER_URL=$(SAFARI_WEBDRIVER_URL) \
+	  SAFARI_EXPECT_VERSION=$(SAFARI_EXPECT_VERSION) node run.js --env=cpo $(RUNFLAGS)
 
 # The remaining three serve the editor from their OWN origin and run no CPO
 # server, so they get no BASE_URL. They still run the "no external network"

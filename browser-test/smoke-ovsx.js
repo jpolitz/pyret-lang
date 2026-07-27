@@ -6,7 +6,6 @@
  *   OVSX_ASSET_ROOT=/path/to/dist/web/build/web [OVSX_FAITHFUL=1] node smoke-ovsx.js
  */
 const { setup, label } = require("./envs/vscode-ovsx");
-const { makePlaywrightPage } = require("./shared/playwright-page");
 const { warmUp, checkAllTestsPassed } = require("./shared/cpo-assertions");
 
 (async () => {
@@ -19,7 +18,7 @@ const { warmUp, checkAllTestsPassed } = require("./shared/cpo-assertions");
     process.exit(1);
   }
   try {
-    const page = makePlaywrightPage(session.frame);
+    const page = session.editor;
     await page.inject();
     console.log("frame found, PA injected; waiting for editorReady...");
     await page.waitFor("window.PA.editorReady()", 120000);
