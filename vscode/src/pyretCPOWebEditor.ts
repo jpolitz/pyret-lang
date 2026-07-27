@@ -2,8 +2,13 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { URI, Utils } from 'vscode-uri';
 import { Buffer } from 'buffer';
-import { render } from 'mustache';
-const code = require('../build/web/views/editor.html');
+// See cross-file dependencies with code.pyret.org/src/scripts/inline-selfcontained.js
+const code = require('../build/web/views/editor.selfcontained.html');
+
+const WEBVIEW_BASE_URL = '__PYRET_WEBVIEW_BASE_URL__';
+const WEBVIEW_HASH = '__PYRET_WEBVIEW_HASH__';
+const WEBVIEW_URL_FILE_MODE = '__PYRET_WEBVIEW_URL_FILE_MODE__';
+const WEBVIEW_COMPILER = '__PYRET_WEBVIEW_COMPILER__';
 
 // import * as fs from 'fs';
 // import * as path from 'path';
@@ -112,35 +117,23 @@ function getTheme(vscodeTheme: vscode.ColorThemeKind): string {
 export function getHtmlForWebview(context: vscode.ExtensionContext, webview: vscode.Webview, showDefinitions = true): string {
   const config = vscode.workspace.getConfiguration('pyret-parley');
   const theme = getTheme(vscode.window.activeColorTheme.kind);
-  let urlFileMode = config.get('urlFileMode');
-  const baseURI = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'web', 'build', 'web'));
-  let view = "";
-  if (showDefinitions === false) {
-    view = "hideDefinitions=true&headerStyle=hide";
-  }
-  else {
-    view = "hideInteractions=true";
-  }
+  const urlFileMode = config.get('urlFileMode');
+  const baseURI = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'web', 'build', 'web')).toString();
+  const view = showDefinitions === false ? "hideDefinitions=true&headerStyle=hide" : "hideInteractions=true";
+  const hashOptions = `#footerStyle=hide&${view}&theme=${theme}`;
   // The compiler backend is chosen by the pyret-parley.compiler setting --
-  // the same knob as code.pyret.org's ?compiler= flag, resolved here the way
-  // CPO's server resolves it: in ts mode PYRET points straight at the ts
-  // jarr, and editor.html's flavor script (keyed on CPO_COMPILER/PYRET_TS)
-  // loads the TS compiler bundle alongside it.
+  // the same knob as code.pyret.org's ?compiler= flag. The selfcontained
+  // template bakes both flavors' asset paths (relative to the BASE_URL
+  // sentinel); this fill is only the choice between them.
   const compiler = config.get('compiler') === 'ts' ? 'ts' : 'pyret';
-  const jarr = compiler === 'ts' ? 'cpo-main-ts.jarr.js' : 'cpo-main.jarr.js';
-  const templated =
-    render((code as string), {
-      BASE_URL: baseURI.toString(),
-      PYRET: webview.asWebviewUri(vscode.Uri.joinPath(baseURI, 'js', jarr)).toString(),
-      PYRET_TS: compiler === 'ts' ? webview.asWebviewUri(vscode.Uri.joinPath(baseURI, 'js', 'cpo-main-ts.jarr.js')).toString() : "",
-      PYRET_TS_COMPILER: webview.asWebviewUri(vscode.Uri.joinPath(baseURI, 'js', 'ts-compiler.js')).toString(),
-      CPO_COMPILER: compiler,
-      HASH_OPTIONS: `#footerStyle=hide&${view}&theme=${theme}`,
-      URL_FILE_MODE: urlFileMode,
-      IMAGE_PROXY_BYPASS: "true"
-    });
-  console.log("Templated: ", templated);
-  return templated;
+  // Plain string replacement of the build's literal placeholders. split/join,
+  // not String.replace, so a `$` in a filled value can't be read as a
+  // replacement pattern.
+  return (code as string)
+    .split(WEBVIEW_BASE_URL).join(baseURI)
+    .split(WEBVIEW_HASH).join(hashOptions)
+    .split(WEBVIEW_URL_FILE_MODE).join(String(urlFileMode ?? ""))
+    .split(WEBVIEW_COMPILER).join(compiler);
 }
 
 

@@ -2051,7 +2051,7 @@
         p.value = countForCat;
         rawCounts.set(p.category, countForCat + 1);
       }
-      const counts = [...rawCounts.entries().map((kv) => ({ category: kv[0], count: kv[1] }))];
+      const counts = [...rawCounts.entries()].map((kv) => ({ category: kv[0], count: kv[1] }));
       const data = [
         {
           name: 'rawDotsData',
@@ -2663,17 +2663,9 @@
       const defaultColor = config.defaultColor || default_colors[0];
       const lineWidth = toFixnum(get(rawData, 'lineWidth'));
       const color = getColorOrDefault(get(rawData, 'color'), defaultColor);
-      const asScatterPlot = scatterPlot(globalOptions, rawData, config);
+      const pointSize = getNumOrDefault(get(rawData, 'point-size'), 0);
+      const asScatterPlot = scatterPlot(globalOptions, rawData.extendWith({'point-size': pointSize}), config);
       const marks = asScatterPlot.marks;
-      const markShapeMarks = marks.find((m) => m.name === `${prefix}ShapeMarks`);
-      if (markShapeMarks) {
-        markShapeMarks.encode.enter.size.value = Math.max(40, markShapeMarks.encode.enter.size.value);
-        markShapeMarks.encode.hover = markShapeMarks.encode.update;
-        markShapeMarks.encode.update = {
-          fill: { signal: `${prefix}crosshair === datum ? '${color}' : 'transparent'` },
-          stroke: { signal: `${prefix}crosshair === datum ? '${color}' : 'transparent'` },
-        }
-      }
       marks.push({
         type: 'line',
         from: { data: `${prefix}rawTable` },
@@ -2958,7 +2950,7 @@
 
       addCrosshairs(prefix, ['Dots'], signals, marks, pointColor);
 
-      const samplePoints = [...Array(numSamples).keys().map((i) => (xMinValue + (fraction * i)))];
+      const samplePoints = [...Array(numSamples).keys()].map((i) => (xMinValue + (fraction * i)));
 
       return recomputePoints(func, samplePoints, (dataValues) => {
         data[0].values = dataValues;
@@ -2976,7 +2968,7 @@
             const xMinValue = globalOptions.xMinValue;
             const xMaxValue = globalOptions.xMaxValue;
             const fraction = (xMaxValue - xMinValue) / (numSamples - 1);
-            const samplePoints = [...Array(numSamples).keys().map((i) => (xMinValue + (fraction * i)))];
+            const samplePoints = [...Array(numSamples).keys()].map((i) => (xMinValue + (fraction * i)));
             RUNTIME.runThunk(() => {
               // NOTE(Ben): We can use view.data(`${prefix}rawTable`, ...newData...)
               // to replace the existing data points in the _current_ view, so that

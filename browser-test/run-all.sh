@@ -50,7 +50,7 @@ rc=0
 for COMPILER in ${PYRET_COMPILERS:-pyret ts}; do
   for ENVNAME in cpo embed vscode; do
     echo "=== $ENVNAME ($COMPILER compiler) ==="
-    node "$HERE/run.js" --env="$ENVNAME" --compiler="$COMPILER" | tee "$RESULTS/$ENVNAME-$COMPILER-full.txt"
+    node "$HERE/run.js" --env="$ENVNAME" --compiler="$COMPILER" "$@" | tee "$RESULTS/$ENVNAME-$COMPILER-full.txt"
     test "${PIPESTATUS[0]}" -eq 0 || rc=1
   done
 done

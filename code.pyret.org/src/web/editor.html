@@ -3,9 +3,9 @@
 <head>
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
   <title>{{APP_NAME}}</title>
-  <link crossorigin="anonymous" rel="preload" href="{{&PYRET}}" as="script">
+  {{^PYRET_GZIPPED}}<link crossorigin="anonymous" rel="preload" href="{{&PYRET}}" as="script">{{/PYRET_GZIPPED}}
   <script>
-  window.PYRET = "{{&PYRET}}"; window.APP_NAME = "{{APP_NAME}}"; window.APP_DOMAIN = "{{APP_DOMAIN}}";
+  window.PYRET = "{{&PYRET}}"; window.PYRET_GZIPPED = "{{ PYRET_GZIPPED }}" === "true"; window.APP_NAME = "{{APP_NAME}}"; window.APP_DOMAIN = "{{APP_DOMAIN}}";
   // Opt-in TypeScript-compiler flavor: chosen by ?compiler=ts (or the
   // server-side CPO_COMPILER env default). Swaps in the cpo-main-ts jarr
   // and loads the TS compiler bundle; default behavior is unchanged.
