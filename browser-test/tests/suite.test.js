@@ -49,21 +49,31 @@ if (unknown.length > 0) {
 
 // One editor frame for the whole run (specs share it, sequentially).
 let session = null;
+// Whatever setup() opened has to be closed even when a LATER step in this hook
+// throws, so the teardown handle is claimed the moment it exists rather than
+// riding along on `session` (which is only assigned once the hook fully
+// succeeds). A leaked Chromium + dev server keeps open handles on the
+// `node --test` process forever, so it never exits, the reporter never flushes
+// its failure summary, and a fast readable hook failure turns into a silent
+// 25-minute CI timeout -- exactly how the vscode env's boot-timeout error hid
+// itself instead of printing its diagnostics.
+let teardown = null;
 
 before(async () => {
   const { setup, label } = require("../envs/" + ENV);
   console.log("environment: " + label);
   const s = await setup();
+  teardown = s.cleanup;
   const page = makePlaywrightPage(s.frame);
   await page.inject();
   await page.waitFor("window.PA.editorReady()", 120000);
   // Absorb the one-time runtime/render warmup so no actual test pays it.
   await warmUp(page);
-  session = { page, cleanup: s.cleanup };
+  session = { page };
 }, { timeout: 240000 });
 
 after(async () => {
-  if (session) await session.cleanup();
+  if (teardown) await teardown();
 });
 
 for (const suite of chosen) {

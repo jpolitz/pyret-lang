@@ -7,16 +7,24 @@
  */
 const { launchChromium } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
+const { resourceScope } = require("../shared/resource-scope");
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:4999";
 
 async function setup() {
-  const browser = await launchChromium();
-  const page = await browser.newPage();
-  page.setDefaultTimeout(60000);
-  await page.goto(BASE_URL + "/editor", { waitUntil: "domcontentloaded", timeout: 120000 });
-  const frame = await findEditorFrame(page);
-  return { page, frame, cleanup: () => browser.close() };
+  const scope = resourceScope();
+  try {
+    const browser = await launchChromium();
+    scope.add(() => browser.close());
+    const page = await browser.newPage();
+    page.setDefaultTimeout(60000);
+    await page.goto(BASE_URL + "/editor", { waitUntil: "domcontentloaded", timeout: 120000 });
+    const frame = await findEditorFrame(page);
+    return { page, frame, cleanup: scope.closeAll };
+  } catch (e) {
+    await scope.closeAll();
+    throw e;
+  }
 }
 
 module.exports = { setup, label: "code.pyret.org /editor (reference)" };

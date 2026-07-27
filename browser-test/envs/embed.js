@@ -12,35 +12,43 @@
  */
 const { launchChromium } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
+const { resourceScope } = require("../shared/resource-scope");
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:4999";
 
 async function setup() {
-  const browser = await launchChromium();
-  const page = await browser.newPage();
-  page.setDefaultTimeout(60000);
-  await page.goto(BASE_URL + "/embed/embed1.html?" + BASE_URL, { waitUntil: "domcontentloaded", timeout: 120000 });
+  const scope = resourceScope();
+  try {
+    const browser = await launchChromium();
+    scope.add(() => browser.close());
+    const page = await browser.newPage();
+    page.setDefaultTimeout(60000);
+    await page.goto(BASE_URL + "/embed/embed1.html?" + BASE_URL, { waitUntil: "domcontentloaded", timeout: 120000 });
 
-  // Wait for the embedded instance to announce itself (pyret-init).
-  await page.waitForFunction(
-    () => window.messages &&
-      window.messages.filter((m) => m.data.protocol === "pyret" && m.data.data.type === "pyret-init").length === 1,
-    undefined,
-    { timeout: 60000, polling: 200 }
-  );
+    // Wait for the embedded instance to announce itself (pyret-init).
+    await page.waitForFunction(
+      () => window.messages &&
+        window.messages.filter((m) => m.data.protocol === "pyret" && m.data.data.type === "pyret-init").length === 1,
+      undefined,
+      { timeout: 60000, polling: 200 }
+    );
 
-  // Initialize the controlled editor with a runnable starter context.
-  await page.evaluate(() =>
-    window.embedAPI.sendReset({
-      definitionsAtLastRun: false,
-      editorContents: "use context starter2024\n\n",
-      replContents: "",
-      interactionsSinceLastRun: [],
-    })
-  );
+    // Initialize the controlled editor with a runnable starter context.
+    await page.evaluate(() =>
+      window.embedAPI.sendReset({
+        definitionsAtLastRun: false,
+        editorContents: "use context starter2024\n\n",
+        replContents: "",
+        interactionsSinceLastRun: [],
+      })
+    );
 
-  const frame = await findEditorFrame(page);
-  return { page, frame, cleanup: () => browser.close() };
+    const frame = await findEditorFrame(page);
+    return { page, frame, cleanup: scope.closeAll };
+  } catch (e) {
+    await scope.closeAll();
+    throw e;
+  }
 }
 
 module.exports = { setup, label: "embed API embedded instance (#embed1 iframe)" };
