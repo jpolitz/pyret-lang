@@ -18,6 +18,7 @@ name: browser-test (embed + vscode webviews)
 
 on:
   push:
+    branches: [drydock, mainmast]
     tags-ignore:
       - automated*
   pull_request:
