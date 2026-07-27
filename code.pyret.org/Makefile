@@ -83,8 +83,11 @@ build/web/views/%.html: src/web/%.html
 # it inlines.
 SELFCONTAINED = build/web/views/editor.selfcontained.html
 
+# beforePyret.js is spelled out because no COPY_* var contains it (it has its
+# own webpack rule) -- without it the inlined copy in the template goes stale.
 $(SELFCONTAINED): build/web/views/editor.html src/scripts/inline-selfcontained.js \
     $(COPY_JS) $(COPY_LIB_JS) $(COPY_NEW_JS) $(MISC_JS) build/web/js/editor-misc.min.js \
+    build/web/js/beforePyret.js \
     $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(OUT_CSS) $(MISC_CSS) $(COPY_NEW_CSS)
 	node src/scripts/inline-selfcontained.js build/web/views/editor.html build/web $@
 

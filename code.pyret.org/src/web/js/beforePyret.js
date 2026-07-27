@@ -91,12 +91,25 @@ function _shareurlRace(fetchInput, fetchInit) {
     if (directFirst) proxyCtrl.abort();
   });
 
-  // Caller's response: whichever of direct-verified or proxy fulfills
-  // first. If both fail, surface proxy's error (the more authoritative
-  // upstream — direct's may just be 'direct-not-verified').
-  const responsePromise = Promise.any([directP, proxyP]).catch(
-    aggErr => Promise.reject(aggErr.errors[1] || aggErr.errors[0])
-  );
+  // Caller's response: whichever of direct-verified or proxy-OK fulfills
+  // first. A non-ok proxy response must NOT win while direct is still
+  // pending: fetch fulfills on HTTP errors, and on hosts with no proxy
+  // endpoint at all (static serving: the vscode webview, embed-static) the
+  // local 404 arrives long before the real cross-origin response, which
+  // would hand the caller a bogus 404. If BOTH fail, surface proxy's
+  // response/error (the more authoritative upstream — direct's may just be
+  // 'direct-not-verified').
+  const responsePromise = Promise.any([
+    directP,
+    proxyP.then(r => {
+      if (!r.ok) { const e = new Error('proxy response not ok'); e._shareurlResponse = r; throw e; }
+      return r;
+    }),
+  ]).catch(aggErr => {
+    const proxyErr = aggErr.errors[1];
+    if (proxyErr && proxyErr._shareurlResponse) return proxyErr._shareurlResponse;
+    return Promise.reject(proxyErr || aggErr.errors[0]);
+  });
 
   return { responsePromise, shouldProxyPromise };
 }
