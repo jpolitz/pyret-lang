@@ -112,7 +112,7 @@ server: cpo-build | results
 	else \
 	  echo "starting CPO server on port $(PORT)..."; \
 	  ( cd $(CPO) && $(SERVER_ENV) nohup node src/run.js \
-	      </dev/null > $(HERE)/results/cpo-server.log 2>&1 & ) ; \
+	      </dev/null > $(HERE)/results/cpo-server.log 2>&1 & ) >/dev/null 2>&1 ; \
 	  for _ in $$(seq 1 60); do \
 	    curl -fs -o /dev/null $(BASE_URL)/editor && break; sleep 1; done; \
 	  curl -fs -o /dev/null $(BASE_URL)/editor \
@@ -134,12 +134,9 @@ cpo: server deps
 embed: server deps
 	cd $(HERE) && BASE_URL=$(BASE_URL) node run.js --env=embed $(RUNFLAGS)
 
-# The remaining three serve the editor from their OWN origin, so BASE_URL is
-# deliberately NOT passed. url-imports registers two "hermetic" fixture tests
-# only when BASE_URL is set, and those fixtures are fetched cross-origin with
-# no Access-Control-Allow-Origin on the dev static route -- so setting it here
-# would fail them with `TypeError: Failed to fetch` even with the server up.
-# (That is exactly what CI does, and why those two fail there.)
+# The remaining three serve the editor from their OWN origin and run no CPO
+# server, so they get no BASE_URL. They still run the "no external network"
+# url-file tests: run.js serves those fixtures itself, for every env.
 embed-static: embed-build cpo-build deps
 	cd $(HERE) && env -u BASE_URL node run.js --env=embed-static $(RUNFLAGS)
 

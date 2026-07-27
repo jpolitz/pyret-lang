@@ -68,11 +68,35 @@ const nodeArgs = ["--test", "--test-reporter=" + reporter];
 if (grep) nodeArgs.push("--test-name-pattern=" + grep);
 nodeArgs.push(path.join(__dirname, "tests", "suite.test.js"));
 
-const child = spawn(process.execPath, nodeArgs, {
-  stdio: "inherit",
-  env: { ...process.env, PYRET_ENV: env, PYRET_SUITES: suites },
-});
-child.on("exit", (code, signal) => {
-  if (signal) process.kill(process.pid, signal);
-  else process.exit(code == null ? 1 : code);
-});
+// Serve the url-file fixtures ourselves, for every environment.
+//
+// They used to be reached through the CPO server's dev-only test-util mount,
+// which meant the three environments that run no CPO server (embed-static,
+// vscode, vscode-ovsx) either skipped those tests or failed them. Serving them
+// here makes the "no external network" cases genuinely hermetic and identical
+// across all five envs.
+//
+// It has to start HERE rather than in an env's setup(): suite.test.js builds its
+// spec list at module load, before before() ever runs, so the origin must be
+// known before the child is spawned. Hence a parent-side server and an env var.
+const { startStaticServer } = require("./shared/static-server");
+const FIXTURE_ROOT = path.resolve(__dirname, "..", "code.pyret.org", "test-util");
+
+(async () => {
+  const fixtures = await startStaticServer({ roots: [FIXTURE_ROOT] });
+
+  const child = spawn(process.execPath, nodeArgs, {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      PYRET_ENV: env,
+      PYRET_SUITES: suites,
+      PYRET_FIXTURE_BASE: fixtures.origin,
+    },
+  });
+  child.on("exit", async (code, signal) => {
+    await fixtures.close();
+    if (signal) process.kill(process.pid, signal);
+    else process.exit(code == null ? 1 : code);
+  });
+})();
