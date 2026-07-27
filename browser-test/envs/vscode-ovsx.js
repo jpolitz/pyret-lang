@@ -32,6 +32,7 @@
 const path = require("path");
 const { launchChromium } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
+const { makePlaywrightPage } = require("../shared/playwright-page");
 const { startOvsxServer } = require("../shared/ovsx-server");
 const { ProceduralError } = require("../shared/errors");
 
@@ -107,8 +108,7 @@ async function setup() {
 
   const frame = await findEditorFrame(page);
   return {
-    page,
-    frame,
+    editor: makePlaywrightPage(frame),
     cleanup: async () => {
       await browser.close();
       await server.close();

@@ -129,7 +129,7 @@ Two mechanisms keep the inputs and assertions identical to upstream:
 run.js                  friendly CLI: --env/--grep -> `node --test ...` + PYRET_ENV
 tests/suite.test.js     the node:test entry: boots one env, one test() per spec
 envs/
-  cpo.js                launch chromium, goto /editor
+  cpo.js                goto /editor (the one env that also runs under real Safari)
   embed.js              goto /embed/embed1.html, sendReset, find the iframe
   embed-static.js       pyret-embed (embed/dist) against the built editor.embed.html (no CPO server)
   vscode.js             boot @vscode/test-web, open the custom editor, find the webview
@@ -145,8 +145,10 @@ shared/
   dispatch.js           map a loaded spec to its assertion
   errors.js             ProceduralError (procedural failures vs content AssertionError)
   playwright-page.js    `page` adapter over a Playwright frame
+  webdriver.js          minimal W3C WebDriver client (real Safari; see below)
+  webdriver-page.js     the same `page` adapter over a WebDriver session
   find-frame.js         locate the editor frame (the one with #runButton)
-  browser.js            launch Chromium (system Chrome or Playwright's bundled one)
+  browser.js            open a browser: Chromium via Playwright, or Safari via WebDriver
 vscode/fixture-workspace/test.arr   the .arr the custom editor opens
 results/                captured run logs
 ```
@@ -203,6 +205,132 @@ npm run embed -- --grep tables                # same, via package scripts
 Other flags: `--suites=check-blocks,errors,...` (default `all`),
 `--reporter=spec|tap|dot|junit` (default `spec`). Or skip the wrapper entirely:
 `PYRET_ENV=embed node --test --test-name-pattern=tables tests/suite.test.js`.
+
+## Running `cpo` against real Safari
+
+`make cpo-safari` runs the same `cpo` specs in **Apple's Safari** instead of Chromium.
+The motivating case is checking an *old* Safari (17.x), which is otherwise hard to get
+at: GitHub's `macos-14` runner image ships a current Safari regardless of the OS pin,
+and Playwright's `webkit` is a separate WebKit build, not the shipped browser.
+
+Only `cpo` supports this. It is the one env that is same-origin, needs no init script,
+and has the editor in the main frame — so `shared/webdriver-page.js` needs no frame
+handling. See the note in that file before porting the others.
+
+Nothing here is Safari-17-specific: point it at any safaridriver.
+
+### Standing up a Safari 17 VM
+
+Safari can't be downgraded independently of the OS, so Safari 17.0 means a macOS
+Sonoma 14.0 guest. Apple's Virtualization.framework runs it on any Apple Silicon host
+at macOS 14+; [`tart`](https://tart.run) is the convenient wrapper.
+
+```sh
+brew install cirruslabs/cli/tart
+```
+
+**Build from a pinned IPSW, not from `ghcr.io/cirruslabs/macos-sonoma-*`** — those
+images are rebuilt monthly and carry whatever Safari is current. Fetch macOS 14.0
+(build `23A344`) from [ipsw.me](https://ipsw.me), then:
+
+```sh
+tart create --from-ipsw=/path/UniversalMac_14.0_23A344_Restore.ipsw safari17-golden --disk-size 40
+tart run safari17-golden       # complete Setup Assistant once, by hand
+```
+
+In Setup Assistant create user `admin` / password `admin` (the tart convention), then
+enable **auto-login** (System Settings → Users & Groups) and **Remote Login**
+(System Settings → General → Sharing). Auto-login is not optional: `safaridriver`
+needs an active GUI session, and Safari has no headless mode.
+
+Then, inside the VM, freeze Safari before it updates itself out from under you:
+
+```sh
+sudo softwareupdate --schedule off
+sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticCheckEnabled -bool false
+sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticDownload -bool false
+sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool false
+printf '0.0.0.0 gdmf.apple.com\n0.0.0.0 swscan.apple.com\n' | sudo tee -a /etc/hosts
+```
+
+Finally enable automation: Safari → Settings → Advanced → *Show features for web
+developers*, then **Develop → Allow Remote Automation**, then `sudo safaridriver --enable`.
+
+Treat `safari17-golden` as read-only from here on and clone per run — tart clones are
+APFS copy-on-write, so they cost nothing until they diverge. (Apple's EULA allows at
+most 2 macOS VMs per host, so golden + one clone is the budget.)
+
+### Running it
+
+`safaridriver -p N` has no `--host` flag — it only ever binds loopback inside the VM —
+so tunnel it. One command starts the driver and forwards the port:
+
+```sh
+tart clone safari17-golden safari17-run && tart run safari17-run &
+ssh -L 4444:127.0.0.1:4444 admin@$(tart ip safari17-run) 'safaridriver -p 4444'
+```
+
+In the other direction the VM has to reach the CPO server, so `BASE_URL` must be the
+host's address on the VM's subnet — and the server has to have been **started** with it,
+since `BASE_URL` is baked into the served page as `PYRET=.../cpo-main.jarr`:
+
+With tart's default NAT that address is **192.168.64.1**. Read it off `ifconfig
+bridge100` — *not* `ipconfig getifaddr bridge100`, which returns empty for a bridge
+interface:
+
+```sh
+ifconfig bridge100 | awk '/inet /{print $2}'      # -> 192.168.64.1
+make stop-server                                  # if one is up on localhost
+make cpo-safari BASE_URL=http://192.168.64.1:4999 SAFARI_EXPECT_VERSION=17 \
+  PYRET_STATIC_HOST=192.168.64.1 SUITES=check-blocks
+```
+
+`SAFARI_WEBDRIVER_URL` (default `http://127.0.0.1:4444`) points at the driver.
+`make cpo` is unaffected and still runs Chromium.
+
+**`PYRET_STATIC_HOST` is required for the VM**, and is easy to forget because it
+fails so indirectly. `run.js` starts its own fixture server for the url-file specs
+and, by default, binds it to `127.0.0.1` — which from inside the guest means *the
+guest*. Safari fetches into the void, the import never resolves, and the specs die
+on `timed out waiting for: window.PA.doneRendering()` rather than on anything that
+mentions the network. Setting it widens the bind to `0.0.0.0` and advertises the
+given address. Only the remote-browser path needs it; Chromium and Safari-on-a-CI-
+runner are same-machine and keep the loopback default.
+
+### Which Safari actually answered?
+
+Every Safari run prints the browser it got, e.g.
+`browser: Safari 17.0 (macOS) via http://127.0.0.1:4444`. **Read that line.**
+
+There is a silent failure mode worth knowing about: if a `safaridriver` is already
+running *on the host* on the tunnel's local port, `ssh -L` cannot bind, and every
+request quietly goes to the host's current Safari instead of the VM's. `GET /status`
+answers `ready:true` either way, so the run goes green against completely the wrong
+browser. Session capabilities are the only thing that distinguishes them.
+
+`SAFARI_EXPECT_VERSION=17` turns that into a hard failure. Set it whenever the point
+of the run is an old Safari. To check by hand:
+
+```sh
+lsof -nP -iTCP:4444 -sTCP:LISTEN     # should be ssh, not safaridriver
+```
+
+Because the VM has a real display, this is also the good way to *debug* a Safari-only
+failure: let the suite stall on a failing spec and open Web Inspector on the automated
+tab.
+
+### Status
+
+As of 2026-07-27 (at `ff450bc45`), all six suites pass in Safari 17.0 under
+`--env=cpo`: **243/243**, per-test outcomes identical to Chromium. Safari is ~2×
+slower (178s vs 85s) because every `eval` is an HTTP round trip through the tunnel
+rather than a CDP call.
+
+Modern Safari also runs in CI — see the `safari` job in
+`.github/workflows/browser-test.yml`. That is the only WebKit coverage the project
+has (Playwright cannot drive Apple's Safari), but it is Safari 26.x and cannot
+catch old-Safari compatibility bugs: the GitHub runner images track Safari forward
+regardless of which macOS they pin. Old Safari needs the VM above.
 
 ## Results
 

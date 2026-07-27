@@ -15,6 +15,9 @@ name: browser-test (embed + vscode webviews)
 # Shape: build code.pyret.org + the extension ONCE, then fan out the five
 # environments as a parallel matrix (each on its own runner, so chart rendering
 # doesn't contend for CPU).
+#
+# Plus one `safari` job: the cpo env again, but in real Safari on a macOS runner
+# (see the comment on that job for what it does and does not cover).
 
 on:
   push:
@@ -146,3 +149,92 @@ jobs:
         env:
           BASE_URL: ${{ (matrix.env == 'cpo' || matrix.env == 'embed') && 'http://localhost:4999' || '' }}
         run: node run.js --env=${{ matrix.env }}
+
+  # The cpo specs in REAL Safari (PYRET_BROWSER=safari -> shared/webdriver.js).
+  #
+  # What this covers: Apple's actual browser, which nothing else in CI touches.
+  # Playwright has no way to drive Safari, and its bundled "webkit" is a separate
+  # WebKit build, not the shipped browser.
+  #
+  # What it does NOT cover: old Safari. macos-15 ships Safari 26.x, and the
+  # runner images track Safari forward regardless of the OS pin -- macos-14
+  # (Sonoma) also carries 26.x today. So this cannot catch the class of bug that
+  # motivated the WebDriver backend (e.g. 2edad1883, iterator helpers missing in
+  # Safari 17). That still needs a pinned VM; see browser-test/README.md.
+  #
+  # cpo only: it is the one env the WebDriver backend supports -- same-origin, no
+  # init script, editor in the main frame.
+  safari:
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 30
+    # Soft rollout: Safari automation on a hosted runner is new here, and a flaky
+    # WebKit job should not block merges before we have any history. Drop this
+    # once it has been reliably green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Restore cpo build
+        uses: actions/download-artifact@v4
+        with:
+          name: cpo-build
+          path: code.pyret.org/build
+
+      - name: Install browser-test deps
+        working-directory: ./browser-test
+        # No `playwright install` here: the WebDriver backend talks HTTP to
+        # safaridriver and needs no browser binary. The playwright *package* is
+        # still installed because shared/browser.js requires it for the chromium
+        # path -- npm ci --ignore-scripts gets the package without the ~150MB
+        # browser download.
+        run: npm ci --ignore-scripts
+
+      - name: Install CPO server runtime deps
+        working-directory: ./code.pyret.org
+        run: npm ci --ignore-scripts
+
+      - name: Start CPO server
+        working-directory: ./code.pyret.org
+        env:
+          BASE_URL: http://localhost:4999
+          PORT: '4999'
+          PYRET: http://localhost:4999/js/cpo-main.jarr
+          POSTMESSAGE_ORIGIN: '*'
+          NODE_ENV: development
+          SESSION_SECRET: not-so-secret
+          REDISCLOUD_URL: ''
+          URL_FILE_MODE: all-remote
+          IMAGE_PROXY_BYPASS: 'true'
+          SHARED_FETCH_SERVER: https://code.pyret.org
+          CURRENT_PYRET_RELEASE: ''
+        run: |
+          node src/run.js &
+          for _ in $(seq 1 30); do curl -fs -o /dev/null http://localhost:4999/editor && break; sleep 1; done
+          curl -f http://localhost:4999/editor
+
+      - name: Enable and start safaridriver
+        # --enable flips "Allow Remote Automation"; it needs root and exits
+        # without starting the service. Safari has no headless mode, so this
+        # relies on the runner's GUI login session.
+        run: |
+          safaridriver --version
+          sudo safaridriver --enable
+          safaridriver -p 4444 &
+          for _ in $(seq 1 15); do curl -fs -o /dev/null http://127.0.0.1:4444/status && break; sleep 1; done
+          curl -fs http://127.0.0.1:4444/status
+
+      - name: Run cpo in Safari
+        working-directory: ./browser-test
+        # Same machine as the server, so no ssh tunnel and no PYRET_STATIC_HOST
+        # (both of which the VM path needs). SAFARI_EXPECT_VERSION is deliberately
+        # unset: the runner's Safari floats, and the run logs which one answered
+        # ("browser: Safari <v> ... via <url>").
+        env:
+          BASE_URL: http://localhost:4999
+          PYRET_BROWSER: safari
+          SAFARI_WEBDRIVER_URL: http://127.0.0.1:4444
+        run: node run.js --env=cpo

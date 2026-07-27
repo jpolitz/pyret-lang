@@ -26,6 +26,7 @@ const path = require("path");
 const fs = require("fs");
 const { launchChromium } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
+const { makePlaywrightPage } = require("../shared/playwright-page");
 const { startStaticServer } = require("../shared/static-server");
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -71,8 +72,7 @@ async function setup() {
 
   const frame = await findEditorFrame(page);
   return {
-    page,
-    frame,
+    editor: makePlaywrightPage(frame),
     cleanup: async () => {
       await browser.close();
       await server.close();
