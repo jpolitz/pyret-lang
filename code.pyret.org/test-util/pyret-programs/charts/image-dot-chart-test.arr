@@ -1,35 +1,30 @@
-include chart
+include charts
 include image
 import color as C
-include math
 
-# Regression coverage for the categorical dot chart WITH image labels -- the
-# shape Bootstrap's decision-tree starter file uses via
-# `image-dot-chart(training, "species", animal-img)`, and the one teachers hit
-# on pyret.bootstrapworld.org.
+# Coverage for the CHARTS module (lang/src/arr/trove/charts.arr -> charts-lib),
+# which nothing else in this corpus touches.
 #
-# dot-chart-test.arr already covers `from-list.dot-chart`, but only without
-# images: image-dot-chart-from-list is dot-chart-from-list(...).image-labels(...),
-# so the image-carrying path had no coverage at all. Both land in charts-lib's
-# categoricalDotChart, whose `rawCounts.entries().map(...)` needs the
-# iterator-helpers proposal that Safari did not ship until 18.4 -- on Safari 17
-# it throws "TypeError: ....map is not a function".
+# `include chart` resolves to code.pyret.org/src/web/arr/trove/chart.arr, a
+# separate, older implementation backed by chart-lib. Every other program in
+# this directory uses it, so the whole charts suite exercises chart-lib and
+# never charts-lib -- including dot-chart-test.arr, which renders a categorical
+# dot chart and passes happily on a real Safari 17.
+#
+# charts-lib is what the newer API and Bootstrap's decision-tree starter file
+# reach (image-dot-chart(training, "species", animal-img)), and its
+# categoricalDotChart does `rawCounts.entries().map(...)` -- an iterator-helpers
+# call Safari did not ship until 18.4. On Safari 17 that throws
+# "TypeError: ....map is not a function", which is what teachers hit on
+# pyret.bootstrapworld.org.
 
 species = [list: "cat", "dog", "cat", "snail", "dog", "cat", "rabbit"]
 
-fun animal-img(s):
-  ask:
-    | s == "cat"    then: circle(12, "solid", "orange")
-    | s == "dog"    then: square(20, "solid", "brown")
-    | s == "snail"  then: triangle(18, "solid", "green")
-    | otherwise:          star(14, "solid", "purple")
-  end
-end
+# Each image carries its own category name, so a saved image from a failing run
+# shows which label landed where.
+images = species.map(lam(s): text(s, 18, C.purple) end)
 
-images = species.map(animal-img)
-
-zoo-series = from-list.image-dot-chart(images, species)
-zoo = render-chart(zoo-series).get-image()
+zoo = render-chart(from-list.image-dot-chart(images, species)).get-image()
 
 check "Image dot chart, categorical data with image labels":
   zoo satisfies is-image
