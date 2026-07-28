@@ -30,7 +30,7 @@
  *   OVSX_CAP_MB      hostile size cap in MB (default 15)
  */
 const path = require("path");
-const { launchChromium } = require("../shared/browser");
+const { launchChromium, wireBrowserLogs } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
 const { startOvsxServer } = require("../shared/ovsx-server");
 const { ProceduralError } = require("../shared/errors");
@@ -64,6 +64,7 @@ async function setup() {
     const browser = await launchChromium();
     scope.add(() => browser.close());
     const page = await browser.newPage();
+    wireBrowserLogs(page);
     page.setDefaultTimeout(60000);
 
     // Take the real vscode branch. The host is a no-op; content + control come from

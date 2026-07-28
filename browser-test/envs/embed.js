@@ -10,7 +10,7 @@
  *
  * Needs the CPO server running at BASE_URL.
  */
-const { launchChromium } = require("../shared/browser");
+const { launchChromium, wireBrowserLogs } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
 const { resourceScope } = require("../shared/resource-scope");
 
@@ -26,6 +26,7 @@ async function setup() {
     const browser = await launchChromium();
     scope.add(() => browser.close());
     const page = await browser.newPage();
+    wireBrowserLogs(page);
     page.setDefaultTimeout(60000);
     const compilerParam = COMPILER === "pyret" ? "" : "&compiler=" + COMPILER;
     await page.goto(BASE_URL + "/embed/embed1.html?" + BASE_URL + compilerParam, { waitUntil: "domcontentloaded", timeout: 120000 });

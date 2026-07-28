@@ -24,7 +24,7 @@
  */
 const path = require("path");
 const fs = require("fs");
-const { launchChromium } = require("../shared/browser");
+const { launchChromium, wireBrowserLogs } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
 const { startStaticServer } = require("../shared/static-server");
 const { resourceScope } = require("../shared/resource-scope");
@@ -60,6 +60,7 @@ async function setup() {
     const browser = await launchChromium();
     scope.add(() => browser.close());
     const page = await browser.newPage();
+    wireBrowserLogs(page);
     page.setDefaultTimeout(60000);
 
     await page.goto(server.origin + "/embed-static-host.html", {

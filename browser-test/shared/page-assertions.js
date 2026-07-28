@@ -47,6 +47,16 @@ function PYRET_PAGE_ASSERTIONS() {
     editorReady() {
       return PA.pyretLoaded() && PA.cmPresent() && PA.cmValue() !== "";
     },
+    // stickError banners: every caller (runtime-bundle load failure, program
+    // load failure, save failure) marks a genuinely broken editor. Crucially,
+    // beforePyret's terminal load-failure path HIDES #loader while posting one
+    // of these, so pyretLoaded()/editorReady() alone cannot tell a booted
+    // runtime from a dead page -- the harness must check here too.
+    stickyErrors() {
+      return Array.from(document.querySelectorAll(".notificationArea .error"))
+        .map((e) => (e.textContent || "").trim())
+        .filter((t) => t !== "");
+    },
 
     // ---- input (mirrors util.setCodemirror on the definitions CM) ----
     setDefinitions(code) {

@@ -1540,13 +1540,40 @@ $(function() {
       })
       .catch(function (e) {
         logFailureAndManualFetch(window.PYRET, e);
-        pyretLoad2.src = process.env.PYRET_BACKUP;
-        pyretLoad2.type = "text/javascript";
-        document.body.appendChild(pyretLoad2);
+        loadBackupPyret("fetching/decompressing " + window.PYRET + " failed: " + e.message);
       });
   } else {
     pyretLoad.src = window.PYRET;
     document.body.appendChild(pyretLoad);
+  }
+
+  // The page's terminal state: neither the runtime bundle nor its backup is
+  // coming. Alongside the user-facing banner, say WHY on the console -- in a
+  // vscode webview there is no logging server behind logger.log, so the
+  // console line is the only diagnostic that survives (and the browser-test
+  // harness now records it).
+  function terminalPyretLoadFailure(detail) {
+    console.error("Pyret failed to load: " + detail);
+    $("#loader").hide();
+    $("#runPart").hide();
+    $("#breakButton").hide();
+    window.stickError("Pyret failed to load; check your connection or try refreshing the page.  If this happens repeatedly, please report it as a bug.  (" + detail + ")");
+  }
+
+  function loadBackupPyret(primaryDetail) {
+    console.error("Pyret runtime bundle failed to load: " + primaryDetail);
+    // Builds without a configured PYRET_BACKUP (the vscode webview, anything
+    // built without the env var) used to assign it anyway, so the browser
+    // requested a literal "undefined" -- an instant 404 whose error event
+    // replaced the primary failure's story. No backup: go straight to the
+    // terminal state, carrying the reason the primary died.
+    if (process.env.PYRET_BACKUP) {
+      pyretLoad2.src = process.env.PYRET_BACKUP;
+      pyretLoad2.type = "text/javascript";
+      document.body.appendChild(pyretLoad2);
+    } else {
+      terminalPyretLoadFailure(primaryDetail);
+    }
   }
 
   function logFailureAndManualFetch(url, e) {
@@ -1597,18 +1624,12 @@ $(function() {
 
   $(pyretLoad).on("error", function(e) {
     logFailureAndManualFetch(window.PYRET, e);
-    pyretLoad2.src = process.env.PYRET_BACKUP;
-    pyretLoad2.type = "text/javascript";
-    document.body.appendChild(pyretLoad2);
+    loadBackupPyret("the script tag for " + window.PYRET + " fired its error event");
   });
 
   $(pyretLoad2).on("error", function(e) {
-    $("#loader").hide();
-    $("#runPart").hide();
-    $("#breakButton").hide();
-    window.stickError("Pyret failed to load; check your connection or try refreshing the page.  If this happens repeatedly, please report it as a bug.");
+    terminalPyretLoadFailure("the backup bundle " + process.env.PYRET_BACKUP + " also failed");
     logFailureAndManualFetch(process.env.PYRET_BACKUP, e);
-
   });
 
   window.addEventListener("focus", (e) => {
