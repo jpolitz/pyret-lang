@@ -48,7 +48,14 @@ const DEVICE_NAME = process.env.IOS_DEVICE_NAME || "iPad (10th generation)";
 //   WDA_LAUNCH_TIMEOUT   Appium waits for WebDriverAgent (builds it if cold)
 //   CONNECTION_RETRY     wdio waits for POST /session to come back
 //   SETUP_TIMEOUT        node:test waits for the before() hook
-const WDA_LAUNCH_TIMEOUT = parseInt(process.env.WDA_LAUNCH_TIMEOUT || "360000", 10);
+// 10 minutes, from measurement rather than superstition. On a macos-14 runner a
+// cold WebDriverAgent needs ~75s to build, then ~3 more minutes before the
+// runner app even logs "Running tests...", then longer still to bind port 8100.
+// At 6 minutes this aborted mid-launch and reported a bare client timeout; the
+// one run that succeeded did so only because 26 minutes of uncached npm gave
+// the simulator time to settle first. Caching the DerivedData (below) removes
+// the build from the critical path, but the launch is still slow.
+const WDA_LAUNCH_TIMEOUT = parseInt(process.env.WDA_LAUNCH_TIMEOUT || "600000", 10);
 const CONNECTION_RETRY_TIMEOUT = WDA_LAUNCH_TIMEOUT + 180000;
 const SETUP_TIMEOUT = CONNECTION_RETRY_TIMEOUT + 180000;
 
@@ -117,6 +124,11 @@ async function setup() {
       // genuine failure doesn't sit through the long timeout twice.
       "appium:wdaLaunchTimeout": WDA_LAUNCH_TIMEOUT,
       "appium:wdaStartupRetries": 1,
+      // A fixed DerivedData path so CI can cache the built WebDriverAgent
+      // between runs; without it every run pays the cold xcodebuild.
+      ...(process.env.WDA_DERIVED_DATA
+        ? { "appium:derivedDataPath": process.env.WDA_DERIVED_DATA }
+        : {}),
       // Without this, xcodebuild output is swallowed unless the driver decides
       // an error is present -- so a real build failure looks like a timeout.
       "appium:showXcodeLog": true,
