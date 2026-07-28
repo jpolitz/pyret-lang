@@ -68,10 +68,37 @@ async function warmUp(page) {
   await page.waitFor("window.PA.doneRendering()", 120000);
 }
 
+// How long to wait for a testing summary AFTER the run has already finished.
+// Callers reach here having awaited breakDone(), so the summary should appear
+// promptly; the per-spec budgets (900s for the chart/table programs) are there
+// to cover the run itself, not this.
+const SUMMARY_WAIT_CAP = parseInt(process.env.PYRET_SUMMARY_WAIT || "180000", 10);
+
 // mirrors util.checkAllTestsPassed -- CONTENT: "Looks shipshape" must be present.
 async function checkAllTestsPassed(page, name, timeout) {
   await page.inject();
-  await page.waitFor("window.PA.testingSummaryPresent()", timeout || 20000);
+  // A program that fails to compile, or raises at the top level, never produces
+  // a testing summary. Waiting the full per-spec budget for one meant a broken
+  // program burned 15 minutes and then reported "test timed out after 900000ms"
+  // -- true, and useless: it says nothing about what the editor actually showed.
+  // Bound the wait and report the output instead.
+  const summaryWait = Math.min(timeout || 20000, SUMMARY_WAIT_CAP);
+  try {
+    await page.waitFor(
+      "(window.PA.testingSummaryPresent() || window.PA.compileErrorPresent())",
+      summaryWait
+    );
+  } catch (e) {
+    // fall through -- the check below produces the useful message
+  }
+  if (!(await page.eval("window.PA.testingSummaryPresent()"))) {
+    await page.eval("window.PA.removeOutputCodeMirrors()");
+    const text = await page.eval("window.PA.outputText()");
+    throw new ProceduralError(
+      "no testing summary after " + summaryWait + "ms -- the program did not run " +
+        "to completion. Editor output was:\n" + (text || "<empty output>")
+    );
+  }
   await page.waitFor("window.PA.doneRendering()", 20000);
   const res = await page.eval("window.PA.shipshapeResult()");
   assert.ok(
