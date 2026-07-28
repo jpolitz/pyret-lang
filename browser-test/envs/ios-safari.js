@@ -105,6 +105,10 @@ async function setup() {
     logLevel: "warn",
     // Must outlast Appium's own WDA wait -- see the timeout ladder above.
     connectionRetryTimeout: CONNECTION_RETRY_TIMEOUT,
+    // No retries. wdio's default is to retry POST /session, and on a runner this
+    // slow the retry fires while the first session is still mid-handshake, so
+    // two sessions end up fighting over one simulator and neither finishes.
+    connectionRetryCount: 0,
     capabilities: {
       platformName: "iOS",
       browserName: "Safari",
@@ -114,8 +118,14 @@ async function setup() {
       ...(process.env.SIM_UDID ? { "appium:udid": process.env.SIM_UDID } : {}),
       // Chart rendering keeps the page busy for a long time; don't let the
       // driver give up on attaching to it.
-      "appium:webviewConnectTimeout": 120000,
-      "appium:safariInitialUrl": BASE_URL + "/editor",
+      "appium:webviewConnectTimeout": 240000,
+      // Deliberately about:blank rather than /editor. Session creation blocks on
+      // the remote debugger reporting an application, and pointing Safari at the
+      // editor makes that handshake wait on a ~39MB cpo-main.jarr parsing on a
+      // simulator -- run 10 sat in "Waiting up to 120000ms for applications to
+      // be reported" and timed out. Attach to a trivial page first; setup()
+      // navigates to /editor once the session exists.
+      "appium:safariInitialUrl": "about:blank",
       "appium:newCommandTimeout": 0,
       // The driver builds WebDriverAgent with xcodebuild on first use, and a
       // cold build on a CI runner takes minutes -- well past the 60s default,
