@@ -57,7 +57,10 @@ const DEVICE_NAME = process.env.IOS_DEVICE_NAME || "iPad (10th generation)";
 // the build from the critical path, but the launch is still slow.
 const WDA_LAUNCH_TIMEOUT = parseInt(process.env.WDA_LAUNCH_TIMEOUT || "600000", 10);
 const CONNECTION_RETRY_TIMEOUT = WDA_LAUNCH_TIMEOUT + 180000;
-const SETUP_TIMEOUT = CONNECTION_RETRY_TIMEOUT + 180000;
+// Sequential session attempts (see newSessionWithWarmRetry). The setup budget
+// has to cover all of them, plus the 15s pause between.
+const SESSION_ATTEMPTS = parseInt(process.env.IOS_SESSION_ATTEMPTS || "2", 10);
+const SETUP_TIMEOUT = (CONNECTION_RETRY_TIMEOUT + 195000) * SESSION_ATTEMPTS;
 
 // getContext/getContexts return either a plain context name or a detailed
 // { id, title, url, bundleId } object depending on the driver and the options
@@ -97,8 +100,39 @@ async function ensureWebContext(driver) {
   }
 }
 
+// The FIRST session on a cold runner has to build and launch WebDriverAgent,
+// and that has repeatedly outlived whatever is holding the POST /session
+// connection open -- most recently undici itself, closing the socket with
+// UND_ERR_SOCKET well below any timeout wdio exposes. Raising driver-level
+// timeouts cannot fix a transport that has already hung up.
+//
+// So don't make one request carry the cold start. WDA is not torn down between
+// attempts (appium:useNewWDA defaults false), so when a first attempt dies
+// waiting for it, the agent it started keeps running and the next attempt
+// attaches to a warm one in seconds. These are sequential -- each awaits the
+// previous failure -- which is why wdio's own concurrent retries stay off.
+async function newSessionWithWarmRetry(options, attempts) {
+  let lastError;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await remote(options);
+    } catch (e) {
+      lastError = e;
+      console.log(
+        "ios-safari: session attempt " + i + "/" + attempts + " failed (" +
+          ((e && e.message) || e) + ")" +
+          (i < attempts ? " -- retrying against the WebDriverAgent it started" : "")
+      );
+      if (i < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 15000));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function setup() {
-  const driver = await remote({
+  const driver = await newSessionWithWarmRetry({
     hostname: APPIUM_HOST,
     port: APPIUM_PORT,
     path: "/",
@@ -143,12 +177,12 @@ async function setup() {
       // an error is present -- so a real build failure looks like a timeout.
       "appium:showXcodeLog": true,
     },
-  });
+  }, SESSION_ATTEMPTS);
 
   await ensureWebContext(driver);
   await driver.setTimeout({ pageLoad: 120000, script: 120000 });
-  // safariInitialUrl already navigated; this makes the target explicit and
-  // re-navigates if the session was recycled onto about:blank.
+  // The session starts on about:blank by design (see safariInitialUrl above);
+  // the editor is loaded here, once the debugger is already attached.
   await driver.url(BASE_URL + "/editor");
 
   // Unlike the Playwright envs there is no frame hunt: on /editor the editor IS

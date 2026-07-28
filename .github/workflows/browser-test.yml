@@ -144,7 +144,9 @@ jobs:
   test-ios-safari:
     needs: build
     runs-on: macos-14
-    timeout-minutes: 60
+    # Generous because a cold WebDriverAgent can eat one whole session attempt
+    # before the warm retry succeeds; a warm run is far shorter.
+    timeout-minutes: 75
     env:
       # Pin the OLDEST iOS worth supporting, not the newest available. macos-14
       # ships 17.0 / 17.2 / 17.4 / 17.5 runtimes preinstalled, and the bugs this
