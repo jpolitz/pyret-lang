@@ -164,6 +164,11 @@ function makeEvents(config) {
     }
     editorUpdate(state.editorContents);
     replUpdate(state.replContents);
+    // The host-fed settle point (see EXPECTS_HOST_RESET in beforePyret.js):
+    // everything above -- the awaited warm-start run included -- is done and
+    // the host's contents are installed. RECEIVED_RESET (commSetup) marks
+    // receipt, which is the START of that window; this marks its end.
+    window.EDITOR_CONTENTS_SETTLED = true;
   }
 
   config.CPO.events.onLoad(async function () {
@@ -328,6 +333,9 @@ function makeEvents(config) {
       });
       CPO.loadProgram(toLoad).then((text) => {
         editorUpdate(text);
+        // The share-link flavor of a host reset settles here (it bypasses
+        // reset(), so the end of reset() can't cover it).
+        window.EDITOR_CONTENTS_SETTLED = true;
       })
       .catch((e) => {
         console.error("Error loading initial state from share link: ", e, link);

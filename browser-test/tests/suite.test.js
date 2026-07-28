@@ -66,7 +66,23 @@ before(async () => {
   teardown = s.cleanup;
   const page = makePlaywrightPage(s.frame);
   await page.inject();
-  await page.waitFor("window.PA.editorReady()", 120000);
+  try {
+    await page.waitFor("window.PA.editorReady()", 120000);
+  } catch (e) {
+    // Say WHICH readiness fact is missing instead of a bare timeout -- and
+    // catch the built-editor-predates-the-contract case explicitly (an old
+    // build never sets EDITOR_CONTENTS_SETTLED, and would otherwise present
+    // as an unexplained 120s hang).
+    const diag = await page.eval(
+      "({ pyretLoaded: window.PA.pyretLoaded(), cmPresent: window.PA.cmPresent()," +
+      "   contentsSettled: window.EDITOR_CONTENTS_SETTLED === true," +
+      "   expectsHostReset: window.EXPECTS_HOST_RESET," +
+      "   stickyErrors: window.PA.stickyErrors() })");
+    throw new Error("editor never became ready: " + JSON.stringify(diag) +
+      (diag.expectsHostReset === undefined
+        ? " (EXPECTS_HOST_RESET is undefined -- is the built editor older than the EDITOR_CONTENTS_SETTLED contract? rebuild code.pyret.org / the extension)"
+        : ""));
+  }
   // editorReady is satisfiable by a DEAD editor: its pyretLoaded() reads "the
   // #loader overlay is hidden", and beforePyret's terminal load-failure path
   // (runtime bundle and backup both failed) hides that overlay while posting a
