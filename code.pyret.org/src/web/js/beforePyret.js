@@ -162,6 +162,17 @@ window.ct_error = function(/* varargs */) {
 };
 var initialParams = url.parse(document.location.href);
 var params = url.parse("/?" + initialParams["hash"]);
+// Who owns this editor's initial contents? A standalone page installs its own
+// (programLoaded below). An embedded instance (the embed API's iframe, the
+// vscode webview) or a page booted from an initialState hash is host-fed: its
+// real contents arrive via the events.js `reset` protocol, and boot isn't
+// over until that reset fully settles -- reset() runs a warm-start program
+// before installing contents, and driving the editor during that window races
+// the host's own handshake. EDITOR_CONTENTS_SETTLED is the single "initial
+// contents are in and the editor is quiescent" fact, declared at whichever of
+// those two settle points applies (here for standalone; events.js reset() for
+// host-fed), so observers don't have to re-derive per-host boot behavior.
+window.EXPECTS_HOST_RESET = isEmbedded || !!params["get"]["initialState"];
 window.highlightMode = "mcmh"; // what is this for?
 window.clearFlash = function() {
   $(".notificationArea").empty();
@@ -1479,6 +1490,12 @@ $(function() {
       ];
       hideWhenControlled.forEach(s => $(s).hide());
       removeWhenControlled.forEach(s => $(s).remove());
+    }
+
+    // Standalone boot settles here; a host-fed editor settles at the end of
+    // events.js reset() instead (see EXPECTS_HOST_RESET above).
+    if(!window.EXPECTS_HOST_RESET) {
+      window.EDITOR_CONTENTS_SETTLED = true;
     }
 
   });
