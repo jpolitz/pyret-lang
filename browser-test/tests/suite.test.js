@@ -67,6 +67,18 @@ before(async () => {
   const page = makePlaywrightPage(s.frame);
   await page.inject();
   await page.waitFor("window.PA.editorReady()", 120000);
+  // editorReady is satisfiable by a DEAD editor: its pyretLoaded() reads "the
+  // #loader overlay is hidden", and beforePyret's terminal load-failure path
+  // (runtime bundle and backup both failed) hides that overlay while posting a
+  // sticky error banner. In that state the page also keeps #breakButton at its
+  // initial disabled state, so warmUp's breakDone() is vacuously true and the
+  // first wait that can fail is doneRendering's full 120s timeout -- which is
+  // how a runtime that never loaded spent a while diagnosed as "rendering
+  // hangs in CI". Read the banner and fail with the editor's own words.
+  const sticky = await page.eval("window.PA.stickyErrors()");
+  if (sticky.length > 0) {
+    throw new Error("the editor booted into an error state: " + sticky.join(" | "));
+  }
   // Absorb the one-time runtime/render warmup so no actual test pays it.
   await warmUp(page);
   session = { page };

@@ -11,7 +11,7 @@
  */
 const path = require("path");
 const { open } = require("@vscode/test-web");
-const { launchChromium } = require("../shared/browser");
+const { launchChromium, wireBrowserLogs } = require("../shared/browser");
 const { findEditorFrame } = require("../shared/find-frame");
 const { resourceScope } = require("../shared/resource-scope");
 
@@ -44,6 +44,7 @@ async function setup() {
     const browser = await launchChromium();
     scope.add(() => browser.close());
     const page = await browser.newPage();
+    wireBrowserLogs(page);
     page.setDefaultTimeout(60000);
 
     // Open the file directly via the workbench's `payload` query param, the same
