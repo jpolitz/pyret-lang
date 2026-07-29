@@ -378,6 +378,14 @@ export function makePyretPane(
         interactionsSinceLastRun: [],
         editorContents: docText,
         replContents: "",
+        // Skip the editor's boot warm-start run (events.js reset()). Its only
+        // observable effect is a live REPL prompt at boot, and the cpo pane
+        // hides the interactions pane anyway -- while the run is in flight the
+        // editor looks ready but swallows Run clicks and races typed edits
+        // against the contents install. For the repl pane this field is inert:
+        // definitionsAtLastRun is the file's text there, and that run always
+        // happens.
+        warmStart: false,
       };
       switch (e.data.type) {
         case 'pyret-init': {
