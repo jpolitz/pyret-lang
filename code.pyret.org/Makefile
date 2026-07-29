@@ -80,13 +80,12 @@ build/web/views/%.html: src/web/%.html
 # Self-contained variant of the editor template: shell scripts/styles inlined so
 # the page boots where its assets are served without an executable MIME type
 # (see src/scripts/inline-selfcontained.js). Depends on the built shell js/css
-# it inlines.
+# it inlines -- the RULE lives further down, after the COPY_*/MISC_* variables
+# are assigned: make expands a rule's prerequisite list when it READS the rule,
+# so a rule up here would see every one of those `:=` variables as empty and
+# never rebuild the template when an inlined asset changes (fresh builds hide
+# this; every incremental build served a stale webview).
 SELFCONTAINED = build/web/views/editor.selfcontained.html
-
-$(SELFCONTAINED): build/web/views/editor.html src/scripts/inline-selfcontained.js \
-    $(COPY_JS) $(COPY_LIB_JS) $(COPY_NEW_JS) $(MISC_JS) build/web/js/editor-misc.min.js \
-    $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(OUT_CSS) $(MISC_CSS) $(COPY_NEW_CSS)
-	node src/scripts/inline-selfcontained.js build/web/views/editor.html build/web $@
 
 OUT_CSS := $(patsubst src/web/%.template.css,build/web/%.css,$(wildcard src/web/css/*.template.css))
 
@@ -385,6 +384,16 @@ $(WEBIMG):
 
 $(WEBARR):
 	@$(call MKDIR,$(WEBARR))
+
+# The self-contained template's rule (see the SELFCONTAINED comment near the
+# top for why it must sit below the COPY_*/MISC_* assignments it depends on).
+# beforePyret.js is spelled out because no COPY_* var contains it (it has its
+# own webpack rule) -- without it the inlined copy in the template goes stale.
+$(SELFCONTAINED): build/web/views/editor.html src/scripts/inline-selfcontained.js \
+    $(COPY_JS) $(COPY_LIB_JS) $(COPY_NEW_JS) $(MISC_JS) build/web/js/editor-misc.min.js \
+    build/web/js/beforePyret.js \
+    $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(OUT_CSS) $(MISC_CSS) $(COPY_NEW_CSS)
+	node src/scripts/inline-selfcontained.js build/web/views/editor.html build/web $@
 
 web-local: $(WEB) $(WEBV) $(WEBJS) $(WEBJSGOOG) $(WEBCSS) $(WEBTHEMES) $(WEBFONTS) $(WEBIMG) $(WEBIMAGES) $(WEBARR) $(OUT_HTML) $(COPY_HTML) $(OUT_CSS) $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(COPY_FONTS) $(COPY_JS) $(COPY_LIB_JS) $(COPY_LIB_IMAGES) $(COPY_ARR) $(COPY_GIF) $(COPY_SVG) $(COPY_PNG) $(MISC_JS) $(MISC_CSS) $(MISC_IMG) $(COPY_NEW_CSS) $(COPY_NEW_JS) $(COPY_GOOGLE_JS) $(CPOMAIN) $(CPOGZ) build/web/js/editor-misc.min.js build/web/js/snap build/web/js/transpile.xml build/web/editor.html build/web/editor.embed.html $(SELFCONTAINED) 
 
