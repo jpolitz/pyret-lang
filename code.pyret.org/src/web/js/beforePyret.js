@@ -91,12 +91,25 @@ function _shareurlRace(fetchInput, fetchInit) {
     if (directFirst) proxyCtrl.abort();
   });
 
-  // Caller's response: whichever of direct-verified or proxy fulfills
-  // first. If both fail, surface proxy's error (the more authoritative
-  // upstream — direct's may just be 'direct-not-verified').
-  const responsePromise = Promise.any([directP, proxyP]).catch(
-    aggErr => Promise.reject(aggErr.errors[1] || aggErr.errors[0])
-  );
+  // Caller's response: whichever of direct-verified or proxy-OK fulfills
+  // first. A non-ok proxy response must NOT win while direct is still
+  // pending: fetch fulfills on HTTP errors, and on hosts with no proxy
+  // endpoint at all (static serving: the vscode webview, embed-static) the
+  // local 404 arrives long before the real cross-origin response, which
+  // would hand the caller a bogus 404. If BOTH fail, surface proxy's
+  // response/error (the more authoritative upstream — direct's may just be
+  // 'direct-not-verified').
+  const responsePromise = Promise.any([
+    directP,
+    proxyP.then(r => {
+      if (!r.ok) { const e = new Error('proxy response not ok'); e._shareurlResponse = r; throw e; }
+      return r;
+    }),
+  ]).catch(aggErr => {
+    const proxyErr = aggErr.errors[1];
+    if (proxyErr && proxyErr._shareurlResponse) return proxyErr._shareurlResponse;
+    return Promise.reject(proxyErr || aggErr.errors[0]);
+  });
 
   return { responsePromise, shouldProxyPromise };
 }
@@ -1508,7 +1521,32 @@ $(function() {
     // MIME, so pull the .gz.js and inflate it in-page with the native
     // DecompressionStream, then run it from a Blob URL. The `error` handler
     // registered below (synchronously) fires before this async append resolves.
-    fetch(window.PYRET)
+    //
+    // In the ts flavor the compiler bundle has the same MIME problem (its
+    // <script src> in editor.html is skipped under PYRET_GZIPPED), so fetch
+    // and Blob-execute it FIRST -- the jarr expects window.PyretTSCompiler,
+    // matching the synchronous script order of the un-gzipped page.
+    var tsCompilerLoad = Promise.resolve();
+    if (window.CPO_COMPILER === "ts" && window.PYRET_TS_COMPILER) {
+      tsCompilerLoad = fetch(window.PYRET_TS_COMPILER)
+        .then(function (resp) {
+          if (!resp.ok) { throw new Error("status " + resp.status); }
+          return resp.blob();
+        })
+        .then(function (blob) {
+          return new Promise(function (resolve, reject) {
+            var tsLoad = document.createElement('script');
+            tsLoad.onload = resolve;
+            tsLoad.onerror = function () { reject(new Error("executing ts-compiler bundle failed")); };
+            tsLoad.src = URL.createObjectURL(new Blob([blob], { type: "application/javascript" }));
+            document.body.appendChild(tsLoad);
+          });
+        });
+    }
+    tsCompilerLoad
+      .then(function () {
+        return fetch(window.PYRET);
+      })
       .then(function (resp) {
         if (!resp.ok) { throw new Error("status " + resp.status); }
         return new Response(resp.body.pipeThrough(new DecompressionStream("gzip"))).blob();

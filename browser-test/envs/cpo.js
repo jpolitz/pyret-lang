@@ -10,6 +10,9 @@ const { findEditorFrame } = require("../shared/find-frame");
 const { resourceScope } = require("../shared/resource-scope");
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:4999";
+// PYRET_COMPILER=ts loads the TypeScript-compiler flavor of the editor
+// (the ?compiler=ts opt-in); default is the stock Pyret-hosted compiler.
+const COMPILER = process.env.PYRET_COMPILER || "pyret";
 
 async function setup() {
   const scope = resourceScope();
@@ -19,7 +22,8 @@ async function setup() {
     const page = await browser.newPage();
     wireBrowserLogs(page);
     page.setDefaultTimeout(60000);
-    await page.goto(BASE_URL + "/editor", { waitUntil: "domcontentloaded", timeout: 120000 });
+    const query = COMPILER === "pyret" ? "" : "?compiler=" + COMPILER;
+    await page.goto(BASE_URL + "/editor" + query, { waitUntil: "domcontentloaded", timeout: 120000 });
     const frame = await findEditorFrame(page);
     return { page, frame, cleanup: scope.closeAll };
   } catch (e) {
@@ -28,4 +32,4 @@ async function setup() {
   }
 }
 
-module.exports = { setup, label: "code.pyret.org /editor (reference)" };
+module.exports = { setup, label: `code.pyret.org /editor (reference, ${COMPILER} compiler)` };

@@ -313,3 +313,310 @@ new-bootstrap: no-diff-standalone $(PHASE0BUILD)
 	cp -r $(PHASEC)/js $(PHASE0)/
 no-diff-standalone: phaseB phaseC
 	diff $(PHASEB)/pyret.jarr $(PHASEC)/pyret.jarr
+
+# ============================================================
+# TypeScript compiler port (strictly additive; see src/ts-compiler/)
+# Builds a TS implementation of the arr/compiler pipeline that
+# accepts the same CLI options and emits the same module format.
+# ============================================================
+
+TS_COMP_DIR      = src/ts-compiler
+TS_COMP_OUT      = build/ts-compiler
+TS_PYRET         = $(NODE) $(TS_COMP_OUT)/pyret.js
+TS_COMP_SRC      = $(wildcard $(TS_COMP_DIR)/src/*.ts) $(wildcard $(TS_COMP_DIR)/src/*/*.ts)
+
+$(TS_COMP_OUT)/js/pyret-parser.js: src/$(JSBASE)/pyret-grammar.bnf src/$(JSBASE)/pyret-tokenizer.js $(wildcard lib/jglr/*.js)
+	@$(call MKDIR,$(TS_COMP_OUT)/js)
+	$(NODE) lib/jglr/parser-generator.js src/$(JSBASE)/pyret-grammar.bnf $(TS_COMP_OUT)/js/pyret-grammar.js "../../../lib/jglr" "jglr/jglr" "pyret-base/js/pyret-parser"
+	$(NODE) $(TS_COMP_OUT)/js/pyret-grammar.js $(TS_COMP_OUT)/js/pyret-parser.js
+
+$(TS_COMP_DIR)/node_modules/.bin/tsc:
+	npm --prefix $(TS_COMP_DIR) install --no-audit --no-fund
+
+$(TS_COMP_OUT)/pyret.js: $(TS_COMP_SRC) $(TS_COMP_DIR)/tsconfig.json $(TS_COMP_DIR)/node_modules/.bin/tsc $(TS_COMP_OUT)/js/pyret-parser.js
+	$(TS_COMP_DIR)/node_modules/.bin/tsc -p $(TS_COMP_DIR)
+
+
+# Runtime/support files for the TS compiler's output dir (mirrors PHASEA_ALL_DEPS)
+TS_COMP_ALL_DEPS := $(patsubst src/%,$(TS_COMP_OUT)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(TS_COMP_OUT)/js/%.js,$(COPY_LIB)) $(TS_COMP_OUT)/bundled-node-compile-deps.js $(TS_COMP_OUT)/bundled-node-deps.js $(TS_COMP_OUT)/config.json
+
+$(TS_COMP_OUT)/js/%.js: src/js/base/%.js
+	@$(call MKDIR,$(TS_COMP_OUT)/js)
+	cp $< $@
+
+$(TS_COMP_OUT)/js/%.js: lib/jglr/%.js
+	@$(call MKDIR,$(TS_COMP_OUT)/js)
+	cp $< $@
+
+$(TS_COMP_OUT)/bundled-node-compile-deps.js: src/js/trove/require-node-compile-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-compile-dependencies.js -o $@
+
+$(TS_COMP_OUT)/bundled-node-deps.js: src/js/trove/require-node-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-dependencies.js -o $@
+
+$(TS_COMP_OUT)/config.json: src/scripts/node_modules-config.json
+	cp $< $@
+
+.PHONY : ts-compiler
+ts-compiler: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
+
+# Precompiled builtins for the TS compiler's --serve mode, mirroring libA:
+# the serve handler resolves lib-compiled/ next to its own pyret.js (see
+# src/ts-compiler/src/server.ts), the way the Pyret-hosted server uses
+# build/phaseA/lib-compiled. Used by the npm CLI's `--backend ts`.
+$(TS_COMP_OUT)/libs.jarr: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
+	$(TS_PYRET) --outfile $(TS_COMP_OUT)/libs.jarr \
+                      --build-runnable src/arr/compiler/libs.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir $(TS_COMP_OUT)/lib-compiled/ \
+                      --deps-file $(TS_COMP_OUT)/bundled-node-compile-deps.js \
+                      -no-check-mode $(EF) \
+                      --require-config src/scripts/standalone-configA.json
+
+.PHONY : ts-libA
+ts-libA : $(TS_COMP_OUT)/libs.jarr
+
+# Unit tests for the TS compiler implementation itself
+.PHONY : ts-unit-test
+ts-unit-test: ts-compiler
+	$(NODE) $(TS_COMP_DIR)/tests/run-unit-tests.js
+
+# Parity: compile and run the same programs with the Pyret-hosted
+# compiler (phaseA) and the TS compiler, with the same options, and
+# compare results.
+.PHONY : ts-parity-test
+ts-parity-test: ts-compiler $(PHASEA)/pyret.jarr
+	bash $(TS_COMP_DIR)/tests/parity-test.sh
+
+# Build and run the main Pyret test suite using the TS compiler
+TS_TEST_BUILD=$(TS_PYRET) \
+	  --builtin-js-dir src/js/trove/ \
+		--builtin-arr-dir src/arr/trove/ \
+		--require-config src/scripts/standalone-configA.json \
+		--compiled-dir tests/ts-compiled/
+
+tests/pyret/main2-ts.jarr: ts-compiler tests/pyret/main2.arr $(TEST_FILES)
+	$(TS_TEST_BUILD) \
+		--outfile tests/pyret/main2-ts.jarr \
+		--build-runnable tests/pyret/main2.arr \
+		-check-all
+
+# The suite's own compiler tests (test-repl.arr and friends) compile
+# through CLI.default-test-context, whose module cache is tests/compiled/.
+# The stock suite warms that cache as a side effect of building main2.jarr
+# there; the ts build keeps its own compile cache in tests/ts-compiled/, so
+# warm tests/compiled/ explicitly (compiled caches are interchangeable
+# between the two compilers). Without this, every repl-test restart
+# recompiles all builtins in-suite -- hours instead of seconds.
+TS_SUITE_CACHE_WARM=tests/compiled/.ts-suite-warm
+$(TS_SUITE_CACHE_WARM): $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
+	@$(call MKDIR,tests/compiled)
+	echo '"warm"' > $(TS_COMP_OUT)/suite-cache-warm.arr
+	$(TS_PYRET) --build-runnable $(TS_COMP_OUT)/suite-cache-warm.arr \
+                      --outfile $(TS_COMP_OUT)/suite-cache-warm.jarr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir tests/compiled/ \
+                      --deps-file $(TS_COMP_OUT)/bundled-node-compile-deps.js \
+                      -no-check-mode -no-display-progress \
+                      --require-config src/scripts/standalone-configA.json
+	touch $(TS_SUITE_CACHE_WARM)
+
+.PHONY : ts-pyret-test
+ts-pyret-test: tests/pyret/main2-ts.jarr $(TS_SUITE_CACHE_WARM)
+	$(NODE) tests/pyret/main2-ts.jarr
+
+.PHONY : ts-test
+ts-test: ts-unit-test ts-parity-test ts-repl-test ts-pyret-test ts-type-check-test ts-regression-test ts-io-test
+
+.PHONY : ts-clean
+ts-clean:
+	$(call RMDIR,$(TS_COMP_OUT))
+	$(call RMDIR,tests/ts-compiled)
+	$(call RM,tests/pyret/main2-ts.jarr)
+	$(call RM,tests/pyret/regression-ts.jarr)
+	$(call RM,tests/type-check/main-ts.jarr)
+	$(call RM,tests/pyret/all-ts.jarr)
+
+# Analogous to the %.jarr rule above, but using the TypeScript compiler:
+# `make path/to/foo.ts.jarr` builds path/to/foo.arr into path/to/foo.ts.jarr.
+# Same flag override applies (EF="..." to replace -no-check-mode).
+%.ts.jarr: $(TS_COMP_OUT)/pyret.js %.arr
+	$(TS_PYRET) --outfile $*.ts.jarr \
+                      --build-runnable $*.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir compiled-ts/ \
+                      $(EXTRA_FLAGS) \
+                      --require-config src/scripts/standalone-configA.json
+
+# TS-compiler analogues of the remaining test entry points
+tests/pyret/regression-ts.jarr: ts-compiler tests/pyret/regression.arr $(REG_TEST_FILES)
+	$(TS_TEST_BUILD) \
+		--build-runnable tests/pyret/regression.arr --outfile tests/pyret/regression-ts.jarr
+
+.PHONY : ts-regression-test
+ts-regression-test: tests/pyret/regression-ts.jarr
+	$(NODE) tests/pyret/regression-ts.jarr
+
+tests/type-check/main-ts.jarr: ts-compiler tests/type-check/main.arr $(TYPE_TEST_FILES)
+	$(TS_TEST_BUILD) \
+		--build-runnable tests/type-check/main.arr --outfile tests/type-check/main-ts.jarr
+
+.PHONY : ts-type-check-test
+ts-type-check-test: ts-compiler tests/type-check/main-ts.jarr
+	$(NODE) tests/type-check/main-ts.jarr
+
+.PHONY : ts-io-test
+ts-io-test: ts-compiler
+	$(NPM_EXEC) jest --detectOpenHandles --forceExit --verbose "src/ts-compiler/tests/io-ts.test.js"
+
+tests/pyret/all-ts.jarr: ts-compiler $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) $(MAIN_TEST_FILES)
+	$(TS_TEST_BUILD) \
+		--build-runnable tests/all.arr \
+    --outfile tests/pyret/all-ts.jarr \
+		-check-all
+
+.PHONY : all-ts-pyret-test
+all-ts-pyret-test: tests/pyret/all-ts.jarr $(TS_SUITE_CACHE_WARM)
+	$(NODE) tests/pyret/all-ts.jarr
+
+.PHONY : ts-repl-test
+# The repl test now drives repl.ts against a REAL in-process load-lib runtime
+# (src/ts-compiler/tests/in-process-host.js), so it needs the warm builtin
+# cache in tests/ts-compiled/ that building main2-ts.jarr produces. Uses the
+# node:test runner because the in-process runtime pulls in requirejs, which
+# can't load inside a jest worker.
+ts-repl-test: ts-compiler tests/pyret/main2-ts.jarr
+	$(NODE) --test src/ts-compiler/tests/repl-test.js
+
+# ============================================================
+# Bootstrap convergence: byte-identical, self-fixpointing compilers
+# from BOTH the Pyret-hosted (.arr) path and the TypeScript path.
+#
+# The existing .arr chain is phase0 -> phaseA -> phaseB -> phaseC, with
+# `no-diff-standalone` asserting phaseB == phaseC (the .arr self-fixpoint).
+#
+# Here we add a TS-seeded chain that mirrors phaseB/phaseC exactly but
+# swaps the driving compiler for build/ts-compiler/pyret.js:
+#   phaseB-ts = ts-compiler compiles src/arr/compiler/pyret.arr
+#   phaseC-ts = phaseB-ts    compiles src/arr/compiler/pyret.arr
+# Each stage uses the SAME CLI options as its .arr counterpart (same
+# --require-config content, same --deps-file content, same flags); only
+# the output/compiled dirs and the driving compiler differ.  Because
+# $PYRET (this-pyret-dir) resolves to the *running* compiler's own dir
+# and only the resolved file *contents* are bundled -- identical across
+# all phase dirs -- any byte difference is a real codegen difference, not
+# path noise.  (The existing phaseB-vs-phaseC diff already relies on this
+# same path-independence.)
+# ============================================================
+
+PHASEBTS         = build/phaseB-ts
+PHASECTS         = build/phaseC-ts
+
+PHASEBTS_ALL_DEPS := $(patsubst src/%,$(PHASEBTS)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(PHASEBTS)/js/%.js,$(COPY_LIB)) $(PHASEBTS)/bundled-node-compile-deps.js $(PHASEBTS)/bundled-node-deps.js $(PHASEBTS)/config.json
+PHASECTS_ALL_DEPS := $(patsubst src/%,$(PHASECTS)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(PHASECTS)/js/%.js,$(COPY_LIB)) $(PHASECTS)/bundled-node-compile-deps.js $(PHASECTS)/bundled-node-deps.js $(PHASECTS)/config.json
+
+PHASEBTS_DIRS    := $(sort $(dir $(PHASEBTS_ALL_DEPS)))
+PHASECTS_DIRS    := $(sort $(dir $(PHASECTS_ALL_DEPS)))
+
+.PHONY : phaseB-ts
+phaseB-ts: $(PHASEBTS)/pyret.jarr
+
+# phaseB-ts: the TS compiler compiles the compiler source.  Mirrors the
+# phaseB rule (own build/phaseB-ts/{config,deps}); driver is $(TS_PYRET).
+$(PHASEBTS)/pyret.jarr: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS) $(PHASEBTS_ALL_DEPS) $(patsubst src/%,$(PHASEBTS)/%,$(PARSERS))
+	$(TS_PYRET) --outfile $(PHASEBTS)/pyret.jarr \
+                      --build-runnable src/arr/compiler/pyret.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir $(PHASEBTS)/compiled/ \
+                      --deps-file $(PHASEBTS)/bundled-node-compile-deps.js \
+                      -no-check-mode $(EF) \
+                      --require-config $(PHASEBTS)/config.json
+
+.PHONY : phaseC-ts
+phaseC-ts: $(PHASECTS)/pyret.jarr
+
+# phaseC-ts: phaseB-ts compiles the compiler source (TS-seeded self-build).
+# Mirrors the phaseC rule (reuses phaseB-ts's config/deps); driver is the
+# freshly built phaseB-ts standalone.
+$(PHASECTS)/pyret.jarr: $(PHASEBTS)/pyret.jarr $(PHASECTS_ALL_DEPS) $(patsubst src/%,$(PHASECTS)/%,$(PARSERS))
+	$(NODE) $(PHASEBTS)/pyret.jarr --outfile $(PHASECTS)/pyret.jarr \
+                      --build-runnable src/arr/compiler/pyret.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir $(PHASECTS)/compiled/ \
+                      --deps-file $(PHASEBTS)/bundled-node-compile-deps.js \
+                      -no-check-mode $(EF) \
+                      --require-config $(PHASEBTS)/config.json
+
+# --- Support-file plumbing for the two TS-seeded phase dirs (mirrors the
+# --- phaseA/B/C plumbing near the top of this Makefile) ---
+$(PHASEBTS_ALL_DEPS): | $(PHASEBTS)
+$(PHASECTS_ALL_DEPS): | $(PHASECTS) phaseB-ts
+
+$(PHASEBTS):
+	@$(call MKDIR,$(PHASEBTS_DIRS))
+$(PHASECTS):
+	@$(call MKDIR,$(PHASECTS_DIRS))
+
+$(PHASEBTS)/$(JS)/%-parser.js: src/$(JSBASE)/%-grammar.bnf src/$(JSBASE)/%-tokenizer.js $(wildcard lib/jglr/*.js)
+	$(NODE) lib/jglr/parser-generator.js src/$(JSBASE)/$*-grammar.bnf $(PHASEBTS)/$(JS)/$*-grammar.js "../../../lib/jglr" "jglr/jglr" "pyret-base/js/$*-parser"
+	$(NODE) $(PHASEBTS)/$(JS)/$*-grammar.js $(PHASEBTS)/$(JS)/$*-parser.js
+$(PHASECTS)/$(JS)/%-parser.js: src/$(JSBASE)/%-grammar.bnf src/$(JSBASE)/%-tokenizer.js $(wildcard lib/jglr/*.js)
+	$(NODE) lib/jglr/parser-generator.js src/$(JSBASE)/$*-grammar.bnf $(PHASECTS)/$(JS)/$*-grammar.js "../../../lib/jglr" "jglr/jglr" "pyret-base/js/$*-parser"
+	$(NODE) $(PHASECTS)/$(JS)/$*-grammar.js $(PHASECTS)/$(JS)/$*-parser.js
+
+$(PHASEBTS)/$(JS)/%.js : src/$(JSBASE)/%.js
+	cp $< $@
+$(PHASEBTS)/$(JS)/%.js : lib/jglr/%.js
+	cp $< $@
+$(PHASECTS)/$(JS)/%.js : src/$(JSBASE)/%.js
+	cp $< $@
+$(PHASECTS)/$(JS)/%.js : lib/jglr/%.js
+	cp $< $@
+
+$(PHASEBTS)/bundled-node-compile-deps.js: src/js/trove/require-node-compile-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-compile-dependencies.js -o $@
+$(PHASEBTS)/bundled-node-deps.js: src/js/trove/require-node-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-dependencies.js -o $@
+$(PHASECTS)/bundled-node-compile-deps.js: src/js/trove/require-node-compile-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-compile-dependencies.js -o $@
+$(PHASECTS)/bundled-node-deps.js: src/js/trove/require-node-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-dependencies.js -o $@
+
+$(PHASEBTS)/config.json: src/scripts/node_modules-config.json
+	cp $< $@
+$(PHASECTS)/config.json: src/scripts/node_modules-config.json
+	cp $< $@
+
+# TS-seeded self-fixpoint: phaseB-ts must equal phaseC-ts.
+.PHONY : no-diff-ts
+no-diff-ts: phaseB-ts phaseC-ts
+	diff $(PHASEBTS)/pyret.jarr $(PHASECTS)/pyret.jarr
+
+# The grand convergence check.  Builds both chains and asserts that all
+# four standalones are one byte-identical fixpoint reached from two
+# independent seeds (the committed phase0 chain and the TS compiler):
+#   * phaseB    == phaseC     (.arr self-fixpoint; == existing no-diff-standalone)
+#   * phaseB-ts == phaseC-ts  (TS  self-fixpoint)
+#   * phaseB    == phaseB-ts  (headline: TS compiler is a byte-exact drop-in)
+# Prints sha256 of all four and a PASS/FAIL line per invariant; exits
+# nonzero if any invariant fails.
+.PHONY : bootstrap-converge
+bootstrap-converge: phaseB phaseC phaseB-ts phaseC-ts
+	@B=$(PHASEB)/pyret.jarr; C=$(PHASEC)/pyret.jarr; \
+	 BT=$(PHASEBTS)/pyret.jarr; CT=$(PHASECTS)/pyret.jarr; \
+	 echo "=== bootstrap convergence ==="; \
+	 sha256sum $$B $$C $$BT $$CT; \
+	 echo "---"; \
+	 fail=0; \
+	 if cmp -s $$B  $$C;  then echo "PASS  .arr fixpoint       phaseB    == phaseC";    else echo "FAIL  .arr fixpoint       phaseB    != phaseC";    fail=1; fi; \
+	 if cmp -s $$BT $$CT; then echo "PASS  ts   fixpoint       phaseB-ts == phaseC-ts"; else echo "FAIL  ts   fixpoint       phaseB-ts != phaseC-ts"; fail=1; fi; \
+	 if cmp -s $$B  $$BT; then echo "PASS  cross (headline)    phaseB    == phaseB-ts"; else echo "FAIL  cross (headline)    phaseB    != phaseB-ts"; fail=1; fi; \
+	 echo "---"; \
+	 if [ $$fail -eq 0 ]; then echo "CONVERGED: all four standalones are byte-identical"; \
+	 else echo "NOT CONVERGED: see FAILs above (diff the named .jarr files to diagnose)"; fi; \
+	 exit $$fail

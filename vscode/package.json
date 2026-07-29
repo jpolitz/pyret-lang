@@ -101,6 +101,20 @@
 						"Load `url-file()` imports from the local filesystem if they exist, otherwise from the URL"
 					],
 					"description": "Controls how `url-file()` imports are resolved"
+				},
+				"pyret-parley.compiler": {
+					"type": "string",
+					"default": "pyret",
+					"scope": "resource",
+					"enum": [
+						"pyret",
+						"ts"
+					],
+					"markdownEnumDescriptions": [
+						"The stock Pyret-hosted compiler (`cpo-main.jarr`)",
+						"The TypeScript port of the compiler (`cpo-main-ts.jarr` + `ts-compiler.js`; requires the extension to be built from a code.pyret.org build that ran `make web-ts`)"
+					],
+					"description": "Which compiler backend the editor webview loads (the same knob as code.pyret.org's ?compiler= flag)"
 				}
 			}
 		}
@@ -111,7 +125,8 @@
 		"compile": "webpack --mode production",
 		"compile-tests": "webpack --config webpack.test.config.js --mode development",
 		"pretest": "npm run compile && npm run compile-tests",
-		"test": "vscode-test-web --browserType=chromium --headless --esm --extensionDevelopmentPath=. --extensionTestsPath=./dist/web/test/index.js ./test/fixtures/spell-checker"
+		"test": "vscode-test-web --browserType=chromium --headless --esm --extensionDevelopmentPath=. --extensionTestsPath=./dist/web/test/index.js ./test/fixtures/spell-checker",
+		"test:ts": "vscode-test-web --browserType=chromium --headless --esm --extensionDevelopmentPath=. --extensionTestsPath=./dist/web/test/index.js ./test/fixtures/spell-checker-ts"
 	},
 	"devDependencies": {
 		"@types/mocha": "^10.0.6",

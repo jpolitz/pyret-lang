@@ -29,3 +29,31 @@ jobs:
     - name: run tests
       run: make all-pyret-test
 
+  bootstrap-converge:
+    name: bootstrap convergence (.arr == TS, byte-identical)
+
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./lang
+
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 24
+
+    - name: install
+      run: make install
+
+    - name: build TypeScript compiler
+      run: make ts-compiler
+
+    # Builds both bootstrap chains and asserts all four standalones are one
+    # byte-identical fixpoint: phaseB==phaseC (.arr self-fixpoint),
+    # phaseB-ts==phaseC-ts (TS self-fixpoint), phaseB==phaseB-ts (the TS
+    # compiler is a byte-exact drop-in for the Pyret-hosted compiler).
+    - name: converge
+      run: make bootstrap-converge
+

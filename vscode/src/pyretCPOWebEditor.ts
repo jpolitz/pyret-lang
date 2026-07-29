@@ -8,6 +8,7 @@ const code = require('../build/web/views/editor.selfcontained.html');
 const WEBVIEW_BASE_URL = '__PYRET_WEBVIEW_BASE_URL__';
 const WEBVIEW_HASH = '__PYRET_WEBVIEW_HASH__';
 const WEBVIEW_URL_FILE_MODE = '__PYRET_WEBVIEW_URL_FILE_MODE__';
+const WEBVIEW_COMPILER = '__PYRET_WEBVIEW_COMPILER__';
 
 // import * as fs from 'fs';
 // import * as path from 'path';
@@ -120,13 +121,19 @@ export function getHtmlForWebview(context: vscode.ExtensionContext, webview: vsc
   const baseURI = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'web', 'build', 'web')).toString();
   const view = showDefinitions === false ? "hideDefinitions=true&headerStyle=hide" : "hideInteractions=true";
   const hashOptions = `#footerStyle=hide&${view}&theme=${theme}`;
+  // The compiler backend is chosen by the pyret-parley.compiler setting --
+  // the same knob as code.pyret.org's ?compiler= flag. The selfcontained
+  // template bakes both flavors' asset paths (relative to the BASE_URL
+  // sentinel); this fill is only the choice between them.
+  const compiler = config.get('compiler') === 'ts' ? 'ts' : 'pyret';
   // Plain string replacement of the build's literal placeholders. split/join,
   // not String.replace, so a `$` in a filled value can't be read as a
   // replacement pattern.
   return (code as string)
     .split(WEBVIEW_BASE_URL).join(baseURI)
     .split(WEBVIEW_HASH).join(hashOptions)
-    .split(WEBVIEW_URL_FILE_MODE).join(String(urlFileMode ?? ""));
+    .split(WEBVIEW_URL_FILE_MODE).join(String(urlFileMode ?? ""))
+    .split(WEBVIEW_COMPILER).join(compiler);
 }
 
 
