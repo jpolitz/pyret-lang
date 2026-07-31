@@ -619,22 +619,27 @@ export function makeProgFlatnessEnv(
 }
 
 export function getDefinedValues(ast: AA.AProg): Map<string, string> {
-  function help(ae: AA.AExpr): AA.AModule {
-    switch (ae.$name) {
-      case 'a-type-let': return help(ae.body);
-      case 'a-let': return help(ae.body);
-      case 'a-arr-let': return help(ae.body);
-      case 'a-var': return help(ae.body);
-      case 'a-seq': return help(ae.e2);
-      case 'a-lettable': {
-        const e = ae.e;
-        if (!AA.isAModule(e)) {
-          raise('Ill-formed ANF ast: ' + torepr(e));
+  // The spine is one chain node per statement; loop instead of recursing
+  // so long programs don't overflow fixed-size stacks (e.g. browsers).
+  function help(aeInit: AA.AExpr): AA.AModule {
+    let ae = aeInit;
+    for (;;) {
+      switch (ae.$name) {
+        case 'a-type-let': ae = ae.body; continue;
+        case 'a-let': ae = ae.body; continue;
+        case 'a-arr-let': ae = ae.body; continue;
+        case 'a-var': ae = ae.body; continue;
+        case 'a-seq': ae = ae.e2; continue;
+        case 'a-lettable': {
+          const e = ae.e;
+          if (!AA.isAModule(e)) {
+            raise('Ill-formed ANF ast: ' + torepr(e));
+          }
+          return e;
         }
-        return e;
+        default:
+          throw new InternalCompilerError('getDefinedValues: unknown expr ' + (ae as any).$name);
       }
-      default:
-        throw new InternalCompilerError('getDefinedValues: unknown expr ' + (ae as any).$name);
     }
   }
 
