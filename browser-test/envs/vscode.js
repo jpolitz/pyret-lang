@@ -40,6 +40,11 @@ async function setup() {
       folderPath: WORKSPACE,
       port: PORT,
       quality: "stable",
+      // Pinned build, not "latest stable": VS Code 1.130.0 (shipped 2026-07-22)
+      // intermittently never resolves the custom editor in dev-extension mode
+      // (see the commit message that added this line for the upstream trail).
+      // This commit is 1.129.1, the last build this suite was green on.
+      commit: "8a7abeba6e03ea3af87bfbce9a1b7e48fed567b8",
       esm: true,
       printServerLog: false,
     });
