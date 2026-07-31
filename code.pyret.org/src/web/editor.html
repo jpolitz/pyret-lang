@@ -482,6 +482,44 @@ function handleGoogLoad() {
     handleClientLoad(apiKey, publicOnly);
   }
 }
+
+/*
+ * TEST-ONLY: read public Google Sheets with nobody signed in.
+ *
+ * `load-spreadsheet` normally needs an OAuth session, so an unauthenticated
+ * browser cannot open even a world-readable sheet -- which is most of the
+ * Bootstrap curriculum. With `?sheets=public`, sheetsAPI is instead built over
+ * a server-side proxy for Google's public export endpoints
+ * (src/web/js/google-apis/sheets-public.js, /test-only/gsheet/* in
+ * src/server.js). Only the transport changes; the type inference and table
+ * building underneath are the same code as a signed-in run.
+ *
+ * Two locks, both needed: PUBLIC_SHEETS_PROXY is rendered "true" only by a
+ * development server, so the query parameter does nothing on a deployed
+ * instance, and the proxy routes it talks to do not exist there either.
+ *
+ * The script is fetched lazily so a normal editor load never pays for it, and
+ * sheetsAPI is a promise that waits for it -- otherwise a program that ran
+ * before the script landed would race it.
+ */
+if (("{{ PUBLIC_SHEETS_PROXY }}" === "true") &&
+    /[?&#]sheets=public(&|$)/.test(window.location.search + window.location.hash)) {
+  window.PUBLIC_SHEETS = true;
+  window.sheetsAPI = new Promise(function(resolve, reject) {
+    var s = document.createElement("script");
+    s.src = "{{ &BASE_URL }}/js/google-apis/sheets-public.js";
+    s.onload = function() {
+      try {
+        createSheetsAPI(true, makePublicSpreadsheetsClient("{{ &BASE_URL }}")).then(resolve, reject);
+      } catch (e) { reject(e); }
+    };
+    s.onerror = function() {
+      reject(new Error("?sheets=public: could not load js/google-apis/sheets-public.js"));
+    };
+    document.head.appendChild(s);
+  });
+  console.log("?sheets=public: Google Sheets will be read through the test-only public proxy");
+}
 </script>
 <!-- Google API Loader (For picker) -->
 <!-- GAPI Client -->

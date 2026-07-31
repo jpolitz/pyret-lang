@@ -6,6 +6,8 @@
 #   make embed SUITES=url-imports
 #   make cpo   SUITES=tables,url-imports GREP='url-file'
 #
+#   make curriculum     Bootstrap's starter files (curriculum/); needs network
+#
 # Freshness of the big builds is delegated to the real Makefiles in lang/ and
 # code.pyret.org/, which are already incremental -- this file only encodes
 # WHICH prerequisites each environment needs, and starts/stops the CPO server.
@@ -150,6 +152,27 @@ all-envs:
 	@rc=0; for e in cpo embed embed-static vscode vscode-ovsx; do \
 	  echo "=== $$e ==="; $(MAKE) --no-print-directory $$e || rc=1; done; \
 	echo "done (rc=$$rc)"; exit $$rc
+
+# ------------------------------------------------------- the curriculum suite
+
+# Bootstrap's starter files (curriculum/). Same prerequisites as `cpo`, but its
+# inputs come from raw.githubusercontent.com rather than code.pyret.org/test,
+# so it needs outbound network. Not part of all-envs: it takes ~45 minutes and
+# it fails when BOOTSTRAP's repos change, which is a different signal from the
+# rest of this directory.
+#
+#   make curriculum
+#   make curriculum CURRICULUM_PARTS=links,libraries
+#   make curriculum GREP='^data-science/'
+CURRICULUM_PARTS ?= all
+CURRICULUM_FLAGS := --parts=$(CURRICULUM_PARTS)
+ifneq ($(strip $(GREP)),)
+CURRICULUM_FLAGS += --grep=$(GREP)
+endif
+
+.PHONY: curriculum
+curriculum: server deps
+	cd $(HERE) && BASE_URL=$(BASE_URL) node curriculum/run.js --env=cpo $(CURRICULUM_FLAGS)
 
 clean-stamps:
 	rm -f $(HERE)/.chromium.stamp

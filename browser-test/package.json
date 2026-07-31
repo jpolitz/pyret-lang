@@ -7,7 +7,8 @@
     "cpo": "node run.js --env=cpo",
     "embed": "node run.js --env=embed",
     "vscode": "node run.js --env=vscode",
-    "all": "./run-all.sh"
+    "all": "./run-all.sh",
+    "curriculum": "node curriculum/run.js --env=cpo"
   },
   "//": "Filter with --grep (regex over suite + test names), e.g. `npm run embed -- --grep tables`.",
   "devDependencies": {

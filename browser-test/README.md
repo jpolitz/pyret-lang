@@ -157,8 +157,45 @@ shared/
   find-frame.js         locate the editor frame (the one with #runButton)
   browser.js            launch Chromium (system Chrome or Playwright's bundled one)
 vscode/fixture-workspace/test.arr   the .arr the custom editor opens
+curriculum/             a second suite over Bootstrap's starter files (see below)
 results/                captured run logs
 ```
+
+## `curriculum/` — the Bootstrap starter files
+
+A sibling suite that reuses this harness (the same env adapters, the same
+`window.PA`, the same assert/ProceduralError split) but swaps the *inputs*:
+instead of the programs in `code.pyret.org/test/*.js` it runs the ~158 `.arr`
+files that Bootstrap's lessons hand to students, fetched from
+`bootstrapworld/starter-files` at the term tag. It exists to answer "would a
+student's starter file still work?" when Pyret changes — the entry point loads
+over `#shareurl`, its `use context url-file(...)` library resolves and computes
+the right answers, reactors and charts draw, the Google Sheets behind the data
+science lessons load and produce the right columns and rows, and the
+deliberately-broken teaching files still break in the way the lesson is about.
+
+Reading those sheets needs no credentials: a development-only server proxy
+fetches Google's public export endpoints (the obstacle is CORS and OAuth, not
+permission), and the editor's `?sheets=public` points the client at it. See
+`curriculum/README.md` -> "Google Sheets".
+
+```bash
+make curriculum                    # starts the CPO server if it isn't up
+```
+
+It runs ~200 tests in about 45 minutes and depends on network access to
+github.com, so it is **not** in `all-envs` or in `browser-test.yml`; CI runs it
+from its own workflow (`.github/workflows/curriculum-test.yml`) on pushes to the
+long-lived branches, weekly, and on demand.
+
+`--compiler=pyret` is green (207/207); `--compiler=ts` is **known-red** — 24/27
+of its `libraries` tests pass and the other three fail non-deterministically
+with the context's names unbound in the interactions window. That looks like a
+TS-compiler bug, not a harness one; see "Compiler flavors" in the curriculum
+README.
+
+See [`curriculum/README.md`](curriculum/README.md) for what it does and does not
+prove, what the first run found, and how to re-pin it to a new term.
 
 ## Running
 

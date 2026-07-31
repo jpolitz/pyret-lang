@@ -1,0 +1,98 @@
+name: curriculum (Bootstrap starter files)
+
+# Runs browser-test/curriculum/ -- the ~158 .arr files Bootstrap's lessons hand
+# to students -- against a freshly built code.pyret.org, so a Pyret change that
+# would break a classroom shows up here.
+#
+# Deliberately NOT part of browser-test.yml's matrix:
+#
+#   * it takes ~40 minutes (one editor, 158 programs, each importing several
+#     thousand lines of Bootstrap library over the network);
+#   * its inputs come from github.com/bootstrapworld, so it can fail because
+#     BOOTSTRAP changed something -- a different signal from "Pyret broke", and
+#     one that should not block an unrelated pull request;
+#   * it reads the curriculum's public Google Sheets through the dev server's
+#     test-only proxy (see browser-test/curriculum/README.md), so it needs
+#     outbound access to docs.google.com as well as to github.com. No
+#     credentials: the sheets are public.
+#
+# So: on pushes to the long-lived branches, on a weekly schedule (which is what
+# catches curriculum-side drift), and on demand.
+
+on:
+  push:
+    branches: [drydock, mainmast]
+    tags-ignore:
+      - automated*
+  schedule:
+    # Mondays, 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      parts:
+        description: 'which groups to run (links,shareurl,libraries,entry-points)'
+        default: 'all'
+      grep:
+        description: 'regex over test names (test names are starter-file paths)'
+        default: ''
+
+jobs:
+  curriculum:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Build code.pyret.org web assets
+        working-directory: ./code.pyret.org
+        run: |
+          ln -s ../lang pyret
+          cd ../lang && npm install && make phaseA-deps
+          cd ../code.pyret.org
+          npm ci --ignore-scripts
+          npm run build
+
+      - name: Install browser-test deps + Chromium
+        working-directory: ./browser-test
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+
+      - name: Start CPO server
+        working-directory: ./code.pyret.org
+        env:
+          BASE_URL: http://localhost:4999
+          PORT: '4999'
+          PYRET: http://localhost:4999/js/cpo-main.jarr
+          POSTMESSAGE_ORIGIN: '*'
+          # Load-bearing: the test-only Google Sheets proxy that lets the ~76
+          # spreadsheet-backed starter files read their data lives inside
+          # `if(config.development)` in src/server.js.
+          NODE_ENV: development
+          SESSION_SECRET: not-so-secret
+          REDISCLOUD_URL: ''
+          URL_FILE_MODE: all-remote
+          IMAGE_PROXY_BYPASS: 'true'
+          SHARED_FETCH_SERVER: https://code.pyret.org
+          CURRENT_PYRET_RELEASE: ''
+        run: |
+          node src/run.js &
+          for _ in $(seq 1 30); do curl -fs -o /dev/null http://localhost:4999/editor && break; sleep 1; done
+          curl -f http://localhost:4999/editor
+
+      - name: Run the curriculum suite
+        working-directory: ./browser-test
+        env:
+          BASE_URL: http://localhost:4999
+          # The starter-files tree listing goes through the GitHub API, which is
+          # rate limited to 60/hour per IP when unauthenticated -- shared with
+          # every other job on this runner's egress. The workflow token lifts
+          # that to 1000/hour and needs no extra permissions.
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node curriculum/run.js --env=cpo \
+            --parts='${{ github.event.inputs.parts || 'all' }}' \
+            ${{ github.event.inputs.grep && format('--grep={0}', github.event.inputs.grep) || '' }}
