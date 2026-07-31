@@ -230,15 +230,22 @@
     }
 
     /*
-      A cancelled run is not a program error, so it gets no error box: reject
-      the run promise instead. repl-ui.js hangs afterRun off that promise's
-      .fin(), which a rejection reaches -- so the Run button, the "Running..."
-      indicator and the `running` flag are all restored, which is what keeps a
-      stopped run from wedging the editor. Anything else is a real failure and
-      is displayed as before.
+      A cancelled run is a user break that happened to land before the program
+      became a Pyret computation, so it is reported as one: the same
+      ffi.userBreak the runtime raises when it kills a thread, which renders as
+      "Program stopped by user". Otherwise pressing Stop would mean two
+      different things to the student depending on which millisecond it landed
+      in -- that message during execution, and a silently empty output area
+      during the module load.
+
+      Resolving with that result rather than rejecting also keeps the editor
+      out of its wedged state: repl-ui.js hangs afterRun off .fin(), which runs
+      either way, so the Run button, the "Running..." indicator and the
+      `running` flag are restored regardless. Anything else is a real failure
+      and is displayed as before.
     */
-    function rejectOrShow(ret, err) {
-      if (err instanceof T.repl.Cancelled) { ret.reject(err); }
+    function reportRunEnd(ret, err) {
+      if (err instanceof T.repl.Cancelled) { tsLib.resolveWithUserBreak(ret); }
       else { tsLib.resolveWithError(ret, err); }
     }
 
@@ -257,7 +264,7 @@
             T.compileStructs.standardGlobals);
           tsRepl.restartInteractions(defsLocator, opts, cancel)
             .then(function(either) { tsLib.resolveWithEither(ret, either); })
-            .catch(function(err) { rejectOrShow(ret, err); });
+            .catch(function(err) { reportRunEnd(ret, err); });
         }, 0);
         return ret.promise;
       },
@@ -268,7 +275,7 @@
           var locator = tsRepl.makeInteractionLocator(function() { return str; });
           tsRepl.runInteraction(locator, cancel)
             .then(function(either) { tsLib.resolveWithEither(ret, either); })
-            .catch(function(err) { rejectOrShow(ret, err); });
+            .catch(function(err) { reportRunEnd(ret, err); });
         }, 0);
         return ret.promise;
       },
