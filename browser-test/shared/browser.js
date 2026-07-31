@@ -40,9 +40,28 @@ function wireBrowserLogs(page) {
   });
 }
 
+/*
+ * SHOW_BROWSER opens a real window instead of running headless, so a run can be
+ * watched and poked at. Same name as code.pyret.org/test-util/util.js's knob,
+ * so it is one thing to remember across both suites.
+ *
+ * SLOWMO_MS delays every Playwright action by that many ms. Worth pairing with
+ * SHOW_BROWSER: the assertions drive the editor far faster than a person can
+ * follow, and at 0 the interesting moment is over before you have seen it.
+ *
+ * For stepping rather than watching, Playwright brings two things Selenium did
+ * not, and neither needs a change here: PWDEBUG=1 opens the Inspector and
+ * pauses before the first action, and an `await page.pause()` dropped into a
+ * test halts THERE with the page live and the devtools console usable -- which
+ * beats watching a whole suite go by to reach one state.
+ *
+ * Headless stays the default: CI has no display, and a run that silently waits
+ * on a window nobody can see is worse than one that just runs.
+ */
 async function launchChromium() {
   const opts = {
-    headless: true,
+    headless: !process.env.SHOW_BROWSER,
+    slowMo: Number(process.env.SLOWMO_MS) || 0,
     args: ["--no-sandbox", "--disable-dev-shm-usage"],
   };
   if (process.env.GOOGLE_CHROME_BINARY) {

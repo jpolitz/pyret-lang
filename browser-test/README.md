@@ -250,6 +250,26 @@ Other flags: `--suites=check-blocks,errors,...` (default `all`),
 `--reporter=spec|tap|dot|junit` (default `spec`). Or skip the wrapper entirely:
 `PYRET_ENV=embed node --test --test-name-pattern=tables tests/suite.test.js`.
 
+### Watching a run (local dev)
+
+`SHOW_BROWSER` opens a real window instead of running headless — the same knob
+name `code.pyret.org`'s mocha suite uses. Pair it with `SLOWMO_MS`, because the
+assertions drive the editor much faster than a person can follow:
+
+```bash
+SHOW_BROWSER=true SLOWMO_MS=250 node run.js --env=cpo --grep 'is-not'
+```
+
+Both work in every env, since all five go through the same launcher
+(`shared/browser.js`). Needs a display; on a headless box, prefix with
+`xvfb-run -a` (which is a way to run it, not to watch it).
+
+To *step* rather than watch, Playwright has two things that need no flag:
+`PWDEBUG=1` opens the Inspector and pauses before the first action, and an
+`await page.pause()` dropped into a test halts there with the page live and the
+devtools console usable — usually better than watching a whole suite go by to
+reach one state.
+
 ## Results
 
 Captured run logs land in `results/` (`run-all.sh` writes one per
