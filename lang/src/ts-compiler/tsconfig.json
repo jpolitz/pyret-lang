@@ -3,7 +3,7 @@
     "target": "ES2020",
     "module": "commonjs",
     "moduleResolution": "node",
-    "lib": ["ES2020"],
+    "lib": ["ES2024"],
     "outDir": "../../build/ts-compiler",
     "rootDir": "src",
     "strict": true,

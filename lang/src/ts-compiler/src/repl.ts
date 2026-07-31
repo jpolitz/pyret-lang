@@ -96,34 +96,6 @@ async function runProgramWith<Realm, Result>(
   }
 }
 
-/*
-  Cancellation for an in-flight run.
-
-  A run is three phases (see runInteraction): an awaited module chase, a
-  synchronous compile, and execution. Only the last is a Pyret computation, so
-  a host's stop button -- which breaks the Pyret runtime -- can reach only
-  that one. During the first two the runtime is running nothing, so a break
-  has nothing to interrupt and the run carries on to completion: the program
-  compiles and runs after the user asked it to stop.
-
-  This is what a host holds instead, so it can say "stop" to the parts that
-  are not Pyret computations. It deliberately does NOT abort the fetches
-  underway: an abandoned module chase writes nothing shared
-  (compileWorklistKnownModules only reads currentModules, and its bookkeeping
-  is local), so letting it run off is harmless, and it keeps this orthogonal
-  to however the host does IO. What it guarantees is narrower and is the part
-  that matters: once cancelled, the run does not proceed to compile or
-  execute.
-
-  Two faces, because the phases need different things. `promise` rejects, for
-  racing across an await. `isCancelled()` is for the checkpoint after the
-  synchronous compile, which cannot observe a promise -- a cancel arriving
-  during it is not delivered until it ends.
-
-  Rejecting rather than resolving a sentinel is also what lets a host's UI
-  recover: CPO hangs its "the run is over" handler off the run promise's
-  finally, which a rejection reaches and a never-settling promise does not.
-*/
 export class Cancelled extends Error {
   constructor() {
     super('The run was cancelled');
@@ -131,19 +103,22 @@ export class Cancelled extends Error {
   }
 }
 
+// cancel() rejects the promise *and* sets isCancelled()
+// The promise half is used to race([]) against other async work,
+// while the isCancelled() half is used for synchronous checks for early
+// returns.
 export interface Cancellation {
-  // Rejects with Cancelled once cancel() is called; never resolves.
+  cancel(): void;
   promise: Promise<never>;
   isCancelled(): boolean;
-  cancel(): void;
 }
 
 export function makeCancellation(): Cancellation {
   let cancelled = false;
-  let doReject: (e: any) => void = () => undefined;
-  const promise = new Promise<never>((_resolve, reject) => { doReject = reject; });
-  // A run that is never cancelled leaves this promise rejected-but-unobserved
-  // if we do not claim it here, which surfaces as an unhandled rejection.
+  const { promise, reject } = Promise.withResolvers<never>();
+  // *Always* catch these. They can be rejected from many places, sometimes
+  // before relevant places can install handlers, or after relevant places have
+  // cleared them. These should never bubble up as "UnhandledRejections"
   promise.catch(() => undefined);
   return {
     promise,
@@ -151,7 +126,7 @@ export function makeCancellation(): Cancellation {
     cancel: () => {
       if (cancelled) { return; }
       cancelled = true;
-      doReject(new Cancelled());
+      reject(new Cancelled());
     },
   };
 }
@@ -207,41 +182,24 @@ export function makeRepl<A2, Realm = any, Result = any>(
     locator: CL.Locator,
     cancel: Cancellation = NEVER_CANCELLED
   ): Promise<Either<any[], Result>> {
-    // Phase 1, awaited: the module chase. A cancel here is delivered
-    // immediately -- the event loop is free -- and the race rejects before any
-    // of the work below happens. The chase itself is left to finish or not.
+    // Cancellation here kills this function's evaluation, but the
+    // compileWorklist continues to completion regardless.
     const worklist = await Promise.race([
       cancel.promise,
       CL.compileWorklistKnownModules(finder, locator, compileContext, currentModules as any),
     ]);
-    // Phase 2, synchronous: the compile. Nothing can be delivered while it
-    // runs, so a cancel that arrives during it is only observable once it ends
-    // -- hence a checkpoint rather than a race. It has to come BEFORE
-    // runProgramWith is called: calling it starts execution, so racing alone
-    // would run the program and only then notice the cancel.
+
     const compiled = CL.compileProgramWith(worklist, currentModules, currentCompileOptions);
+    // It's important to guard synchronously here so we don't even *launch* a
+    // run below if we cancelled during compile
     if (cancel.isCancelled()) { throw new Cancelled(); }
     for (const [k, v] of compiled.modules) {
       currentModules.set(k, v);
     }
-    // Phase 3: execution. Deliberately NOT raced against the cancellation.
-    //
-    // This one IS a Pyret computation, so a host's break reaches it directly,
-    // and what comes back is a break result the host can report ("Program
-    // stopped by user"). Racing here would take that away: cancel.promise
-    // rejects on a microtask, while the break has to unwind the trampoline
-    // before this promise settles, so the cancellation would win every time
-    // and the run would end as a silent cancellation instead of a reported
-    // break. No ordering fixes that -- race settles on whichever is first in
-    // TIME, and argument order only breaks ties between promises that are
-    // already settled.
-    //
-    // Nothing is lost by leaving it out: a broken run comes back as a
-    // non-success result, so isSuccessResult below is false and updateEnv does
-    // not adopt it. A break that arrives too late to stop the program means
-    // the program finished, and adopting that result is right.
-    const result = await runProgramWith(
-      executor, worklist, compiled, currentRealm, currentCompileOptions);
+    // At this point, we trust runProgramWith to run synchronously right up
+    // until a Pyret stack is installed. breakAll() (e.g. stop button) is the
+    // stop mechanism from here on, not the `cancel`
+    const result = await runProgramWith(executor, worklist, compiled, currentRealm, currentCompileOptions);
     if (result.$name === 'right') {
       if (executor.isSuccessResult(result.v)) {
         updateEnv(result.v, locator, compiled.loadables[compiled.loadables.length - 1]);

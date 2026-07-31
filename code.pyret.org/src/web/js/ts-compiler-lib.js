@@ -483,25 +483,23 @@
       return {
         run: function(realm, programJsSource, _options) {
           return new Promise(function(resolve, reject) {
-            setTimeout(function() {
-              runtime.runThunk(function() {
-                return runProgramPy.app(
-                  pyRuntime,
-                  realm,
-                  programJsSource,
-                  runtime.makeObject({ "checks": "main" }),
-                  runtime.ffi.makeList([]));
-              }, function(result) {
-                if(runtime.isSuccessResult(result)) {
-                  resolve(result.result);
-                }
-                else {
-                  // An error escaping run-program itself (not the
-                  // program): surface the whole FailureResult.
-                  reject(result);
-                }
-              });
-            }, 0);
+            runtime.runThunk(function() {
+              return runProgramPy.app(
+                pyRuntime,
+                realm,
+                programJsSource,
+                runtime.makeObject({ "checks": "main" }),
+                runtime.ffi.makeList([]));
+            }, function(result) {
+              if(runtime.isSuccessResult(result)) {
+                resolve(result.result);
+              }
+              else {
+                // An error escaping run-program itself (not the
+                // program): surface the whole FailureResult.
+                reject(result);
+              }
+            });
           });
         },
         isSuccessResult: function(moduleResult) {
