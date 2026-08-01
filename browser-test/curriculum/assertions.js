@@ -114,12 +114,22 @@ async function installDefinitions(page, code, what) {
 async function runFile(page, code, {
   what, timeout = 120000, startTimeout = 30000, paintMs = 8000,
 } = {}) {
+  // Tag the console relay with the file boundary. This goes THROUGH the page
+  // rather than to node's stdout directly so it rides the same channel as the
+  // relayed browser events (shared/browser.js wireBrowserLogs) and keeps their
+  // relative order: console events arrive asynchronously, so a node-side log
+  // can sort before browser lines that actually preceded it. Without this
+  // marker no relayed line is attributable to a file, which is exactly how an
+  // ERR_ABORTED belonging to a passing file got read as the failing one's.
+  await page.eval("console.log(" + JSON.stringify("__FILE__ " + what) + ")");
   await installDefinitions(page, code, what);
   await page.eval("window.CUR.closeInteractiveWindows()");
   await page.eval("window.PA.clearOutput()");
   await page.eval("window.CUR.markRun()");
+  await page.eval("window.CUR.startLifecycleLog()");
   const t0 = Date.now();
   await page.eval("window.PA.run()");
+  await page.eval("window.CUR.markLifecycle('run-clicked')");
   try {
     await page.waitFor("window.CUR.runStarted()", startTimeout);
   } catch (e) {
@@ -133,6 +143,8 @@ async function runFile(page, code, {
   while (Date.now() - t0 < timeout) {
     await new Promise((r) => setTimeout(r, 500));
     st = await page.eval("window.CUR.runState()");
+    await page.eval("window.CUR.markLifecycle('poll done=" +
+      (st.done ? "T" : "F") + " anim=" + (st.animating ? "T" : "F") + "')");
     if (st.animating) {
       // The window opens before the first frame is painted, so don't call it
       // "empty" until it has had a few seconds to paint one.
@@ -149,6 +161,24 @@ async function runFile(page, code, {
   // "runs" nor "interactive" would be an honest answer.
   st.timedOut = !st.animating && !st.done;
 
+  // Record what the output area actually says, for EVERY file rather than only
+  // failing ones -- passing files are the control group, and without them a
+  // signature that shows up in both looks like a cause.
+  //
+  // Read here, before the `window.CUR.stop()` below: that call plus
+  // closeInteractiveWindows() is the last thing this function does, and after
+  // it the finished run's output is gone.
+  //
+  // Both strings render into #output rather than the console: a cancelled run
+  // is reported as ffi.userBreak ("Program stopped by user"), and runtime.js's
+  // "Internal: run called while already running" is delivered AS the run's
+  // result. Grepping the console relay for either finds nothing whether or not
+  // it happened.
+  const outText = await page.eval(
+    "(function(){var o=document.getElementById('output');return o?o.innerText:'';})()");
+  st.stoppedByUser = outText.indexOf("stopped by user") !== -1;
+  st.internalRunError = outText.indexOf("while already running") !== -1;
+
   // Leave the editor usable for the next file no matter which way this one
   // ended: stop a running program, then dismiss any interactive window.
   //
@@ -159,7 +189,45 @@ async function runFile(page, code, {
   // button alone goes quiet earlier, and a Run clicked in that window is
   // silently dropped by `if(running) { return; }` -- which showed up as the
   // NEXT file reporting that it never started.
-  await page.eval("window.CUR.stop()");
+  // CUR.stop() reports whether it actually clicked (the button was enabled).
+  // Record that instead of discarding it: runState().done requires the break
+  // button to be DISABLED, and afterRun (the only post-run disabler) runs off
+  // doneRendering.fin(...), so on paper a completed run can never be clicked
+  // here. A stopClicked=true on a file whose defs run read done is therefore
+  // direct evidence of a window the lifecycle says should not exist.
+  // An animating run keeps #breakButton as its only off switch, but the
+  // button only arms at RUNNING_SPINWHEEL_DELAY_MS (1s) -- a mouse user
+  // cannot stop a younger animation either. The harness used to get away
+  // with stopping at ~500ms because stale spinner timers from earlier
+  // lifecycles armed the button early; with lifecycle-generation checks in
+  // repl-ui that accidental arming is gone, and stopping "too early" is a
+  // silent no-op that leaves the world running and wedges every later file.
+  // So: for animating runs, wait for the button to arm before pressing it.
+  if (st.animating) {
+    try {
+      await page.waitFor(
+        "(function(){var b=document.getElementById('breakButton');return !!(b && !b.disabled);})()",
+        3000);
+    } catch (e) {
+      throw new ProceduralError(
+        "the break button never armed for the animating run of " + what +
+        "; cannot stop it, so later files cannot be trusted");
+    }
+  }
+  await page.eval("window.CUR.markLifecycle('pre-stop')");
+  st.stopClicked = await page.eval("window.CUR.stop()");
+  await page.eval("window.CUR.markLifecycle('post-stop clicked=" + (st.stopClicked ? "T" : "F") + "')");
+  console.log("__STATE__ " + JSON.stringify({
+    what: what,
+    done: st.done, timedOut: st.timedOut, animating: st.animating,
+    errorCount: st.errorCount, elapsedMs: st.elapsedMs,
+    stoppedByUser: st.stoppedByUser, internalRunError: st.internalRunError,
+    stopClicked: st.stopClicked,
+  }));
+  console.log("__TIMELINE__ " + JSON.stringify({
+    what: what,
+    events: await page.eval("window.CUR.drainLifecycleLog()"),
+  }));
   await page.eval("window.CUR.closeInteractiveWindows()");
   let idle = false;
   for (let i = 0; i < 240; i++) {
@@ -302,7 +370,13 @@ function assertOutcome(st, expected, what) {
  */
 async function evalAtRepl(page, code, timeout = 20000) {
   await inject(page);
-  await page.waitFor("window.PA.replPromptVisible()", 15000);
+  // Type only into an editor that is BOTH showing the prompt and not
+  // claiming a run in flight -- typing into a running editor is silently
+  // dropped by repl-ui's `if(running)` guard, which reads as "no output for
+  // 20s" rather than as the sequencing bug it is.
+  await page.waitFor(
+    "window.PA.replPromptVisible() && " +
+    "document.body.getAttribute('data-pyret-running') !== 'true'", 15000);
   const before = await page.eval("window.PA.outputChildCount()");
   await page.eval("window.PA.evalAtRepl(" + JSON.stringify(code) + ")");
   await page.waitFor("window.PA.outputChildCount() > " + before, timeout);
@@ -333,14 +407,45 @@ async function evalAtRepl(page, code, timeout = 20000) {
  * is ("a solid red rectangle of width 300 and height 200 ..."), and images are
  * most of what these files produce.
  */
+// Editor-lifecycle state readable from the DOM, for correlating probe
+// failures with leftover run state. activeThreads itself is closure-private in
+// runtime.js and the runtime object never reaches window, so these are the
+// observable shadows of debris: a break button that is still enabled, a hidden
+// prompt, or a dialog that survived closeInteractiveWindows.
+const SNAPSHOT_JS =
+  "(function(){var o=document.getElementById('output');var ch=o?o.children:[];" +
+  "var b=document.getElementById('breakButton');" +
+  "var pc=document.querySelector('.prompt-container');" +
+  "var t=o?o.innerText:'';return {" +
+  "children: ch.length," +
+  "firstClass: ch.length?ch[0].className:null," +
+  "lastClass: ch.length?ch[ch.length-1].className:null," +
+  "text: t.slice(0,300)," +
+  "stoppedByUser: t.indexOf('stopped by user')!==-1," +
+  "internalRunError: t.indexOf('while already running')!==-1," +
+  "breakEnabled: !!(b&&!b.disabled)," +
+  "promptVisible: !pc||pc.offsetParent!==null," +
+  "dialogs: document.querySelectorAll('.ui-dialog').length};})()";
+
 async function runProbes(page, probes, what) {
+  console.log("__PROBE_ENTRY__ " + JSON.stringify(
+    Object.assign({ what: what }, await page.eval(SNAPSHOT_JS))));
   for (const [expr, expected] of probes) {
     const { cls, res } = await evalAtRepl(page, expr);
-    assert.ok(
-      cls && (cls.indexOf("echo-container") !== -1 || cls.indexOf("trace") !== -1),
-      what + ": the interactions window errored on " + JSON.stringify(expr) +
-        " -- last output child was " + JSON.stringify(cls) + ", rendered " +
-        JSON.stringify(res));
+    const probeOk =
+      cls && (cls.indexOf("echo-container") !== -1 || cls.indexOf("trace") !== -1);
+    if (!probeOk) {
+      // Capture #output at the moment of failure -- the phase the pre-stop
+      // capture in runFile is structurally too early to see. This is where a
+      // "Program stopped by user" from a broken interaction would render.
+      const snap = await page.eval(SNAPSHOT_JS);
+      console.log("__PROBE_FAIL__ " + JSON.stringify({ what: what, expr: expr, cls: cls, snap: snap }));
+      assert.ok(false,
+        what + ": the interactions window errored on " + JSON.stringify(expr) +
+          " -- last output child was " + JSON.stringify(cls) + ", rendered " +
+          JSON.stringify(res) + "\n--- #output at failure ---\n" +
+          JSON.stringify(snap, null, 2));
+    }
     if (expected === null || expected === undefined) continue;
     const hay = [(res && res.text) || "", (res && res.label) || ""].join(" || ");
     assert.ok(

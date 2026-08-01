@@ -44,6 +44,15 @@
     var outputPendingHidden = true;
     var canShowRunningIndicator = false;
     var running = false;
+    // Identity for the current run lifecycle. Bumped at every run start
+    // (runMainCode / runner) and on Break. Deferred work captured under an
+    // older generation -- the spinner timer, a late afterRun -- must check it
+    // before touching shared UI state: canShowRunningIndicator alone cannot
+    // distinguish "my run is still going" from "a NEWER run is going", which
+    // is exactly the case where a stale 1s timer re-enables the break button
+    // mid-run and a poller reading prompt+button state sees a finished run
+    // that is not finished.
+    var runGeneration = 0;
 
     var RUNNING_SPINWHEEL_DELAY_MS = 1000;
 
@@ -313,6 +322,10 @@
         addClass('repl-prompt-sign');
       prompt.append(promptSign);
       function showPrompt() {
+        // TAP(joe/claude, debugging): who shows the prompt, when, from where.
+        console.debug("[lifecycle] showPrompt gen=" + runGeneration +
+          " t=" + performance.now().toFixed(1) + " from: " +
+          String(new Error().stack).split("\n").slice(1, 3).join(" <- "));
         promptContainer.hide();
         promptContainer.fadeIn(100);
         CM.setValue("");
@@ -658,9 +671,25 @@
         return true;
       }
       function afterRun(cm) {
+        // The closure is created at run-chain setup, so this captures the
+        // generation of the run it belongs to.
+        var gen = runGeneration;
         return function() {
+          if (gen !== runGeneration) {
+            // A newer lifecycle owns the UI (a new run started, or Break
+            // bumped the generation). Restoring buttons/prompt here would
+            // repaint state that is no longer this run's to paint.
+            console.debug("[lifecycle] afterRun SKIPPED stale gen=" + gen +
+              " current=" + runGeneration + " t=" + performance.now().toFixed(1));
+            return;
+          }
+          console.debug("[lifecycle] afterRun gen=" + gen +
+            " t=" + performance.now().toFixed(1));
           //speakHistory(1);
           running = false;
+          // Release the run's claim exactly where `running` is cleared, so
+          // the attribute is a faithful mirror of the internal flag.
+          document.body.removeAttribute("data-pyret-running");
           outputPending.remove();
           outputPendingHidden = true;
 
@@ -684,9 +713,24 @@
         }
       }
       function setWhileRunning() {
+        var gen = runGeneration;
         runContents = options.runButton.contents();
         canShowRunningIndicator = true;
+        console.debug("[lifecycle] spinner scheduled gen=" + gen +
+          " t=" + performance.now().toFixed(1));
         setTimeout(function() {
+         if(canShowRunningIndicator && gen !== runGeneration) {
+           // Stale timer: scheduled by an earlier lifecycle, firing while a
+           // NEWER run has canShowRunningIndicator set. Without the
+           // generation check this is the timer that enables the break
+           // button mid-run for a run that never asked for it yet.
+           console.debug("[lifecycle] spinner fire BLOCKED stale gen=" + gen +
+             " current=" + runGeneration + " t=" + performance.now().toFixed(1));
+           return;
+         }
+         console.debug("[lifecycle] spinner fire gen=" + gen +
+           " canShow=" + canShowRunningIndicator +
+           " t=" + performance.now().toFixed(1));
          if(canShowRunningIndicator) {
             options.runButton.attr("disabled", true);
             options.runDropdown.attr('disabled', true);
@@ -863,10 +907,26 @@
         if(running) { return; }
         history.setToEnd();
         running = true;
+        runGeneration++;
+        console.debug("[lifecycle] runMainCode gen=" + runGeneration +
+          " t=" + performance.now().toFixed(1));
         output.empty();
         promptContainer.hide();
         lastEditorRun = uiOptions.cm || null;
         setWhileRunning();
+
+        // The run's claim on the UI, made synchronously and explicitly.
+        // Hosts and tests that need "is a run in flight?" should read THIS,
+        // not infer it from the prompt/button (the prompt can be resurrected
+        // by a queued fade, the button armed by a delayed timer).
+        document.body.setAttribute("data-pyret-running", "true");
+        // showPrompt animates the prompt in with fadeIn(100). hide() defeats
+        // an animation that is RUNNING, but one still QUEUED (jQuery starts
+        // fx asynchronously, later under load) starts afterwards and sets
+        // display at fade-start -- resurrecting the prompt mid-run. Flush
+        // the queue so this run's hide is final. (.hide() again afterwards:
+        // jumpToEnd COMPLETES a currently-running fadeIn, i.e. shows it.)
+        promptContainer.stop(true, true).hide();
 
         CPO.documents.forEach(function(doc, name) {
           if (name.indexOf("interactions://") === 0)
@@ -902,6 +962,9 @@
         }
         if(running) { console.log("Skipping a run because a run is happening already: ", code, synthetic); return; }
         running = true;
+        runGeneration++;
+        console.debug("[lifecycle] runner gen=" + runGeneration +
+          " t=" + performance.now().toFixed(1));
         var thiscode = {code: code, erroroutput: false, start: false, end: false, dup: false};
         history.addToHistory(thiscode);
         history.setToEnd();
@@ -917,7 +980,10 @@
         var echoCM = CodeMirror.fromTextArea(echo[0], { readOnly: true });
         echoCM.setValue(code);
         CM.setValue("");
+        // Same claim + queue flush as runMainCode; see the comments there.
+        document.body.setAttribute("data-pyret-running", "true");
         promptContainer.hide();
+        promptContainer.stop(true, true).hide();
         setWhileRunning();
         interactionsCount++;
         var thisName = 'interactions://' + interactionsCount;
@@ -987,6 +1053,15 @@
       };
 
       var onBreak = function() {
+        // NOTE: deliberately does NOT bump runGeneration. The broken run's
+        // own chain still resolves through afterRun -- created under the
+        // current generation -- and that afterRun is the legitimate restorer
+        // of `running`/buttons/prompt after a break. Bumping here would make
+        // it read as stale and leave the editor wedged. The stale-work
+        // hazard this generation exists for (deferred work firing during a
+        // NEWER run) is covered by the bumps at runMainCode/runner entry.
+        console.debug("[lifecycle] onBreak gen=" + runGeneration +
+          " t=" + performance.now().toFixed(1));
         breakButton.attr("disabled", true);
         stopLi.attr('disabled', true);
         repl.stop();

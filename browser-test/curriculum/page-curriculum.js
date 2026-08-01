@@ -68,9 +68,16 @@ function PYRET_CURRICULUM_ASSERTIONS() {
       const chart = Array.prototype.filter.call(
         document.querySelectorAll(".ui-dialog"),
         (d) => !d.querySelector(".repl-animation") && !!d.querySelector("svg"))[0] || null;
+      // The editor's own synchronous claim (repl-ui sets it in
+      // runMainCode/runner, clears it in afterRun). The prompt/button
+      // reading below is kept as a cross-check, but this attribute is the
+      // authoritative half: the prompt can be resurrected mid-run by a
+      // queued fade, and the button armed by a stale timer, and both
+      // conjured a false "done" that made the harness stop live runs.
+      const claimed = document.body.getAttribute("data-pyret-running") === "true";
       return {
         promptVisible: promptVisible,
-        done: promptVisible && !!br && br.disabled === true,
+        done: !claimed && promptVisible && !!br && br.disabled === true,
         animating: !!(animation || chart),
         windowKind: animation ? "animation" : (chart ? "chart" : null),
         // ...and it painted. Separate from `animating` because a reactor with
@@ -159,6 +166,62 @@ function PYRET_CURRICULUM_ASSERTIONS() {
         label: label ? label.replace(/\s+/g, " ").trim() : null,
         text: (r.innerText || "").replace(/\s+/g, " ").trim(),
       };
+    },
+
+    // ----- lifecycle timeline ------------------------------------------
+    //
+    // Timestamped record of every #breakButton disabled-flip and every
+    // prompt-container visibility change, plus harness-placed markers. This
+    // exists because the stopClicked=true failures require the break button
+    // to become ENABLED inside the ~25ms between the harness's done-poll
+    // (which requires it disabled) and its stop() call -- and the only
+    // enabler in repl-ui.js is setWhileRunning's 1s timer, whose schedule
+    // cannot obviously hit that window. The observer sees which flip
+    // actually happened and when, instead of us inferring it.
+    //
+    // MutationObserver callbacks run as microtasks, so entries land in
+    // event-loop order with ~no perturbation of the page.
+    startLifecycleLog() {
+      if (window.__CUR_LC_OBS) { window.__CUR_LC_OBS.disconnect(); }
+      const log = [];
+      window.__CUR_LC = log;
+      const t0 = performance.now();
+      window.__CUR_LC_T0 = t0;
+      const push = (ev, detail) =>
+        log.push({ t: Math.round((performance.now() - t0) * 10) / 10, ev: ev, detail: detail });
+      const br = document.getElementById("breakButton");
+      const pc = document.querySelector(".prompt-container");
+      push("start", {
+        breakDisabled: !!(br && br.disabled),
+        promptVisible: !pc || pc.offsetParent !== null,
+      });
+      const obs = new MutationObserver((muts) => {
+        for (const m of muts) {
+          if (m.target === br && m.attributeName === "disabled") {
+            push("break", { disabled: br.disabled });
+          } else if (pc && (m.target === pc)) {
+            push("prompt", { visible: pc.offsetParent !== null });
+          }
+        }
+      });
+      if (br) obs.observe(br, { attributes: true, attributeFilter: ["disabled"] });
+      if (pc) obs.observe(pc, { attributes: true, attributeFilter: ["style", "class"] });
+      window.__CUR_LC_OBS = obs;
+      return true;
+    },
+    markLifecycle(name) {
+      if (!window.__CUR_LC) return false;
+      window.__CUR_LC.push({
+        t: Math.round((performance.now() - window.__CUR_LC_T0) * 10) / 10,
+        ev: "mark", detail: name,
+      });
+      return true;
+    },
+    drainLifecycleLog() {
+      const log = window.__CUR_LC || [];
+      if (window.__CUR_LC_OBS) { window.__CUR_LC_OBS.disconnect(); window.__CUR_LC_OBS = null; }
+      window.__CUR_LC = null;
+      return log;
     },
   };
   window.CUR = CUR;
