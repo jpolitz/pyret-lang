@@ -67,9 +67,17 @@ const DRAIN_RECORDER = `(function(){
   return r.samples;
 })()`;
 
+// Stops the recorder and clicks in ONE in-page turn, so every sample
+// strictly precedes the Stop. Samples from after the click would flag
+// repl-ui's onBreak, which shows the prompt immediately while the claim
+// rightly stays held until afterRun -- longstanding cosmetic behavior of
+// break PROCESSING, not the pre-stop lie this test exists to catch. (It is
+// also why "prompt visible" alone was never a safe done-signal; the claim
+// is the authority.)
 const CLICK_STOP = `(function(){
   var b = document.getElementById("breakButton");
   if (!b || b.disabled !== false) return { clicked: false };
+  if (window.__RAPID_RERUN__) window.__RAPID_RERUN__.stop();
   var claim = document.body.getAttribute("data-pyret-running") === "true";
   b.click();
   return { clicked: true, claimAtClick: claim };
@@ -146,10 +154,13 @@ module.exports = function registerRapidRerun(getSession) {
         "Stop ended the run, but not as a user break; the editor shows: " +
         JSON.stringify(shown.slice(0, 200)));
 
-      // The recording is the heart of the test: at no sampled instant during
-      // run 2 may the editor have claimed a run AND shown the prompt. That
-      // conjunction is exactly what a pending fade from run 1 used to
-      // produce, and it is what made a DOM reader call a live run finished.
+      // The recording is the heart of the test: at no sampled instant
+      // between run 2's start and the Stop click may the editor have claimed
+      // a run AND shown the prompt. That conjunction is exactly what a
+      // pending fade from run 1 used to produce, and it is what made a DOM
+      // reader call a live run finished. (Sampling ends at the click -- see
+      // CLICK_STOP -- because break processing shows the prompt while the
+      // claim is legitimately still held.)
       const samples = await page.eval(DRAIN_RECORDER);
       assert.ok(samples && samples.length > 0, "the recorder captured nothing");
       const lies = samples.filter((s) => s.claim && s.promptVisible);
