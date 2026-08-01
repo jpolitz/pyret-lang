@@ -34,6 +34,7 @@ const SUITES = {
   "big-programs": { local: "./big-programs.js" },
   "stop-during-load": require("./stop-during-load"),
   "rapid-rerun": require("./rapid-rerun"),
+  "effective-ids": require("./effective-ids"),
 };
 
 if (!ENV || !["cpo", "embed", "embed-static", "vscode", "vscode-ovsx"].includes(ENV)) {
