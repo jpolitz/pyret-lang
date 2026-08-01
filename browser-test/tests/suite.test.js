@@ -29,6 +29,7 @@ const SUITES = {
   "tables": "tables.js",
   "url-imports": "url-imports.js",
   "stop-during-load": require("./stop-during-load"),
+  "rapid-rerun": require("./rapid-rerun"),
 };
 
 if (!ENV || !["cpo", "embed", "embed-static", "vscode", "vscode-ovsx"].includes(ENV)) {
