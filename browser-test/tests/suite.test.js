@@ -33,6 +33,7 @@ const SUITES = {
   // upstream code.pyret.org/test file -- see tests/big-programs.js).
   "big-programs": { local: "./big-programs.js" },
   "stop-during-load": require("./stop-during-load"),
+  "rapid-rerun": require("./rapid-rerun"),
 };
 
 if (!ENV || !["cpo", "embed", "embed-static", "vscode", "vscode-ovsx"].includes(ENV)) {
