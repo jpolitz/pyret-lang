@@ -1,7 +1,16 @@
 /**
  * Builds a new Google Sheets API interface
+ *
+ * @param immediate - passed through to the gapi reauth
+ * @param [spreadsheetsOverride] - a stand-in for gapi's `spreadsheets` client.
+ *        When given, gapi is not loaded at all and the API is built directly
+ *        over it. This is the seam the TEST-ONLY public-sheets path uses (see
+ *        google-apis/sheets-public.js): reading a public sheet needs no
+ *        credentials, but it does need a different transport, and injecting it
+ *        here means everything below -- Spreadsheet, Worksheet, unifyRows and
+ *        its type inference, getAllCells -- is the same code either way.
  */
-function createSheetsAPI(immediate) {
+function createSheetsAPI(immediate, spreadsheetsOverride) {
 
   function createAPI(spreadsheets) {
 
@@ -807,6 +816,10 @@ function createSheetsAPI(immediate) {
   }
 
   var ret = Q.defer();
+  if (spreadsheetsOverride) {
+    ret.resolve(createAPI(spreadsheetsOverride));
+    return ret.promise;
+  }
   gwrap.load({url: 'https://sheets.googleapis.com/$discovery/rest?version=v4',
               reauth: {
                 immediate: immediate
