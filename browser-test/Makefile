@@ -151,5 +151,32 @@ all-envs:
 	  echo "=== $$e ==="; $(MAKE) --no-print-directory $$e || rc=1; done; \
 	echo "done (rc=$$rc)"; exit $$rc
 
+# ------------------------------------------------------- the curriculum suite
+
+# Bootstrap's starter files (curriculum/). Same prerequisites as `cpo`, but its
+# inputs are fetched from raw.githubusercontent.com, so it needs outbound
+# network -- and SHEETS=public (the default) additionally reads the
+# curriculum's public Google Sheets through the dev server's test-only proxy.
+# Not part of all-envs: it is long, and it can fail because BOOTSTRAP changed
+# something, which is a different signal from the rest of this directory.
+#
+#   make curriculum
+#   make curriculum SHEETS=none
+#   make curriculum GREP='^data-science/'
+#   make curriculum CURRICULUM_PARTS=pin,shareurl
+CURRICULUM_PARTS ?= all
+SHEETS ?= public
+CURRICULUM_FLAGS := --parts=$(CURRICULUM_PARTS) --sheets=$(SHEETS)
+ifneq ($(strip $(GREP)),)
+CURRICULUM_FLAGS += --grep=$(GREP)
+endif
+ifneq ($(strip $(COMPILER)),)
+CURRICULUM_FLAGS += --compiler=$(COMPILER)
+endif
+
+.PHONY: curriculum
+curriculum: server deps
+	cd $(HERE) && BASE_URL=$(BASE_URL) node curriculum/run.js $(CURRICULUM_FLAGS)
+
 clean-stamps:
 	rm -f $(HERE)/.chromium.stamp

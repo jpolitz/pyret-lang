@@ -1,0 +1,160 @@
+name: curriculum (Bootstrap starter files)
+
+# Runs browser-test/curriculum/ -- the .arr files Bootstrap's lessons hand to
+# students -- against a freshly built code.pyret.org, so a Pyret change that
+# would break a classroom shows up here.
+#
+# Two jobs with different failure semantics:
+#
+#   * starter-files: --sheets=none, both compiler flavors, on pushes to the
+#     long-lived branches. Its only network inputs are the pinned .arr files
+#     from github.com, so a failure means Pyret regressed (or the pin moved --
+#     which the `pin` test names explicitly).
+#   * with-sheet-data: --sheets=public, weekly and on demand. It additionally
+#     reads the curriculum's public Google Sheets through the dev server's
+#     test-only proxy, so a failure can mean Bootstrap's data moved -- a
+#     finding to report upstream, not a Pyret regression. That is why it does
+#     not run on pushes.
+#
+# Deliberately not part of browser-test.yml's matrix: it is long, and its
+# inputs belong to Bootstrap.
+
+on:
+  push:
+    branches: [drydock, mainmast]
+    tags-ignore:
+      - automated*
+  schedule:
+    # Mondays, 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      parts:
+        description: 'which parts to run (pin,shareurl,files)'
+        default: 'all'
+      grep:
+        description: 'regex over test names (test names are starter-file paths)'
+        default: ''
+      sheets:
+        description: 'public | none'
+        default: 'public'
+
+jobs:
+  starter-files:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [pyret, ts]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Build code.pyret.org web assets
+        working-directory: ./code.pyret.org
+        run: |
+          ln -s ../lang pyret
+          cd ../lang && npm install && make phaseA-deps
+          cd ../code.pyret.org
+          npm ci --ignore-scripts
+          npm run build
+          if [ "${{ matrix.compiler }}" = "ts" ]; then make web-ts; fi
+
+      - name: Install browser-test deps + Chromium
+        working-directory: ./browser-test
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+
+      - name: Start CPO server
+        working-directory: ./code.pyret.org
+        env:
+          BASE_URL: http://localhost:4999
+          PORT: '4999'
+          PYRET: http://localhost:4999/js/cpo-main.jarr
+          POSTMESSAGE_ORIGIN: '*'
+          NODE_ENV: development
+          SESSION_SECRET: not-so-secret
+          REDISCLOUD_URL: ''
+          URL_FILE_MODE: all-remote
+          IMAGE_PROXY_BYPASS: 'true'
+          SHARED_FETCH_SERVER: https://code.pyret.org
+          CURRENT_PYRET_RELEASE: ''
+        run: |
+          node src/run.js &
+          for _ in $(seq 1 30); do curl -fs -o /dev/null http://localhost:4999/editor && break; sleep 1; done
+          curl -f http://localhost:4999/editor
+
+      - name: Run the curriculum suite (no sheet reads)
+        working-directory: ./browser-test
+        env:
+          BASE_URL: http://localhost:4999
+        run: |
+          node curriculum/run.js --compiler=${{ matrix.compiler }} --sheets=none \
+            --parts='${{ github.event.inputs.parts || 'all' }}' \
+            ${{ github.event.inputs.grep && format('--grep={0}', github.event.inputs.grep) || '' }}
+
+  with-sheet-data:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [pyret, ts]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Build code.pyret.org web assets
+        working-directory: ./code.pyret.org
+        run: |
+          ln -s ../lang pyret
+          cd ../lang && npm install && make phaseA-deps
+          cd ../code.pyret.org
+          npm ci --ignore-scripts
+          npm run build
+          if [ "${{ matrix.compiler }}" = "ts" ]; then make web-ts; fi
+
+      - name: Install browser-test deps + Chromium
+        working-directory: ./browser-test
+        run: |
+          npm ci --ignore-scripts
+          npx playwright install --with-deps chromium
+
+      - name: Start CPO server
+        working-directory: ./code.pyret.org
+        env:
+          BASE_URL: http://localhost:4999
+          PORT: '4999'
+          PYRET: http://localhost:4999/js/cpo-main.jarr
+          POSTMESSAGE_ORIGIN: '*'
+          # Load-bearing: the test-only Google Sheets proxy lives inside
+          # `if(config.development)` in src/server.js.
+          NODE_ENV: development
+          SESSION_SECRET: not-so-secret
+          REDISCLOUD_URL: ''
+          URL_FILE_MODE: all-remote
+          IMAGE_PROXY_BYPASS: 'true'
+          SHARED_FETCH_SERVER: https://code.pyret.org
+          CURRENT_PYRET_RELEASE: ''
+        run: |
+          node src/run.js &
+          for _ in $(seq 1 30); do curl -fs -o /dev/null http://localhost:4999/editor && break; sleep 1; done
+          curl -f http://localhost:4999/editor
+
+      - name: Run the curriculum suite (with sheet data)
+        working-directory: ./browser-test
+        env:
+          BASE_URL: http://localhost:4999
+        run: |
+          node curriculum/run.js --compiler=${{ matrix.compiler }} \
+            --sheets='${{ github.event.inputs.sheets || 'public' }}' \
+            --parts='${{ github.event.inputs.parts || 'all' }}' \
+            ${{ github.event.inputs.grep && format('--grep={0}', github.event.inputs.grep) || '' }}
