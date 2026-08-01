@@ -17,6 +17,11 @@ const { runSpec, specTimeout } = require("../shared/dispatch");
 const { warmUp } = require("../shared/cpo-assertions");
 
 const ENV = process.env.PYRET_ENV;
+// A suite is either the name of a code.pyret.org/test/*.js spec file (the
+// usual case: a table of programs and expected output), a { local } handle on
+// a harness-local spec list, or a function that registers its own test()s --
+// for the cases where what is under test is the editor's behaviour rather
+// than a program's value.
 const SUITES = {
   "check-blocks": "check-blocks.js",
   "errors": "errors.js",
@@ -27,6 +32,7 @@ const SUITES = {
   // Harness-local suite (generated large-program stress shapes; not an
   // upstream code.pyret.org/test file -- see tests/big-programs.js).
   "big-programs": { local: "./big-programs.js" },
+  "stop-during-load": require("./stop-during-load"),
 };
 
 if (!ENV || !["cpo", "embed", "embed-static", "vscode", "vscode-ovsx"].includes(ENV)) {
@@ -126,10 +132,14 @@ after(async () => {
 
 for (const suite of chosen) {
   const entry = SUITES[suite];
-  const specs = typeof entry === "string"
-    ? loadSpecsFromFile(entry)
-    : require(entry.local).specs();
   describe(suite, () => {
+    if (typeof entry === "function") {
+      entry(() => session);
+      return;
+    }
+    const specs = typeof entry === "string"
+      ? loadSpecsFromFile(entry)
+      : require(entry.local).specs();
     for (const s of specs) {
       test(s.name || s.program, { timeout: specTimeout(s) }, async () => {
         await runSpec(session.page, s);

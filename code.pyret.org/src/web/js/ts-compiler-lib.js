@@ -483,25 +483,23 @@
       return {
         run: function(realm, programJsSource, _options) {
           return new Promise(function(resolve, reject) {
-            setTimeout(function() {
-              runtime.runThunk(function() {
-                return runProgramPy.app(
-                  pyRuntime,
-                  realm,
-                  programJsSource,
-                  runtime.makeObject({ "checks": "main" }),
-                  runtime.ffi.makeList([]));
-              }, function(result) {
-                if(runtime.isSuccessResult(result)) {
-                  resolve(result.result);
-                }
-                else {
-                  // An error escaping run-program itself (not the
-                  // program): surface the whole FailureResult.
-                  reject(result);
-                }
-              });
-            }, 0);
+            runtime.runThunk(function() {
+              return runProgramPy.app(
+                pyRuntime,
+                realm,
+                programJsSource,
+                runtime.makeObject({ "checks": "main" }),
+                runtime.ffi.makeList([]));
+            }, function(result) {
+              if(runtime.isSuccessResult(result)) {
+                resolve(result.result);
+              }
+              else {
+                // An error escaping run-program itself (not the
+                // program): surface the whole FailureResult.
+                reject(result);
+              }
+            });
           });
         },
         isSuccessResult: function(moduleResult) {
@@ -553,12 +551,32 @@
       });
     }
 
+    /*
+      Report a run that was stopped before it ever became a Pyret computation.
+
+      When the runtime kills a thread it raises ffi.userBreak (runtime.js,
+      finishFailure), which error.arr's `user-break` renders as "Program
+      stopped by user". A run cancelled during the module chase or the compile
+      never reaches that path -- there is no thread to kill -- so raise the
+      same value here rather than inventing a second way to say the same thing.
+      Everything downstream, including the rendering, is then the shipping
+      path.
+    */
+    function resolveWithUserBreak(deferred) {
+      runtime.runThunk(function() {
+        return runtime.raise(runtime.ffi.userBreak);
+      }, function(result) {
+        deferred.resolve(result);
+      });
+    }
+
     return runtime.makeJSModuleReturn({
       makeBuiltinSupport: makeBuiltinSupport,
       makeFinderFactory: makeFinderFactory,
       makeExecutor: makeExecutor,
       resolveWithEither: resolveWithEither,
       resolveWithError: resolveWithError,
+      resolveWithUserBreak: resolveWithUserBreak,
       bridgeCompileErrors: bridgeCompileErrors,
       tsCompiler: tsCompiler
     });
