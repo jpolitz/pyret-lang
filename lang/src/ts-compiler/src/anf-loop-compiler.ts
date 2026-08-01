@@ -184,13 +184,20 @@ export const effectiveIds: Map<string, boolean> = new Map();
 export function freshId(id: A.Name): A.Name {
   const baseName = A.isSTypeGlobal(id) ? id.tosourcestring() : id.toname();
   const noHyphens = baseName.split('-').join('$');
-  const n = jsNames.makeAtom(noHyphens);
-  if (effectiveIds.has(n.tosourcestring())) { // awkward name collision!
-    return freshId(id);
-  } else {
-    effectiveIds.set(n.tosourcestring(), true);
-    return n;
+  // Scan for a free name with a loop, not recursion. compileModule rewinds
+  // jsNames while effectiveIds persists, so in a long REPL session every
+  // compile re-collides with the names of every compile before it, and the
+  // scan gets deeper each time. Stock has the same shape (fresh-id in
+  // anf-loop-compiler.arr) and survives it because its recursion runs on the
+  // Pyret runtime's trampolined stack; plain JS recursion here overflowed a
+  // real session's stack about a hundred compiles in. The loop issues the
+  // same names in the same order.
+  let n = jsNames.makeAtom(noHyphens);
+  while (effectiveIds.has(n.tosourcestring())) { // awkward name collision!
+    n = jsNames.makeAtom(noHyphens);
   }
+  effectiveIds.set(n.tosourcestring(), true);
+  return n;
 }
 
 export function jsIdOf(id: A.Name): A.Name {
