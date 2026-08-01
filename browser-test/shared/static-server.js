@@ -44,9 +44,14 @@ async function startStaticServer(opts) {
   const roots = opts.roots.map((r) => path.resolve(r));
 
   const server = http.createServer((req, res) => {
-    let pathname;
+    let pathname, delayMs;
     try {
-      pathname = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
+      const u = new URL(req.url, "http://localhost");
+      pathname = decodeURIComponent(u.pathname);
+      // ?delay=<ms> holds the response open before sending it, so a test can
+      // stall a module fetch on purpose and act while the import is in flight.
+      // Capped so a typo cannot hang a CI run.
+      delayMs = Math.min(Math.max(Number(u.searchParams.get("delay")) || 0, 0), 60000);
     } catch (e) {
       res.writeHead(400).end("bad request");
       return;
@@ -69,11 +74,14 @@ async function startStaticServer(opts) {
       // usercontent.com, the host the url-import tests are otherwise written
       // against, answers with the same header -- without it those imports fail
       // with an opaque "TypeError: Failed to fetch".
-      res.writeHead(200, {
-        "Content-Type": contentType(filePath),
-        "Access-Control-Allow-Origin": "*",
-      });
-      fs.createReadStream(filePath).pipe(res);
+      const send = () => {
+        res.writeHead(200, {
+          "Content-Type": contentType(filePath),
+          "Access-Control-Allow-Origin": "*",
+        });
+        fs.createReadStream(filePath).pipe(res);
+      };
+      if (delayMs > 0) setTimeout(send, delayMs); else send();
       return;
     }
     res.writeHead(404, {
