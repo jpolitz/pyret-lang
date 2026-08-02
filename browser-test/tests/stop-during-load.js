@@ -1,41 +1,6 @@
 /*
- * stop-during-load.js -- pressing Stop while an import is still being fetched
- * must leave the editor usable.
- *
- * Not a spec table like the other suites: there is no (program, expected
- * output) pair here, because what is under test is the editor's run/stop state
- * machine rather than what a program evaluates to.
- *
- * The window is opened with the static server's `?delay=` flag, so the module
- * fetch is provably still outstanding when Stop is pressed -- no racing against
- * a real compile. It matters that the delay lands in the *fetch*: repl.ts's
- * runInteraction awaits its module worklist before it compiles or runs
- * anything, and that await is the only phase in which a click can actually be
- * delivered (the compile itself is synchronous and would queue the click behind
- * it).
- *
- * Stop is pressed as soon as a user could press it: once the editor claims the
- * run (data-pyret-running on <body>) and #breakButton arms (repl-ui.js enables
- * it on a RUNNING_SPINWHEEL_DELAY_MS = 1s timer). That lands ~1s into an
- * 8s hold, so the fetch is still unambiguously open.
- *
- * Two assertions, in the order they matter.
- *
- * First: Stop has to actually stop. The program ends in an expression that
- * renders the imported value, so if that value is on screen afterwards the run
- * was not stopped -- it kept going and finished. On the stock compiler the
- * break reaches the module load and the fetch is aborted (net::ERR_ABORTED),
- * leaving "Program stopped by user". On the TS compiler the load is a JS
- * promise chain outside the Pyret runtime, so runtime.breakAll() has nothing
- * there to interrupt: the fetch completes, the compile proceeds and the
- * program runs, several seconds after the user pressed Stop.
- *
- * Second: the editor still works afterwards. That one is about the UI half of
- * the same desync -- repl-ui.js only restores the Run button and clears
- * `running` in afterRun, reached through doneRendering.fin(...). It is checked
- * with a program that terminates, so it passes today; it is what catches the
- * non-terminating case (Stop, then a reactor opens anyway and every later Run
- * is dropped by runMainCode's `if(running) { return; }`).
+ * stop-during-load.js -- pressing Stop while compile is happening (e.g. modules
+ * being fetched and during codegen) must leave the editor usable.
  */
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
@@ -116,7 +81,7 @@ module.exports = function registerStopDuringLoad(getSession) {
       // test never exercised its case.
       try {
         await page.waitFor(
-          "document.body.getAttribute('data-pyret-running') === 'true' && " +
+          "window.replWidget.isRunning() === true && " +
           "(function(){var b=document.getElementById('breakButton');return !!(b && !b.disabled);})()",
           Math.floor(HOLD_MS / 2));
       } catch (e) {
@@ -151,11 +116,7 @@ module.exports = function registerStopDuringLoad(getSession) {
         "after Stop, the Run button is still disabled (it reads " + JSON.stringify(btn.text) +
         "): repl-ui.js's afterRun never ran, so the editor never left the running state");
 
-      // The real question: does the editor accept work again? Deliberately a
-      // trivial program rather than a re-run of the one above -- this editor is
-      // shared with every other suite, and re-running the slow import would
-      // hand the next one an editor that is still busy (whose first Run then
-      // vanishes into `if(running) { return; }`).
+      // Does the editor accept work again?
       await install(page, "1 + 1\n");
       assert.ok(await page.eval(MARK), "could not mark #output");
       await page.eval("window.PA.run()");

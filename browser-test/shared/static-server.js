@@ -48,9 +48,6 @@ async function startStaticServer(opts) {
     try {
       const u = new URL(req.url, "http://localhost");
       pathname = decodeURIComponent(u.pathname);
-      // ?delay=<ms> holds the response open before sending it, so a test can
-      // stall a module fetch on purpose and act while the import is in flight.
-      // Capped so a typo cannot hang a CI run.
       delayMs = Math.min(Math.max(Number(u.searchParams.get("delay")) || 0, 0), 60000);
     } catch (e) {
       res.writeHead(400).end("bad request");
@@ -68,12 +65,9 @@ async function startStaticServer(opts) {
         continue;
       }
       if (!st.isFile()) continue;
-      // Allow-origin because the editor is rarely same-origin with this server:
-      // each env serves the editor from its own origin, so anything fetched here
-      // (notably url-file fixtures) is a cross-origin request. raw.github-
-      // usercontent.com, the host the url-import tests are otherwise written
-      // against, answers with the same header -- without it those imports fail
-      // with an opaque "TypeError: Failed to fetch".
+      // Most of our intended uses of importing by URL are cross-origin by
+      // design, so serving one server for all tests that may be cross-origin is
+      // a useful and realistic setup.
       const send = () => {
         res.writeHead(200, {
           "Content-Type": contentType(filePath),

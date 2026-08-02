@@ -661,9 +661,6 @@
         return function() {
           //speakHistory(1);
           running = false;
-          // Release the run's claim exactly where `running` is cleared, so
-          // the attribute is a faithful mirror of the internal flag.
-          document.body.removeAttribute("data-pyret-running");
           outputPending.remove();
           outputPendingHidden = true;
 
@@ -868,21 +865,12 @@
         running = true;
         output.empty();
         promptContainer.hide();
+        // This gained stop() after having been just hide() for a while,
+        // because we found cases where queued up fadeIns needed to be
+        // canceled to avoid showing the prompt while running.
+        promptContainer.stop(true, true).hide();
         lastEditorRun = uiOptions.cm || null;
         setWhileRunning();
-
-        // The run's claim on the UI, made synchronously and explicitly.
-        // Hosts and tests that need "is a run in flight?" should read THIS,
-        // not infer it from the prompt/button (the prompt can be resurrected
-        // by a queued fade, the button armed by a delayed timer).
-        document.body.setAttribute("data-pyret-running", "true");
-        // showPrompt animates the prompt in with fadeIn(100). hide() defeats
-        // an animation that is RUNNING, but one still QUEUED (jQuery starts
-        // fx asynchronously, later under load) starts afterwards and sets
-        // display at fade-start -- resurrecting the prompt mid-run. Flush
-        // the queue so this run's hide is final. (.hide() again afterwards:
-        // jumpToEnd COMPLETES a currently-running fadeIn, i.e. shows it.)
-        promptContainer.stop(true, true).hide();
 
         CPO.documents.forEach(function(doc, name) {
           if (name.indexOf("interactions://") === 0)
@@ -933,8 +921,6 @@
         var echoCM = CodeMirror.fromTextArea(echo[0], { readOnly: true });
         echoCM.setValue(code);
         CM.setValue("");
-        // Same claim + queue flush as runMainCode; see the comments there.
-        document.body.setAttribute("data-pyret-running", "true");
         promptContainer.stop(true, true).hide();
         setWhileRunning();
         interactionsCount++;
@@ -1023,7 +1009,8 @@
         runCode: runMainCode,
         runner: runner,
         focus: function() { CM.focus(); },
-        stop: onBreak
+        stop: onBreak,
+        isRunning: function() { return running; }
       };
     }
 

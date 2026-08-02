@@ -1,42 +1,13 @@
 /*
  * effective-ids.js -- a long editor session must survive its own compiles.
  *
- * Like stop-during-load.js and rapid-rerun.js, this is a state-machine test:
- * its subject is what the editor accumulates over a session, not any one
- * program's value.
+ * There was an issue in the TS compiler where it faithfully ported a recursive
+ * scan for an unused JS name from `anf-loop-compiler.arr`. This blew out the JS
+ * stack (when the Pyret stack was fine before).
  *
- * The shape of the bug it pins (ts backend, anf-loop-compiler.ts):
+ * This test runs many distinct programs in a row to pump the name set until
+ * it's large and makes sure nothing breaks.
  *
- *   freshId scans for an unused JS name by asking jsNames for a candidate and
- *   retrying while effectiveIds already holds it. compileModule rewinds
- *   jsNames' counter between compiles, but effectiveIds is a module-level Map
- *   that lives as long as the page -- so compile N's scan re-collides with the
- *   names issued by all N-1 compiles before it, and the scan gets one step
- *   deeper every time. As recursion that step was a stack frame, and a real
- *   session overflowed with "Maximum call stack size exceeded" about a hundred
- *   compiles in. Stock Pyret has the identical shape (fresh-id in
- *   anf-loop-compiler.arr) and survives it only because its recursion runs on
- *   the runtime's trampolined stack.
- *
- * So the failure is invisible to any test that reboots the editor, and
- * invisible to a short one: it is a function of how many compiles one page has
- * done. This test is therefore the one thing the suite could not otherwise
- * see -- many compiles, one editor, no reboot.
- *
- * Each iteration compiles DISTINCT source (`i + 1`), for two reasons: it
- * defeats any caching that would let a repeated program skip the compile the
- * bug lives in, and it makes each run's expected value unique, so "run i
- * produced run i's answer" is checkable rather than inferred.
- *
- * The count only has to clear the overflow threshold with margin. It is
- * deliberately not tuned to the ~100 observed in the wild -- that number is a
- * property of one build's stack budget, not of the contract -- so the default
- * is comfortably past it and the env knob exists for bisecting.
- *
- * Under the stock compiler this passes trivially (trampolined stack). It is
- * still worth running there: "an editor left open all class stays healthy" is
- * a contract both flavors owe, and stock is where a future regression would
- * otherwise go unnoticed.
  */
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
@@ -48,7 +19,7 @@ const COMPILES = Number(process.env.PYRET_EFFECTIVE_IDS_COMPILES || 120);
 // instead of presenting as "run 93 printed nothing".
 const STACK_ERROR = "Maximum call stack size exceeded";
 
-const IDLE = "document.body.getAttribute('data-pyret-running') !== 'true' && " +
+const IDLE = "window.replWidget.isRunning() !== true && " +
   "(function(){var pc=document.querySelector('.prompt-container');" +
   "return !pc || pc.offsetParent !== null;})()";
 

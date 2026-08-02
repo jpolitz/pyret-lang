@@ -553,14 +553,7 @@
 
     /*
       Report a run that was stopped before it ever became a Pyret computation.
-
-      When the runtime kills a thread it raises ffi.userBreak (runtime.js,
-      finishFailure), which error.arr's `user-break` renders as "Program
-      stopped by user". A run cancelled during the module chase or the compile
-      never reaches that path -- there is no thread to kill -- so raise the
-      same value here rather than inventing a second way to say the same thing.
-      Everything downstream, including the rendering, is then the shipping
-      path.
+      (This happens for stops during the TS compiler's compile)
     */
     function resolveWithUserBreak(deferred) {
       runtime.runThunk(function() {

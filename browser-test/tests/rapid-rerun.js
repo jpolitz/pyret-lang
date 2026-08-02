@@ -3,16 +3,15 @@
  * the UI: nothing left over from the first run may fake the second one's
  * completion, and a Stop clicked in the leftovers' window must land cleanly.
  *
- * Like stop-during-load.js, this is a state-machine test, not a spec table.
+ * NOTE(joe): this is pretty targeted at a specific regression, which I can
+ * confirm I saw! But it's likely possible to write a better version w/better
+ * invariants, less of this "do a recording" business, etc.
  *
  * Two pieces of run-1 state outlive run 1 by design of the widgets involved:
  *
  *   - showPrompt brings the interactions prompt back with fadeIn(100), and
  *     jQuery starts fx asynchronously -- so when run 2 begins quickly, run
- *     1's fade can still be pending when run 2 hides the prompt. Unflushed,
- *     the pending fade starts afterwards and re-shows the prompt mid-run,
- *     and anything reading "prompt visible" as "no run in flight" acts on a
- *     finished-looking editor that is in fact running.
+ *     1's fade can still be pending when run 2 hides the prompt.
  *
  *   - setWhileRunning schedules a 1s timer at every run start, and run 1's
  *     timer can fire during run 2 (run 1 finished fast; run 2 started
@@ -20,16 +19,6 @@
  *     schedule would -- so a Stop can arrive at a moment run 2 believes no
  *     Stop is possible yet.
  *
- * The contract under test, not the cosmetics: while <body> carries the
- * data-pyret-running claim, the prompt is never visible (a DOM reader can
- * never see "done" during a live run), and a Stop clicked whenever the break
- * button arms -- including via run 1's leftover timer -- ends run 2 as a
- * user break and leaves the editor accepting new work.
- *
- * The choreography makes the leftover window real rather than raced-for:
- * run 1 is trivial (finishes well inside its own second), run 2 starts
- * immediately and never terminates, so the earliest armed break button is
- * run 1's dangling timer and the Stop provably lands on a live run.
  */
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
@@ -50,7 +39,7 @@ const START_RECORDER = `(function(){
     var b = document.getElementById("breakButton");
     samples.push({
       t: Date.now(),
-      claim: document.body.getAttribute("data-pyret-running") === "true",
+      claim: window.replWidget.isRunning() === true,
       promptVisible: !pc || pc.offsetParent !== null,
       breakEnabled: !!(b && !b.disabled)
     });
@@ -78,12 +67,12 @@ const CLICK_STOP = `(function(){
   var b = document.getElementById("breakButton");
   if (!b || b.disabled !== false) return { clicked: false };
   if (window.__RAPID_RERUN__) window.__RAPID_RERUN__.stop();
-  var claim = document.body.getAttribute("data-pyret-running") === "true";
+  var claim = window.replWidget.isRunning() === true;
   b.click();
   return { clicked: true, claimAtClick: claim };
 })()`;
 
-const IDLE = "document.body.getAttribute('data-pyret-running') !== 'true' && " +
+const IDLE = "window.replWidget.isRunning() !== true && " +
   "(function(){var pc=document.querySelector('.prompt-container');" +
   "return !pc || pc.offsetParent !== null;})()";
 
@@ -120,7 +109,7 @@ module.exports = function registerRapidRerun(getSession) {
       await install(page, PROGRAM_FOREVER);
       await page.eval("window.PA.run()");
       try {
-        await page.waitFor("document.body.getAttribute('data-pyret-running') === 'true'", 10000);
+        await page.waitFor("window.replWidget.isRunning() === true", 10000);
       } catch (e) {
         throw new ProceduralError("run 2 never claimed the UI; the rapid re-run was not exercised");
       }
@@ -139,7 +128,7 @@ module.exports = function registerRapidRerun(getSession) {
       const stop = await page.eval(CLICK_STOP);
       assert.ok(stop.clicked, "the break button disarmed between observation and click");
       assert.ok(stop.claimAtClick,
-        "the editor had released data-pyret-running while a non-terminating program was " +
+        "the editor reported no run in flight while a non-terminating program was " +
         "running: the claim does not bracket the run");
 
       // The Stop must end run 2 as what it is -- a user break -- and hand
