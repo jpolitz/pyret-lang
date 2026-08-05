@@ -5,25 +5,236 @@
                     | concat-cons | concat-snoc
   Pyret `+` on ConcatLists (_plus) becomes the method `append(other)`.
   `to-list` returns a plain array.
+
+  Every traversal here is ITERATIVE over an explicit stack. The compiler
+  builds these lists one link per ANF statement / case / variant, so an
+  ordinary large program makes spines thousands of links deep, and the
+  traversals run on every compile (emit, DAG simplify) -- recursing one
+  frame per link overflows browser-sized stacks (see
+  tests/stack-safety-test.js). Callback ORDER is part of the contract --
+  callers' functions can be effectful -- and each helper documents the
+  order it preserves. The one deliberate change: mapToListAcc used to
+  evaluate f in a shape-dependent order (snoc: last first; append: right
+  before left) as an artifact of its accumulator recursion; it now
+  evaluates f strictly left-to-right like everything else. Its only
+  callers build pure pretty-printer docs, and the RESULT array order is
+  unchanged.
 */
 
 import { InternalCompilerError } from './shared';
 
 export abstract class ConcatListBase<T> {
   abstract get $name(): string;
-  abstract toListAcc(rest: T[]): T[];
-  abstract mapToListAcc<U>(f: (x: T) => U, rest: U[]): U[];
-  abstract map<U>(f: (x: T) => U): ConcatList<U>;
-  abstract each(f: (x: T) => void): void;
-  abstract foldl<B>(f: (base: B, x: T) => B, base: B): B;
-  abstract foldr<B>(f: (base: B, x: T) => B, base: B): B;
-  abstract getFirst(): T;
-  abstract getLast(): T;
-  abstract isEmpty(): boolean;
-  abstract length(): number;
-  abstract joinStr(sep: string): string;
-  abstract reverse(): ConcatList<T>;
-  abstract all(f: (x: T) => boolean): boolean;
+  toListAcc(rest: T[]): T[] {
+    const out = elementsForward(this as unknown as ConcatList<T>);
+    return rest.length === 0 ? out : out.concat(rest);
+  }
+  mapToListAcc<U>(f: (x: T) => U, rest: U[]): U[] {
+    const out = mapForward(this as unknown as ConcatList<T>, f);
+    return rest.length === 0 ? out : out.concat(rest);
+  }
+  map<U>(f: (x: T) => U): ConcatList<U> {
+    return mapPreservingShape(this as unknown as ConcatList<T>, f);
+  }
+  // f left-to-right
+  each(f: (x: T) => void): void {
+    const walk = new ForwardWalk(this as unknown as ConcatList<T>);
+    for (let x = walk.next(); x !== DONE; x = walk.next()) {
+      f(x as T);
+    }
+  }
+  // f(acc, x) left-to-right
+  foldl<B>(f: (base: B, x: T) => B, base: B): B {
+    const walk = new ForwardWalk(this as unknown as ConcatList<T>);
+    let acc = base;
+    for (let x = walk.next(); x !== DONE; x = walk.next()) {
+      acc = f(acc, x as T);
+    }
+    return acc;
+  }
+  // f(acc, x) right-to-left, exactly as the recursive formulation applied it
+  foldr<B>(f: (base: B, x: T) => B, base: B): B {
+    const elts = elementsForward(this as unknown as ConcatList<T>);
+    let acc = base;
+    for (let i = elts.length - 1; i >= 0; i--) {
+      acc = f(acc, elts[i]);
+    }
+    return acc;
+  }
+  getFirst(): T {
+    let cur = this as unknown as ConcatList<T>;
+    for (;;) {
+      switch (cur.$name) {
+        case 'concat-empty': throw new InternalCompilerError('getFirst on concat-empty');
+        case 'concat-singleton': return cur.element;
+        case 'concat-cons': return cur.first;
+        case 'concat-snoc':
+          if (cur.head.isEmpty()) { return cur.last; }
+          cur = cur.head;
+          break;
+        case 'concat-append':
+          cur = cur.left.isEmpty() ? cur.right : cur.left;
+          break;
+      }
+    }
+  }
+  getLast(): T {
+    let cur = this as unknown as ConcatList<T>;
+    for (;;) {
+      switch (cur.$name) {
+        case 'concat-empty': throw new InternalCompilerError('getLast on concat-empty');
+        case 'concat-singleton': return cur.element;
+        case 'concat-snoc': return cur.last;
+        case 'concat-cons':
+          if (cur.rest.isEmpty()) { return cur.first; }
+          cur = cur.rest;
+          break;
+        case 'concat-append':
+          cur = cur.right.isEmpty() ? cur.left : cur.right;
+          break;
+      }
+    }
+  }
+  isEmpty(): boolean {
+    const stack: ConcatList<T>[] = [this as unknown as ConcatList<T>];
+    while (stack.length > 0) {
+      const cur = stack.pop() as ConcatList<T>;
+      switch (cur.$name) {
+        case 'concat-empty': break;
+        case 'concat-append': stack.push(cur.left, cur.right); break;
+        default: return false;
+      }
+    }
+    return true;
+  }
+  length(): number {
+    const walk = new ForwardWalk(this as unknown as ConcatList<T>);
+    let n = 0;
+    for (let x = walk.next(); x !== DONE; x = walk.next()) {
+      n++;
+    }
+    return n;
+  }
+  // The ''-skipping is per NODE, not per element (an append whose left
+  // half renders '' contributes no separator, but a cons whose first
+  // renders '' does) -- so this is a faithful post-order evaluation of
+  // the original recursion, String() calls in left-to-right order.
+  joinStr(sep: string): string {
+    type Frame = { node: ConcatList<T>; state: number; a: string };
+    const frames: Frame[] = [{ node: this as unknown as ConcatList<T>, state: 0, a: '' }];
+    const vals: string[] = [];
+    while (frames.length > 0) {
+      const fr = frames[frames.length - 1];
+      const node = fr.node;
+      switch (node.$name) {
+        case 'concat-empty':
+          frames.pop();
+          vals.push('');
+          break;
+        case 'concat-singleton':
+          frames.pop();
+          vals.push(String(node.element));
+          break;
+        case 'concat-cons':
+          if (fr.state === 0) {
+            fr.a = String(node.first);
+            fr.state = 1;
+            frames.push({ node: node.rest, state: 0, a: '' });
+          } else {
+            const r = vals.pop() as string;
+            frames.pop();
+            vals.push(r === '' ? fr.a : fr.a + sep + r);
+          }
+          break;
+        case 'concat-snoc':
+          if (fr.state === 0) {
+            fr.state = 1;
+            frames.push({ node: node.head, state: 0, a: '' });
+          } else {
+            const h = vals.pop() as string;
+            const l = String(node.last);
+            frames.pop();
+            vals.push(h === '' ? l : h + sep + l);
+          }
+          break;
+        case 'concat-append':
+          if (fr.state === 0) {
+            fr.state = 1;
+            frames.push({ node: node.left, state: 0, a: '' });
+          } else if (fr.state === 1) {
+            fr.a = vals.pop() as string;
+            fr.state = 2;
+            frames.push({ node: node.right, state: 0, a: '' });
+          } else {
+            const r = vals.pop() as string;
+            frames.pop();
+            if (fr.a === '') { vals.push(r); }
+            else if (r === '') { vals.push(fr.a); }
+            else { vals.push(fr.a + sep + r); }
+          }
+          break;
+      }
+    }
+    return vals[0];
+  }
+  // Structure-mirroring, rebuilt bottom-up (pure -- no callback order).
+  reverse(): ConcatList<T> {
+    type Frame = { node: ConcatList<T>; state: number; a?: ConcatList<T> };
+    const frames: Frame[] = [{ node: this as unknown as ConcatList<T>, state: 0 }];
+    const vals: ConcatList<T>[] = [];
+    while (frames.length > 0) {
+      const fr = frames[frames.length - 1];
+      const node = fr.node;
+      switch (node.$name) {
+        case 'concat-empty':
+        case 'concat-singleton':
+          frames.pop();
+          vals.push(node);
+          break;
+        case 'concat-cons':
+          if (fr.state === 0) {
+            fr.state = 1;
+            frames.push({ node: node.rest, state: 0 });
+          } else {
+            frames.pop();
+            vals.push(new ConcatSnoc(vals.pop() as ConcatList<T>, node.first));
+          }
+          break;
+        case 'concat-snoc':
+          if (fr.state === 0) {
+            fr.state = 1;
+            frames.push({ node: node.head, state: 0 });
+          } else {
+            frames.pop();
+            vals.push(new ConcatCons(node.last, vals.pop() as ConcatList<T>));
+          }
+          break;
+        case 'concat-append':
+          // original: new ConcatAppend(right.reverse(), left.reverse())
+          if (fr.state === 0) {
+            fr.state = 1;
+            frames.push({ node: node.right, state: 0 });
+          } else if (fr.state === 1) {
+            fr.a = vals.pop() as ConcatList<T>;
+            fr.state = 2;
+            frames.push({ node: node.left, state: 0 });
+          } else {
+            frames.pop();
+            vals.push(new ConcatAppend(fr.a as ConcatList<T>, vals.pop() as ConcatList<T>));
+          }
+          break;
+      }
+    }
+    return vals[0];
+  }
+  // f left-to-right, short-circuiting on the first false
+  all(f: (x: T) => boolean): boolean {
+    const walk = new ForwardWalk(this as unknown as ConcatList<T>);
+    for (let x = walk.next(); x !== DONE; x = walk.next()) {
+      if (!f(x as T)) { return false; }
+    }
+    return true;
+  }
   // sharing method _plus
   append(other: ConcatList<T>): ConcatList<T> {
     const self = this as unknown as ConcatList<T>;
@@ -35,9 +246,8 @@ export abstract class ConcatListBase<T> {
     return this.toListAcc([]);
   }
   mapToListLeft<U>(f: (x: T) => U): U[] {
-    const revved = revmapToListAcc(this as unknown as ConcatList<T>, f, []);
-    revved.reverse();
-    return revved;
+    // f left-to-right (this was mapToListLeft's whole reason to exist)
+    return mapForward(this as unknown as ConcatList<T>, f);
   }
   mapToList<U>(f: (x: T) => U): U[] {
     return this.mapToListAcc(f, []);
@@ -49,120 +259,26 @@ export abstract class ConcatListBase<T> {
 
 export class ConcatEmpty<T> extends ConcatListBase<T> {
   get $name(): 'concat-empty' { return 'concat-empty'; }
-  toListAcc(rest: T[]): T[] { return rest; }
-  mapToListAcc<U>(_f: (x: T) => U, rest: U[]): U[] { return rest; }
-  map<U>(_f: (x: T) => U): ConcatList<U> { return this as unknown as ConcatList<U>; }
-  each(_f: (x: T) => void): void { /* nothing */ }
-  foldl<B>(_f: (base: B, x: T) => B, base: B): B { return base; }
-  foldr<B>(_f: (base: B, x: T) => B, base: B): B { return base; }
-  getFirst(): T { throw new InternalCompilerError('getFirst on concat-empty'); }
-  getLast(): T { throw new InternalCompilerError('getLast on concat-empty'); }
-  isEmpty(): boolean { return true; }
-  length(): number { return 0; }
-  joinStr(_sep: string): string { return ''; }
-  reverse(): ConcatList<T> { return this; }
-  all(_f: (x: T) => boolean): boolean { return true; }
 }
 
 export class ConcatSingleton<T> extends ConcatListBase<T> {
   get $name(): 'concat-singleton' { return 'concat-singleton'; }
   constructor(public element: T) { super(); }
-  toListAcc(rest: T[]): T[] { return [this.element, ...rest]; }
-  mapToListAcc<U>(f: (x: T) => U, rest: U[]): U[] { return [f(this.element), ...rest]; }
-  map<U>(f: (x: T) => U): ConcatList<U> { return new ConcatSingleton(f(this.element)); }
-  each(f: (x: T) => void): void { f(this.element); }
-  foldl<B>(f: (base: B, x: T) => B, base: B): B { return f(base, this.element); }
-  foldr<B>(f: (base: B, x: T) => B, base: B): B { return f(base, this.element); }
-  getFirst(): T { return this.element; }
-  getLast(): T { return this.element; }
-  isEmpty(): boolean { return false; }
-  length(): number { return 1; }
-  joinStr(_sep: string): string { return String(this.element); }
-  reverse(): ConcatList<T> { return this; }
-  all(f: (x: T) => boolean): boolean { return f(this.element); }
 }
 
 export class ConcatAppend<T> extends ConcatListBase<T> {
   get $name(): 'concat-append' { return 'concat-append'; }
   constructor(public left: ConcatList<T>, public right: ConcatList<T>) { super(); }
-  toListAcc(rest: T[]): T[] {
-    return this.left.toListAcc(this.right.toListAcc(rest));
-  }
-  mapToListAcc<U>(f: (x: T) => U, rest: U[]): U[] {
-    return this.left.mapToListAcc(f, this.right.mapToListAcc(f, rest));
-  }
-  map<U>(f: (x: T) => U): ConcatList<U> { return new ConcatAppend(this.left.map(f), this.right.map(f)); }
-  each(f: (x: T) => void): void {
-    this.left.each(f);
-    this.right.each(f);
-  }
-  foldl<B>(f: (base: B, x: T) => B, base: B): B { return this.right.foldl(f, this.left.foldl(f, base)); }
-  foldr<B>(f: (base: B, x: T) => B, base: B): B { return this.left.foldr(f, this.right.foldr(f, base)); }
-  getFirst(): T { return this.left.isEmpty() ? this.right.getFirst() : this.left.getFirst(); }
-  getLast(): T { return this.right.isEmpty() ? this.left.getLast() : this.right.getLast(); }
-  isEmpty(): boolean { return this.left.isEmpty() && this.right.isEmpty(); }
-  length(): number { return this.left.length() + this.right.length(); }
-  joinStr(sep: string): string {
-    const l = this.left.joinStr(sep);
-    const r = this.right.joinStr(sep);
-    if (l === '') { return r; }
-    else if (r === '') { return l; }
-    else { return l + sep + r; }
-  }
-  reverse(): ConcatList<T> { return new ConcatAppend(this.right.reverse(), this.left.reverse()); }
-  all(f: (x: T) => boolean): boolean { return this.left.all(f) && this.right.all(f); }
 }
 
 export class ConcatCons<T> extends ConcatListBase<T> {
   get $name(): 'concat-cons' { return 'concat-cons'; }
   constructor(public first: T, public rest: ConcatList<T>) { super(); }
-  toListAcc(rest: T[]): T[] { return [this.first, ...this.rest.toListAcc(rest)]; }
-  mapToListAcc<U>(f: (x: T) => U, rest: U[]): U[] { return [f(this.first), ...this.rest.mapToListAcc(f, rest)]; }
-  map<U>(f: (x: T) => U): ConcatList<U> { return new ConcatCons(f(this.first), this.rest.map(f)); }
-  each(f: (x: T) => void): void {
-    f(this.first);
-    this.rest.each(f);
-  }
-  foldl<B>(f: (base: B, x: T) => B, base: B): B { return this.rest.foldl(f, f(base, this.first)); }
-  foldr<B>(f: (base: B, x: T) => B, base: B): B { return f(this.rest.foldr(f, base), this.first); }
-  getFirst(): T { return this.first; }
-  getLast(): T { return this.rest.isEmpty() ? this.first : this.rest.getLast(); }
-  isEmpty(): boolean { return false; }
-  length(): number { return 1 + this.rest.length(); }
-  joinStr(sep: string): string {
-    const l = String(this.first);
-    const r = this.rest.joinStr(sep);
-    if (r === '') { return l; }
-    else { return l + sep + r; }
-  }
-  reverse(): ConcatList<T> { return new ConcatSnoc(this.rest.reverse(), this.first); }
-  all(f: (x: T) => boolean): boolean { return f(this.first) && this.rest.all(f); }
 }
 
 export class ConcatSnoc<T> extends ConcatListBase<T> {
   get $name(): 'concat-snoc' { return 'concat-snoc'; }
   constructor(public head: ConcatList<T>, public last: T) { super(); }
-  toListAcc(rest: T[]): T[] { return this.head.toListAcc([this.last, ...rest]); }
-  mapToListAcc<U>(f: (x: T) => U, rest: U[]): U[] { return this.head.mapToListAcc(f, [f(this.last), ...rest]); }
-  map<U>(f: (x: T) => U): ConcatList<U> { return new ConcatSnoc(this.head.map(f), f(this.last)); }
-  each(f: (x: T) => void): void {
-    this.head.each(f);
-    f(this.last);
-  }
-  foldl<B>(f: (base: B, x: T) => B, base: B): B { return f(this.head.foldl(f, base), this.last); }
-  foldr<B>(f: (base: B, x: T) => B, base: B): B { return this.head.foldr(f, f(base, this.last)); }
-  getFirst(): T { return this.head.isEmpty() ? this.last : this.head.getFirst(); }
-  getLast(): T { return this.last; }
-  isEmpty(): boolean { return false; }
-  length(): number { return this.head.length() + 1; }
-  joinStr(sep: string): string {
-    const h = this.head.joinStr(sep);
-    const l = String(this.last);
-    if (h === '') { return l; }
-    else { return h + sep + l; }
-  }
-  reverse(): ConcatList<T> { return new ConcatCons(this.last, this.head.reverse()); }
-  all(f: (x: T) => boolean): boolean { return this.head.all(f) && f(this.last); }
 }
 
 export type ConcatList<T> =
@@ -171,6 +287,128 @@ export type ConcatList<T> =
   | ConcatAppend<T>
   | ConcatCons<T>
   | ConcatSnoc<T>;
+
+// A deferred element in a forward walk (a snoc's `last`, pending until its
+// head is exhausted). A wrapper class so an element that is itself a
+// ConcatList cannot be confused with a link.
+class PendingElem<T> {
+  constructor(public e: T) {}
+}
+
+const DONE = Symbol('concat-walk-done');
+
+/*
+  In-order (left-to-right) element walk, iteratively: cons yields `first`
+  then descends `rest`; snoc descends `head` with `last` pending behind
+  it; append descends left with right pending. next() returns DONE when
+  exhausted. Elements are yielded in exactly the order the recursive
+  each/foldl visited them.
+*/
+class ForwardWalk<T> {
+  private stack: (ConcatList<T> | PendingElem<T>)[];
+  constructor(root: ConcatList<T>) {
+    this.stack = [root];
+  }
+  next(): T | typeof DONE {
+    const stack = this.stack;
+    while (stack.length > 0) {
+      const cur = stack.pop() as ConcatList<T> | PendingElem<T>;
+      if (cur instanceof PendingElem) { return cur.e; }
+      switch (cur.$name) {
+        case 'concat-empty': break;
+        case 'concat-singleton': return cur.element;
+        case 'concat-cons':
+          stack.push(cur.rest);
+          return cur.first;
+        case 'concat-snoc':
+          stack.push(new PendingElem(cur.last), cur.head);
+          break;
+        case 'concat-append':
+          stack.push(cur.right, cur.left);
+          break;
+      }
+    }
+    return DONE;
+  }
+}
+
+function elementsForward<T>(root: ConcatList<T>): T[] {
+  const out: T[] = [];
+  const walk = new ForwardWalk(root);
+  for (let x = walk.next(); x !== DONE; x = walk.next()) {
+    out.push(x as T);
+  }
+  return out;
+}
+
+function mapForward<T, U>(root: ConcatList<T>, f: (x: T) => U): U[] {
+  const out: U[] = [];
+  const walk = new ForwardWalk(root);
+  for (let x = walk.next(); x !== DONE; x = walk.next()) {
+    out.push(f(x as T));
+  }
+  return out;
+}
+
+/*
+  Structure-preserving map, f applied left-to-right (the recursive map's
+  order for every node type: cons evaluates f(first) before mapping rest,
+  snoc maps head before f(last)). The result has the SAME node shape as
+  the input, so no consumer can tell this apart from the recursion.
+*/
+function mapPreservingShape<T, U>(root: ConcatList<T>, f: (x: T) => U): ConcatList<U> {
+  type Frame = { node: ConcatList<T>; state: number; a?: unknown };
+  const frames: Frame[] = [{ node: root, state: 0 }];
+  const vals: ConcatList<U>[] = [];
+  while (frames.length > 0) {
+    const fr = frames[frames.length - 1];
+    const node = fr.node;
+    switch (node.$name) {
+      case 'concat-empty':
+        frames.pop();
+        vals.push(node as unknown as ConcatList<U>);
+        break;
+      case 'concat-singleton':
+        frames.pop();
+        vals.push(new ConcatSingleton(f(node.element)));
+        break;
+      case 'concat-cons':
+        if (fr.state === 0) {
+          fr.a = f(node.first);
+          fr.state = 1;
+          frames.push({ node: node.rest, state: 0 });
+        } else {
+          frames.pop();
+          vals.push(new ConcatCons(fr.a as U, vals.pop() as ConcatList<U>));
+        }
+        break;
+      case 'concat-snoc':
+        if (fr.state === 0) {
+          fr.state = 1;
+          frames.push({ node: node.head, state: 0 });
+        } else {
+          const h = vals.pop() as ConcatList<U>;
+          frames.pop();
+          vals.push(new ConcatSnoc(h, f(node.last)));
+        }
+        break;
+      case 'concat-append':
+        if (fr.state === 0) {
+          fr.state = 1;
+          frames.push({ node: node.left, state: 0 });
+        } else if (fr.state === 1) {
+          fr.a = vals.pop();
+          fr.state = 2;
+          frames.push({ node: node.right, state: 0 });
+        } else {
+          frames.pop();
+          vals.push(new ConcatAppend(fr.a as ConcatList<U>, vals.pop() as ConcatList<U>));
+        }
+        break;
+    }
+  }
+  return vals[0];
+}
 
 export function isConcatEmpty(x: any): x is ConcatEmpty<any> { return x instanceof ConcatEmpty; }
 export function isConcatSingleton(x: any): x is ConcatSingleton<any> { return x instanceof ConcatSingleton; }
@@ -192,42 +430,15 @@ export const clAppend = concatAppend;
 export const clCons = concatCons;
 export const clSnoc = concatSnoc;
 
-function revmapToListAcc<T, U>(self: ConcatList<T>, f: (x: T) => U, revhead: U[]): U[] {
-  if (isConcatEmpty(self)) { return revhead; }
-  else if (isConcatSingleton(self)) { return [f(self.element), ...revhead]; }
-  else if (isConcatAppend(self)) { return revmapToListAcc(self.right, f, revmapToListAcc(self.left, f, revhead)); }
-  else if (isConcatCons(self)) { return revmapToListAcc(self.rest, f, [f(self.first), ...revhead]); }
-  else if (isConcatSnoc(self)) {
-    const newhead = revmapToListAcc(self.head, f, revhead);
-    return [f(self.last), ...newhead]; // order of operations matters
-  } else {
-    throw new InternalCompilerError(`revmapToListAcc: unknown ConcatList ${(self as any).$name}`);
-  }
-}
-
 // Takes a predicate and returns either the first item in this list that
-// passes the predicate, or undefined (Pyret returns an Option)
+// passes the predicate, or undefined (Pyret returns an Option).
+// f left-to-right, stopping at the first hit.
 export function find<T>(f: (x: T) => boolean, l: ConcatList<T>): T | undefined {
-  switch (l.$name) {
-    case 'concat-empty':
-      return undefined;
-    case 'concat-singleton':
-      return f(l.element) ? l.element : undefined;
-    case 'concat-append': {
-      const resultLeft = find(f, l.left);
-      if (resultLeft === undefined) { return find(f, l.right); }
-      else { return resultLeft; }
-    }
-    case 'concat-cons':
-      return f(l.first) ? l.first : find(f, l.rest);
-    case 'concat-snoc': {
-      const resultLeft = find(f, l.head);
-      if (resultLeft === undefined) { return f(l.last) ? l.last : undefined; }
-      else { return resultLeft; }
-    }
-    default:
-      throw new InternalCompilerError(`find: unknown ConcatList ${(l as any).$name}`);
+  const walk = new ForwardWalk(l);
+  for (let x = walk.next(); x !== DONE; x = walk.next()) {
+    if (f(x as T)) { return x as T; }
   }
+  return undefined;
 }
 
 export function foldl<T, B>(f: (base: B, x: T) => B, base: B, lst: ConcatList<T>): B {
