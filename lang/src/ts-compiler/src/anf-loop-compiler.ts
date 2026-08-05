@@ -184,10 +184,13 @@ export const effectiveIds: Map<string, boolean> = new Map();
 export function freshId(id: A.Name): A.Name {
   const baseName = A.isSTypeGlobal(id) ? id.tosourcestring() : id.toname();
   const noHyphens = baseName.split('-').join('$');
-  const n = jsNames.makeAtom(noHyphens);
-  if (effectiveIds.has(n.tosourcestring())) { // awkward name collision!
-    return freshId(id);
-  } else {
+  // Retry collisions in a loop (self-recursion here burns one frame per
+  // collision, which adds up on small stacks).
+  for (;;) {
+    const n = jsNames.makeAtom(noHyphens);
+    if (effectiveIds.has(n.tosourcestring())) { // awkward name collision!
+      continue;
+    }
     effectiveIds.set(n.tosourcestring(), true);
     return n;
   }
