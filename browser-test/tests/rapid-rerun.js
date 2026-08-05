@@ -1,96 +1,60 @@
 /*
  * rapid-rerun.js -- two things outlive a finished run: the animation that
  * restores the interactions prompt, and the 1-second timer that arms the
- * Stop button. A second run started inside that second runs among both
- * leftovers, and they must not affect it: the prompt stays hidden until the
- * run really ends (a visible prompt is how DOM readers decide a run is
- * over), and a Stop clicked the moment the button arms -- which is the
- * FIRST run's timer arming it -- cleanly breaks the live run.
- *
- * One check, one click: run something trivial, immediately start a run that
- * never terminates, and at the first moment Stop is possible require that
- * the editor still claims the run (replWidget.isRunning()) and shows no
- * prompt. If the leftover fade resurrected the prompt, it stays visible
- * from then on, so this single look catches it. Then Stop, and require a
- * user break and a working editor.
+ * Stop button. A run started inside that second must not be affected by
+ * either leftover: the prompt stays hidden until the run really ends (a
+ * visible prompt is how DOM readers decide a run is over), and a Stop
+ * clicked the moment the button arms -- which is the FIRST run's timer
+ * arming it -- cleanly breaks the live run.
  */
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { ProceduralError } = require("../shared/errors");
+const { IDLE, runProgram, outputHas, waitOrFail } = require("./helpers");
 
 const FOREVER = "fun loop(n):\n  loop(n + 1)\nend\nloop(0)\n";
-
-const IDLE = "window.replWidget.isRunning() !== true && " +
-  "(function(){var pc=document.querySelector('.prompt-container');" +
-  "return !pc || pc.offsetParent !== null;})()";
-
-const BREAK_ARMED =
-  "(function(){var b=document.getElementById('breakButton');return !!(b && !b.disabled);})()";
-
-// Read once, atomically: is the run still claimed, is the prompt showing,
-// and click Stop in the same turn (before break processing can muddy either).
-const CHECK_AND_STOP = `(function(){
-  var pc = document.querySelector(".prompt-container");
-  var b = document.getElementById("breakButton");
-  var st = {
-    claimed: window.replWidget.isRunning() === true,
-    promptVisible: !pc || pc.offsetParent !== null,
-    armed: !!(b && !b.disabled)
-  };
-  if (st.armed) b.click();
-  return st;
-})()`;
-
-const OUTPUT_TEXT = `(function(){
-  var out = document.getElementById("output");
-  return out ? (out.innerText || "").replace(/\\s+/g, " ").trim() : "";
-})()`;
-
-async function install(page, code) {
-  for (let i = 0; i < 20; i++) {
-    await page.eval("window.PA.setDefinitions(" + JSON.stringify(code) + ")");
-    if ((await page.eval("window.PA.cmValue()")) === code) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new ProceduralError("could not install the program into the editor (doc-sync race)");
-}
-
-async function run(page, code) {
-  await install(page, code);
-  await page.eval("window.PA.clearOutput()");
-  await page.eval("window.PA.run()");
-}
 
 module.exports = function registerRapidRerun(getSession) {
   test("a run begun immediately after another is not affected by the first run's leftovers",
     { timeout: 120000 }, async () => {
       const page = getSession().page;
 
-      await run(page, "1 + 1\n");
-      await page.waitFor(IDLE, 30000);
+      await runProgram(page, "1 + 1\n");
+      await waitOrFail(page, IDLE, 30000, "the warmup run never finished");
 
-      await run(page, FOREVER);
-      // The button arms at most ~1s in, via the FIRST run's leftover timer
-      // (this run is younger than its own timer's schedule) -- and that
-      // moment is past any leftover prompt animation, so one look suffices.
-      await page.waitFor(BREAK_ARMED, 10000);
-      const st = await page.eval(CHECK_AND_STOP);
-      assert.ok(st.armed && st.claimed,
-        "the editor stopped claiming a run that cannot have ended: " + JSON.stringify(st));
+      await runProgram(page, FOREVER);
+      const st = await stopAtFirstChance(page);
+      assert.ok(st.claimed,
+        "the editor stopped claiming a run that cannot have ended");
       assert.ok(!st.promptVisible,
-        "the prompt is visible mid-run -- the previous run's leftover animation " +
-        "resurrected it, which is what makes DOM readers call a live run finished: " +
-        JSON.stringify(st));
+        "the prompt is visible mid-run -- the previous run's leftover " +
+        "animation resurrected it");
 
-      await page.waitFor(IDLE, 30000);
-      const out = await page.eval(OUTPUT_TEXT);
-      assert.ok(out.indexOf("stopped by user") !== -1,
-        "Stop ended the run, but not as a user break; the editor shows: " +
-        JSON.stringify(out.slice(0, 200)));
+      await waitOrFail(page, `${outputHas("stopped by user")} && ${IDLE}`, 30000,
+        "Stop did not end the run as a user break");
 
-      await run(page, "40 + 2\n");
-      await page.waitFor(IDLE, 30000);
-      assert.ok((await page.eval(OUTPUT_TEXT)).indexOf("42") !== -1,
-        "a run after the Stop did not produce its result");
+      await runProgram(page, "40 + 2\n");
+      await waitOrFail(page, `${outputHas("42")} && ${IDLE}`, 30000,
+        "a run after the Stop never produced its result on an idle editor");
     });
 };
+
+const BREAK_ARMED =
+  "(function(){var b=document.getElementById('breakButton');return !!(b && !b.disabled);})()";
+
+// Observe the claim and the prompt in the same in-page turn as the click,
+// so break processing cannot muddy the readings.
+const CHECK_AND_STOP = `(function(){
+  var pc = document.querySelector(".prompt-container");
+  var st = {
+    claimed: window.replWidget.isRunning() === true,
+    promptVisible: !pc || pc.offsetParent !== null
+  };
+  document.getElementById("breakButton").click();
+  return st;
+})()`;
+
+async function stopAtFirstChance(page) {
+  await waitOrFail(page, BREAK_ARMED, 10000,
+    "the break button never armed during a non-terminating run");
+  return page.eval(CHECK_AND_STOP);
+}

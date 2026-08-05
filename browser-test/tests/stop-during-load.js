@@ -11,6 +11,7 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { ProceduralError } = require("../shared/errors");
+const { IDLE, runProgram, outputText, outputHas, waitOrFail } = require("./helpers");
 
 const HOLD_MS = 8000;
 const RESURRECT_MS = 6000;
@@ -34,35 +35,7 @@ const STOPPABLE =
   "window.replWidget.isRunning() === true && " +
   "(function(){var b=document.getElementById('breakButton');return !!(b && !b.disabled);})()";
 
-const IDLE =
-  "window.replWidget.isRunning() !== true && " +
-  "(function(){var pc=document.querySelector('.prompt-container');" +
-  "return !pc || pc.offsetParent !== null;})()";
-
-const STOPPED_AND_IDLE =
-  `window.PA.outputText().indexOf(${JSON.stringify(STOPPED_MESSAGE)}) !== -1 && ${IDLE}`;
-
-async function install(page, code) {
-  for (let i = 0; i < 20; i++) {
-    await page.eval("window.PA.setDefinitions(" + JSON.stringify(code) + ")");
-    if ((await page.eval("window.PA.cmValue()")) === code) return;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new ProceduralError("could not install the program into the editor (doc-sync race)");
-}
-
-async function outputText(page) {
-  return (await page.eval("window.PA.outputText()")).replace(/\s+/g, " ").trim();
-}
-
-async function waitOrFail(page, expr, ms, message) {
-  try {
-    await page.waitFor(expr, Math.max(1, ms));
-  } catch (e) {
-    assert.fail(message + ". The editor shows: " +
-      JSON.stringify((await outputText(page)).slice(0, 200)));
-  }
-}
+const STOPPED_AND_IDLE = `${outputHas(STOPPED_MESSAGE)} && ${IDLE}`;
 
 async function startRunWithHeldImport(page) {
   const base = process.env.PYRET_FIXTURE_BASE;
@@ -71,11 +44,8 @@ async function startRunWithHeldImport(page) {
       "PYRET_FIXTURE_BASE is unset; run.js sets it when it starts the fixture server");
   }
   const url = base + "/pyret-programs/url-imports/lib/provided.arr?delay=" + HOLD_MS;
-  await install(page, 'import url("' + url + '") as S\n\nS.shared-value\n');
-  await page.eval("window.PA.clearOutput()");
-  const t0 = Date.now();
-  await page.eval("window.PA.run()");
-  return { page, releaseAt: t0 + HOLD_MS };
+  await runProgram(page, 'import url("' + url + '") as S\n\nS.shared-value\n');
+  return { page, releaseAt: Date.now() + HOLD_MS };
 }
 
 async function pressStopAtFirstChance(run) {
@@ -106,10 +76,8 @@ async function expectTheReleaseToResurrectNothing(run) {
 }
 
 async function expectANewRunToProduceResults(page) {
-  await install(page, "1 + 1\n");
-  await page.eval("window.PA.clearOutput()");
-  await page.eval("window.PA.run()");
-  await waitOrFail(page, `window.PA.outputText().indexOf("2") !== -1 && ${IDLE}`, 30000,
+  await runProgram(page, "1 + 1\n");
+  await waitOrFail(page, `${outputHas("2")} && ${IDLE}`, 30000,
     "after Stop, a later Run never produced its result on an idle editor");
 }
 
