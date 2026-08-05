@@ -1,25 +1,46 @@
 /*
- * stop-during-load.js -- pressing Stop while compile is happening (e.g. modules
- * being fetched and during codegen) must leave the editor usable.
+ * stop-during-load.js -- Stop, pressed while the program's import is still
+ * being fetched, must end the run right then -- not whenever the fetch
+ * happens to finish -- and hand back a usable editor.
+ *
+ * There's also an assertion of an explicit regression: at one point the
+ * continuation of the loading step could carry forward after a stop and still
+ * run the program while the UI appeared stopped. The "no resurrection" rule
+ * makes sure we don't hit that again.
  */
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { ProceduralError } = require("../shared/errors");
 
-// Long enough that the fetch is unambiguously still open when we click (the
-// click lands ~1s in, when the break button arms), short enough that the test
-// is not slow.
 const HOLD_MS = 8000;
+const RESURRECT_MS = 6000;
 
-const RUN_MARK = "__stop_during_load_mark";
-// What the fixture module provides; the program renders it, so seeing it on
-// screen means the run reached the end despite Stop.
+module.exports = function registerStopDuringLoad(getSession) {
+  test("Stop pressed while an import is still loading ends the run during the load and leaves the editor usable",
+    { timeout: 120000 }, async () => {
+      const page = getSession().page;
+      const run = await startRunWithHeldImport(page);
+      await pressStopAtFirstChance(run);
+      await expectStoppedDuringTheLoad(run);
+      await expectTheReleaseToResurrectNothing(run);
+      await expectANewRunToProduceResults(page);
+    });
+};
+
 const IMPORTED_VALUE = "from-url-imports-lib";
+const STOPPED_MESSAGE = "stopped by user";
 
-const OUTPUT_TEXT = `(function(){
-  var out = document.getElementById("output");
-  return out ? (out.innerText || "").replace(/\\s+/g, " ").trim() : "";
-})()`;
+const STOPPABLE =
+  "window.replWidget.isRunning() === true && " +
+  "(function(){var b=document.getElementById('breakButton');return !!(b && !b.disabled);})()";
+
+const IDLE =
+  "window.replWidget.isRunning() !== true && " +
+  "(function(){var pc=document.querySelector('.prompt-container');" +
+  "return !pc || pc.offsetParent !== null;})()";
+
+const STOPPED_AND_IDLE =
+  `window.PA.outputText().indexOf(${JSON.stringify(STOPPED_MESSAGE)}) !== -1 && ${IDLE}`;
 
 async function install(page, code) {
   for (let i = 0; i < 20; i++) {
@@ -30,116 +51,65 @@ async function install(page, code) {
   throw new ProceduralError("could not install the program into the editor (doc-sync race)");
 }
 
-// #output is emptied at the top of every run, so a marker placed in it
-// disappears exactly when a run really begins -- which is how we tell "the Run
-// was accepted" from "the Run was silently dropped".
-const MARK = `(function(){
-  var out = document.getElementById("output");
-  if (!out) return false;
-  var s = document.createElement("span");
-  s.id = ${JSON.stringify(RUN_MARK)};
-  out.appendChild(s);
-  return true;
-})()`;
-const MARK_GONE = `document.getElementById(${JSON.stringify(RUN_MARK)}) === null`;
+async function outputText(page) {
+  return (await page.eval("window.PA.outputText()")).replace(/\s+/g, " ").trim();
+}
 
-const RUN_BUTTON = `(function(){
-  var b = document.getElementById("runButton");
-  return b ? { disabled: b.disabled === true,
-               text: (b.innerText || "").trim().replace(/\\s+/g, " ") } : null;
-})()`;
+async function waitOrFail(page, expr, ms, message) {
+  try {
+    await page.waitFor(expr, Math.max(1, ms));
+  } catch (e) {
+    assert.fail(message + ". The editor shows: " +
+      JSON.stringify((await outputText(page)).slice(0, 200)));
+  }
+}
 
-const CLICK_STOP = `(function(){
-  var b = document.getElementById("breakButton");
-  if (!b) return { present: false };
-  var wasEnabled = b.disabled === false;
-  if (wasEnabled) b.click();
-  return { present: true, wasEnabled: wasEnabled };
-})()`;
+async function startRunWithHeldImport(page) {
+  const base = process.env.PYRET_FIXTURE_BASE;
+  if (!base) {
+    throw new ProceduralError(
+      "PYRET_FIXTURE_BASE is unset; run.js sets it when it starts the fixture server");
+  }
+  const url = base + "/pyret-programs/url-imports/lib/provided.arr?delay=" + HOLD_MS;
+  await install(page, 'import url("' + url + '") as S\n\nS.shared-value\n');
+  await page.eval("window.PA.clearOutput()");
+  const t0 = Date.now();
+  await page.eval("window.PA.run()");
+  return { page, releaseAt: t0 + HOLD_MS };
+}
 
-module.exports = function registerStopDuringLoad(getSession) {
-  test("Stop pressed while an import is still loading leaves the editor usable",
-    { timeout: 120000 }, async () => {
-      const base = process.env.PYRET_FIXTURE_BASE;
-      if (!base) {
-        throw new ProceduralError(
-          "PYRET_FIXTURE_BASE is unset; run.js sets it when it starts the fixture server");
-      }
-      const page = getSession().page;
-      const url = base + "/pyret-programs/url-imports/lib/provided.arr?delay=" + HOLD_MS;
-      const program = 'import url("' + url + '") as S\n\nS.shared-value\n';
+async function pressStopAtFirstChance(run) {
+  try {
+    await run.page.waitFor(STOPPABLE, Math.floor(HOLD_MS / 2));
+  } catch (e) {
+    throw new ProceduralError(
+      "the break button never armed while the import was being held, so this " +
+      "test never exercised its case");
+  }
+  await run.page.eval("document.getElementById('breakButton').click()");
+}
 
-      await install(page, program);
-      await page.eval("window.PA.clearOutput()");
-      const t0 = Date.now();
-      await page.eval("window.PA.run()");
+// The deadline leaves the hold's last second unspent: meeting it proves the
+// break landed while the fetch was still open, not once the load finished.
+async function expectStoppedDuringTheLoad(run) {
+  await waitOrFail(run.page, STOPPED_AND_IDLE, (run.releaseAt - 1000) - Date.now(),
+    "Stop did not end the run as a user break while the import was still being fetched");
+}
 
-      // Press Stop at the first moment a user could: the editor has claimed
-      // the run AND the break button has armed. Both must hold -- the claim
-      // alone precedes the button by the spinner delay, and neither can appear
-      // once the (held) run has somehow finished, so a timeout here means the
-      // test never exercised its case.
-      try {
-        await page.waitFor(
-          "window.replWidget.isRunning() === true && " +
-          "(function(){var b=document.getElementById('breakButton');return !!(b && !b.disabled);})()",
-          Math.floor(HOLD_MS / 2));
-      } catch (e) {
-        throw new ProceduralError(
-          "the break button never armed while the import was being held, so this " +
-          "test never exercised its case");
-      }
-      const clickedAtMs = Date.now() - t0;
-      const stop = await page.eval(CLICK_STOP);
-      if (!stop.present || !stop.wasEnabled) {
-        throw new ProceduralError(
-          "Stop was not clickable " + clickedAtMs + "ms into the run, so this test never " +
-          "exercised its case (breakButton present=" + stop.present +
-          ", enabled=" + stop.wasEnabled + ")");
-      }
+async function expectTheReleaseToResurrectNothing(run) {
+  await new Promise((r) =>
+    setTimeout(r, Math.max(0, run.releaseAt + RESURRECT_MS - Date.now())));
+  const shown = await outputText(run.page);
+  assert.ok(shown.indexOf(IMPORTED_VALUE) === -1,
+    "the released fetch resurrected the stopped run. The editor shows: " +
+    JSON.stringify(shown.slice(0, 200)));
+}
 
-      // Past the point where the held module is released, plus room for the
-      // compile and run that follow it.
-      await new Promise((r) => setTimeout(r, (HOLD_MS - clickedAtMs) + 6000));
+async function expectANewRunToProduceResults(page) {
+  await install(page, "1 + 1\n");
+  await page.eval("window.PA.clearOutput()");
+  await page.eval("window.PA.run()");
+  await waitOrFail(page, `window.PA.outputText().indexOf("2") !== -1 && ${IDLE}`, 30000,
+    "after Stop, a later Run never produced its result on an idle editor");
+}
 
-      const shown = await page.eval(OUTPUT_TEXT);
-      assert.ok(
-        shown.indexOf(IMPORTED_VALUE) === -1,
-        "Stop did not stop the program. " + clickedAtMs + "ms into a run whose import was " +
-        "still being fetched, Stop was pressed; the fetch was nevertheless allowed to " +
-        "finish, and the program went on to compile and run, rendering " +
-        JSON.stringify(IMPORTED_VALUE) + ". The editor shows: " + JSON.stringify(shown.slice(0, 200)));
-
-      const btn = await page.eval(RUN_BUTTON);
-      assert.ok(btn, "the Run button is missing from the editor");
-      assert.equal(btn.disabled, false,
-        "after Stop, the Run button is still disabled (it reads " + JSON.stringify(btn.text) +
-        "): repl-ui.js's afterRun never ran, so the editor never left the running state");
-
-      // Does the editor accept work again?
-      await install(page, "1 + 1\n");
-      assert.ok(await page.eval(MARK), "could not mark #output");
-      await page.eval("window.PA.run()");
-      let accepted = false;
-      for (let i = 0; i < 100; i++) {
-        if (await page.eval(MARK_GONE)) { accepted = true; break; }
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      assert.ok(accepted,
-        "after Stop, a later Run never started: #output was never cleared, which is " +
-        "runMainCode's `if(running) { return; }` dropping it because the stopped run " +
-        "left `running` true. The editor is wedged until reload.");
-
-      // Hand the next suite an idle editor.
-      let idle = false;
-      for (let i = 0; i < 150; i++) {
-        const b = await page.eval(RUN_BUTTON);
-        if (b && b.disabled === false && b.text === "Run") { idle = true; break; }
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      if (!idle) {
-        throw new ProceduralError(
-          "the editor never went idle after this test, so later suites cannot be trusted");
-      }
-    });
-};
