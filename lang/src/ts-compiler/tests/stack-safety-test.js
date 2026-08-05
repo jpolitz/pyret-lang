@@ -41,6 +41,10 @@ const GENERATORS = {
   alt: (n) => line(n, (i) => `y${i} = ${i}\nprint(y${i})`),
   // one long left-associated arithmetic chain on a single source line
   binop: (n) => 'n = ' + new Array(n).fill('1').join(' + ') + '\nn',
+  // n statements of MODEST (150-term) chains: pins that per-expression cost
+  // must not accumulate across statement boundaries
+  sums: (n) =>
+    line(n, (i) => `s${i} = ` + new Array(150).fill('1').join(' + ')) + '\ns1',
   // one N-link method chain on a single source line
   chain: (n) => 'l = [list: 1]' + '.push(1)'.repeat(n) + '\nl.length()',
   // one ask with N flat arms (a deep AIf else-chain after ANF)
@@ -69,7 +73,10 @@ const CASES = [
   ['alt', 200, false],
   ['alt', 1000, true, 'resolve-scope NamesVisitor (ast-visitors body spine)'],
   ['binop', 200, false],
+  ['binop', 1000, true, 'anf continuation unwind'],
   ['binop', 3000, true, 'resolve-scope CheckUnbound (ast-visitors app spine)'],
+  ['sums', 10, false],
+  ['sums', 40, true, 'concat-lists spine in DAG simplify (one ANF let per operand)'],
   ['chain', 100, false],
   ['chain', 500, true, 'anf continuation unwind (borderline at 600k)'],
   ['chain', 2000, true, 'parse-pyret tr app-expr chain'],
