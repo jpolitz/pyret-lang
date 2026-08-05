@@ -41,8 +41,9 @@ const GENERATORS = {
   alt: (n) => line(n, (i) => `y${i} = ${i}\nprint(y${i})`),
   // one long left-associated arithmetic chain on a single source line
   binop: (n) => 'n = ' + new Array(n).fill('1').join(' + ') + '\nn',
-  // n statements of MODEST (150-term) chains: pins that per-expression cost
-  // must not accumulate across statement boundaries
+  // n statements of MODEST (150-term) chains: each operand compiles to one
+  // ANF let, so this amplifies into a huge downstream program (n x 150
+  // statements) from realistic source
   sums: (n) =>
     line(n, (i) => `s${i} = ` + new Array(150).fill('1').join(' + ')) + '\ns1',
   // one N-link method chain on a single source line
@@ -69,26 +70,26 @@ const GENERATORS = {
 // [shape, n, todo?, site that overflows today]
 const CASES = [
   ['stmts', 2000, false],
-  ['stmts', 8000, true, 'concat-lists foldr (emit/DAG spine)'],
+  ['stmts', 8000, false],
   ['alt', 200, false],
   ['alt', 1000, true, 'resolve-scope NamesVisitor (ast-visitors body spine)'],
   ['binop', 200, false],
   ['binop', 1000, true, 'anf continuation unwind'],
   ['binop', 3000, true, 'resolve-scope CheckUnbound (ast-visitors app spine)'],
   ['sums', 10, false],
-  ['sums', 40, true, 'concat-lists spine in DAG simplify (one ANF let per operand)'],
+  ['sums', 40, false],
   ['chain', 100, false],
   ['chain', 500, true, 'anf continuation unwind (borderline at 600k)'],
   ['chain', 2000, true, 'parse-pyret tr app-expr chain'],
   ['ask', 400, false],
   ['ask', 2000, true, 'flatness a-if arm cycle'],
   ['data', 150, false],
-  ['data', 1000, true, 'concat-lists each (variant spine)'],
+  ['data', 1000, false],
   ['cases', 150, false],
-  ['cases', 1000, true, 'concat-lists each (branch spine)'],
+  ['cases', 1000, false],
   ['funs', 400, false],
-  ['funs', 2000, true, 'concat-lists foldr (letrec group)'],
-  ['list', 8000, true, 'concat-lists foldr (construct spine)'],
+  ['funs', 2000, false],
+  ['list', 8000, false],
 ];
 
 function compileAt(stackKb, source) {
