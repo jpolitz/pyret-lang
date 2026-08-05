@@ -279,5 +279,8 @@ main(C.otherArgs).then((exitCode) => {
   // before exiting 1. Mirror the message portion.
   printError('The run ended in error:\n\n' +
     (e && e.message !== undefined ? e.message : String(e)) + '\n');
+  // The JS stack, on request -- the message alone cannot say WHERE a
+  // "Maximum call stack size exceeded" came from.
+  if (process.env.PYRET_TS_STACK && e && e.stack) { printError(e.stack + '\n'); }
   process.exit(failureCode);
 });

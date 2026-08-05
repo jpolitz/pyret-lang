@@ -491,6 +491,12 @@ all-ts-pyret-test: tests/pyret/all-ts.jarr $(TS_SUITE_CACHE_WARM)
 ts-repl-test: ts-compiler tests/pyret/main2-ts.jarr
 	$(NODE) --test src/ts-compiler/tests/repl-test.js
 
+.PHONY : ts-stack-safety-test
+# Compiles generated flat-but-large programs in subprocesses pinned to a
+# browser-like --stack-size; `todo` cases are the known-overflow frontier.
+ts-stack-safety-test: ts-compiler
+	$(NODE) --test src/ts-compiler/tests/stack-safety-test.js
+
 # ============================================================
 # Bootstrap convergence: byte-identical, self-fixpointing compilers
 # from BOTH the Pyret-hosted (.arr) path and the TypeScript path.
