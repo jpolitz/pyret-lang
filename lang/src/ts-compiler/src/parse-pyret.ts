@@ -264,6 +264,57 @@ function translate(node: ParseNode, fileName: string): A.Program {
     return translators[node.name](node);
   }
 
+  /*
+    The postfix (application/dot) spine: `o.m(1).n(2)…` parses as one CST
+    node per link, alternating app-expr/dot-expr through `expr` wrappers,
+    and the recursive translation made chain LENGTH into stack depth.
+    Walk the spine iteratively and emit a flat s-app-chain: the base plus
+    one ChainDot/ChainApp link per step, each carrying the l its nested
+    s-dot/s-app node used to have. Arguments still translate
+    innermost-link-first, as the recursion did.
+  */
+  function trPostfixChain(node: ParseNode): any {
+    const spine: ParseNode[] = [];
+    let cur: ParseNode = node;
+    for (;;) {
+      if (cur.name === 'expr') {
+        cur = cur.kids[0];
+        continue;
+      }
+      if (cur.name === 'app-expr') {
+        if (cur.kids.length > 2) {
+          throwParseErrorBadApp(pos(cur.kids[0].pos),
+            pos2(cur.kids[1].pos, cur.kids[cur.kids.length - 1].pos));
+        }
+        spine.push(cur);
+        cur = cur.kids[0];
+        continue;
+      }
+      if (cur.name === 'dot-expr') {
+        spine.push(cur);
+        cur = cur.kids[0];
+        continue;
+      }
+      break;
+    }
+    const base = tr(cur);
+    const links: any[] = [];
+    for (let i = spine.length - 1; i >= 0; i--) {
+      const n = spine[i];
+      if (n.name === 'app-expr') {
+        // (app-expr f args)
+        links.push(new A.ChainApp(pos(n.pos), tr(n.kids[1]), undefined));
+      } else {
+        // (dot-expr obj PERIOD field)
+        links.push(new A.ChainDot(pos(n.pos), symbol(n.kids[2])));
+      }
+    }
+    if (links.length === 0) {
+      return base;
+    }
+    return new A.SAppChain(links[links.length - 1].l, base, links);
+  }
+
   function nameSpec(node: ParseNode, Constructor: new (l: Srcloc, nameSpec: any) => any): any {
     return new Constructor(pos(node.pos), tr(node.kids[0]));
   }
@@ -1247,21 +1298,14 @@ function translate(node: ParseNode, fileName: string): A.Program {
       }
     },
     'app-expr': function(node) {
-      if (node.kids.length > 2) {
-        throwParseErrorBadApp(pos(node.kids[0].pos),
-          pos2(node.kids[1].pos, node.kids[node.kids.length - 1].pos));
-      } else {
-        // (app-expr f args)
-        return new A.SApp(pos(node.pos), tr(node.kids[0]), tr(node.kids[1]));
-      }
+      return trPostfixChain(node);
     },
     'id-expr': function(node) {
       // (id-expr x)
       return new A.SId(pos(node.pos), name(node.kids[0]));
     },
     'dot-expr': function(node) {
-      // (dot-expr obj PERIOD field)
-      return new A.SDot(pos(node.pos), tr(node.kids[0]), symbol(node.kids[2]));
+      return trPostfixChain(node);
     },
     'get-bang-expr': function(node) {
       // (get-bang-expr obj BANG field)

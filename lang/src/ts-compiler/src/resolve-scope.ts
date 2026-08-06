@@ -2035,6 +2035,50 @@ export function resolveNames(p: A.Program, thismoduleUri: string, initialEnv: C.
       }
     }
 
+    // A chain whose base is a plain name and whose first link is a dot
+    // may be a module reference (`C.x`), exactly as the nested innermost
+    // s-dot was: the base and first link then collapse to an
+    // s-id-modref, and the rest of the chain continues on it.
+    sAppChain(node: A.SAppChain): A.Expr {
+      let base: A.Expr;
+      let startIdx = 0;
+      const first = node.links.length > 0 ? node.links[0] : undefined;
+      const nb = node.base;
+      if (first !== undefined && A.isChainDot(first) && A.isSId(nb) && A.isSName(nb.id)
+          && !this.env.has(nb.id.s) && this.moduleEnv.has(nb.id.s)) {
+        const s = nb.id.s;
+        const name = first.field;
+        const modBind = mapGetValue(this.moduleEnv, s);
+        const ve = initialEnv.valueByUri(modBind.uri, name);
+        if (ve === undefined) {
+          nameErrors = [new CE.WfErrSplit("The module " + s + " (" + modBind.uri + ") has no provided member " + name, [first.l, nb.l]), ...nameErrors];
+          base = new A.SIdModref(first.l, modBind.atom, modBind.uri, name);
+        } else if (C.isVVar(ve)) {
+          base = new A.SIdVarModref(first.l, modBind.atom, modBind.uri, name);
+        } else {
+          base = new A.SIdModref(first.l, modBind.atom, modBind.uri, name);
+        }
+        startIdx = 1;
+      } else {
+        base = nb.visit(this);
+      }
+      if (startIdx === node.links.length) {
+        return base;
+      }
+      const links: A.ChainLink[] = [];
+      for (let i = startIdx; i < node.links.length; i++) {
+        const link = node.links[i];
+        if (A.isChainDot(link)) {
+          links.push(new A.ChainDot(link.l, link.field));
+        } else if (A.isChainApp(link)) {
+          links.push(new A.ChainApp(link.l, link.args.map((a: A.Expr) => a.visit(this)), link.appInfo));
+        } else {
+          throw new InternalCompilerError('resolve-names: unexpected link in surface s-app-chain: ' + (link as any).$name);
+        }
+      }
+      return new A.SAppChain(node.l, base, links);
+    }
+
     sDot(node: A.SDot): A.Expr {
       const obj = node.obj;
       const name = node.field;

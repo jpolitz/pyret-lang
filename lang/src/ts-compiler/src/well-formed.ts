@@ -322,6 +322,15 @@ function rejectStandaloneExprs(stmts: A.Expr[], ignoreLast: boolean): boolean {
         badStmt(l, new A.SOp(stmt.l, last.opL, last.op, stmt.first, last.right));
         break;
       }
+      case 's-app-chain': {
+        // A chain ending in a field lookup is the standalone s-dot case;
+        // one ending in an application is fine, as s-app was.
+        const lastLink = stmt.links[stmt.links.length - 1];
+        if (A.isChainDot(lastLink)) {
+          wfError([ED.para(ED.text("A standalone field-lookup expression probably isn't intentional."))], l);
+        }
+        break;
+      }
       case 's-op': {
         if (stmt.op === 'op==') {
           wfError([
@@ -821,6 +830,23 @@ class WellFormedVisitor extends DefaultIterVisitor {
       addError(new C.UnderscoreAs(node.l, 'a field name'));
     }
     return node.obj.visit(this);
+  }
+  sAppChain(node: A.SAppChain): boolean {
+    // Nested traversal order: dot-field checks ran outermost-in on the
+    // way down, then the base, then each link's arguments innermost-out.
+    for (let i = node.links.length - 1; i >= 0; i--) {
+      const link = node.links[i];
+      if (A.isChainDot(link) && link.field === '_') {
+        addError(new C.UnderscoreAs(link.l, 'a field name'));
+      }
+    }
+    if (!node.base.visit(this)) { return false; }
+    for (const link of node.links) {
+      if (A.isChainApp(link)) {
+        if (!link.args.every((a: A.Expr) => a.visit(this))) { return false; }
+      }
+    }
+    return true;
   }
   sTupleGet(node: A.STupleGet): boolean {
     if (!Number.isInteger(node.index) || (node.index < 0) || (node.index > 1000)) {
@@ -1381,6 +1407,9 @@ class TopLevelVisitor extends DefaultIterVisitor {
   }
   sDot(node: A.SDot): boolean {
     return wellFormedVisitor.sDot(node);
+  }
+  sAppChain(node: A.SAppChain): boolean {
+    return wellFormedVisitor.sAppChain(node);
   }
   sGetBang(node: A.SGetBang): boolean {
     return wellFormedVisitor.sGetBang(node);
