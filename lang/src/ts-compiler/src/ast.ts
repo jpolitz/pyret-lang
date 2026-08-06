@@ -1280,6 +1280,143 @@ export class SScopeLetrec {
 
 export type ScopeEntry = SScopeLet | SScopeTypeLet | SScopeLetrec | Expr;
 
+/*
+  FLATTENED application/operator chains, internal to the post-desugar
+  pipeline (never parsed; not user-visible). Desugaring a binop chain
+  (`1 + 1 + ...`) or a dot/app chain (`l.push(1).push(2)...`) used to
+  emit one left-nested s-app per link, so operand/link count became the
+  recursion depth of every later pass and of ANF. An s-app-chain stores
+  the base expression plus the ordered links; `appChainToNested`
+  documents (and, for the type checker, reconstitutes) the equivalent
+  nested form. A link's `appInfo` is filled in by the set-recursive /
+  set-tail cleaning visitors, exactly as s-app becomes s-app-enriched.
+  Chains are only built where the nested callee is never a lambda
+  (binop callees are global function ids; app/method callees are the
+  chain accumulation itself), so the inline-lams rewrite is unaffected.
+*/
+
+export class ChainDot {
+  get $name(): 's-chain-dot' { return 's-chain-dot'; }
+  constructor(public l: Loc, public field: string) {}
+  label(): string { return 's-chain-dot'; }
+  tosource(): any { return PP.str('.' + this.field); }
+}
+
+export class ChainApp {
+  get $name(): 's-chain-app' { return 's-chain-app'; }
+  constructor(public l: Loc, public args: Expr[], public appInfo: AppInfo | undefined) {}
+  label(): string { return 's-chain-app'; }
+  tosource(): any {
+    return PP.parens(PP.separate(PP.commabreak, this.args.map((a) => a.tosource())));
+  }
+}
+
+export class ChainMethod {
+  get $name(): 's-chain-method' { return 's-chain-method'; }
+  constructor(public l: Loc, public dotL: Loc, public field: string, public args: Expr[], public appInfo: AppInfo | undefined) {}
+  label(): string { return 's-chain-method'; }
+  tosource(): any {
+    return PP.str('.' + this.field).append(PP.parens(PP.separate(PP.commabreak, this.args.map((a) => a.tosource()))));
+  }
+}
+
+export class ChainBinop {
+  get $name(): 's-chain-binop' { return 's-chain-binop'; }
+  // notWrapped: the op<> shape, where the equal-always call sits inside
+  // prim not(...)
+  constructor(public l: Loc, public fn: Expr, public rhs: Expr, public notWrapped: boolean, public appInfo: AppInfo | undefined) {}
+  label(): string { return 's-chain-binop'; }
+  tosource(): any {
+    return PP.str(' <op> ').append(this.rhs.tosource());
+  }
+}
+
+export type ChainLink = ChainDot | ChainApp | ChainMethod | ChainBinop;
+
+export class SAppChain extends ExprBase {
+  get $name(): 's-app-chain' { return 's-app-chain'; }
+  constructor(public l: Loc, public base: Expr, public links: ChainLink[]) { super(); }
+  visit(visitor: any): any { return visitor.sAppChain(this); }
+  label(): string { return 's-app-chain'; }
+  tosource(): any {
+    let doc = this.base.tosource();
+    for (const link of this.links) {
+      doc = doc.append(link.tosource());
+    }
+    return doc;
+  }
+}
+
+/*
+  FLATTENED surface operator chain (never nested; replaces the parser's
+  left-nested s-op spine). `first` is the leftmost operand; each link
+  carries the operator token, its loc, the loc of the accumulated span
+  (what the nested node's l was), and the right operand. Pyret rejects
+  mixed operators without parens in well-formed, so a well-formed chain
+  is single-op; links still carry per-op info so well-formed can produce
+  the same mixed-operator errors. s-op remains as a type for any
+  synthetic construction, but the parser emits only chains.
+*/
+export class OpChainLink {
+  get $name(): 's-op-chain-link' { return 's-op-chain-link'; }
+  constructor(public l: Loc, public opL: Loc, public op: string, public right: Expr) {}
+  label(): string { return 's-op-chain-link'; }
+  tosource(): any {
+    return PP.str(' ' + this.op.substring(2) + ' ').append(this.right.tosource());
+  }
+}
+
+export class SOpChain extends ExprBase {
+  get $name(): 's-op-chain' { return 's-op-chain'; }
+  constructor(public l: Loc, public first: Expr, public links: OpChainLink[]) { super(); }
+  visit(visitor: any): any { return visitor.sOpChain(this); }
+  label(): string { return 's-op-chain'; }
+  tosource(): any {
+    let doc = this.first.tosource();
+    for (const link of this.links) {
+      doc = doc.append(link.tosource());
+    }
+    return doc;
+  }
+}
+
+export function isSOpChain(x: any): x is SOpChain { return x instanceof SOpChain; }
+
+export function isChainDot(x: any): x is ChainDot { return x instanceof ChainDot; }
+export function isChainApp(x: any): x is ChainApp { return x instanceof ChainApp; }
+export function isChainMethod(x: any): x is ChainMethod { return x instanceof ChainMethod; }
+export function isChainBinop(x: any): x is ChainBinop { return x instanceof ChainBinop; }
+export function isSAppChain(x: any): x is SAppChain { return x instanceof SAppChain; }
+
+// The nested form a chain stands for (one s-app/s-dot per link). Built
+// iteratively; used by the type checker, whose output then keeps the
+// nested shape (the pre-chain status quo when type checking is on).
+export function appChainToNested(chain: SAppChain): Expr {
+  let acc = chain.base;
+  for (const link of chain.links) {
+    if (isChainDot(link)) {
+      acc = new SDot(link.l, acc, link.field);
+    } else if (isChainApp(link)) {
+      acc = link.appInfo === undefined
+        ? new SApp(link.l, acc, link.args)
+        : new SAppEnriched(link.l, acc, link.args, link.appInfo);
+    } else if (isChainMethod(link)) {
+      const dotted = new SDot(link.dotL, acc, link.field);
+      acc = link.appInfo === undefined
+        ? new SApp(link.l, dotted, link.args)
+        : new SAppEnriched(link.l, dotted, link.args, link.appInfo);
+    } else {
+      const app = link.appInfo === undefined
+        ? new SApp(link.l, link.fn, [acc, link.rhs])
+        : new SAppEnriched(link.l, link.fn, [acc, link.rhs], link.appInfo);
+      acc = link.notWrapped
+        ? new SPrimApp(link.l, 'not', [app], new PrimAppInfoC(false))
+        : app;
+    }
+  }
+  return acc;
+}
+
 export class SScopeBlock extends ExprBase {
   get $name(): 's-scope-block' { return 's-scope-block'; }
   constructor(public l: Loc, public entries: ScopeEntry[], public tail: Expr) { super(); }
@@ -2186,7 +2323,7 @@ export class SSpyBlock extends ExprBase {
 
 export type Expr =
   | SModule | STemplate | STypeLetExpr | SLetExpr | SLetrec | SHintExp | SInstantiate
-  | SBlock | SUserBlock | SScopeBlock | SFun | SType | SNewtype | SVar | SRec | SLet | SRef
+  | SBlock | SUserBlock | SScopeBlock | SAppChain | SOpChain | SFun | SType | SNewtype | SVar | SRec | SLet | SRef
   | SContract | SWhen | SAssign | SIfPipe | SIfPipeElse | SIf | SIfElse | SCases
   | SCasesElse | SOp | SCheckTest | SCheckExpr | SParen | SLam | SMethod | SExtend
   | SUpdate | STuple | STupleGet | SObj | SArray | SConstruct | SApp | SAppEnriched

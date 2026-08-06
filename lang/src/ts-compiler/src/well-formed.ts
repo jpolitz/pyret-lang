@@ -315,6 +315,13 @@ function rejectStandaloneExprs(stmts: A.Expr[], ignoreLast: boolean): boolean {
     : stmts;
   function badStmt(l: Loc, stmt: A.Expr): void {
     switch (stmt.$name) {
+      case 's-op-chain': {
+        // Same message the nested outermost s-op produced: keyed on the
+        // last (outermost) operator of the chain.
+        const last = stmt.links[stmt.links.length - 1];
+        badStmt(l, new A.SOp(stmt.l, last.opL, last.op, stmt.first, last.right));
+        break;
+      }
       case 's-op': {
         if (stmt.op === 'op==') {
           wfError([
@@ -537,6 +544,42 @@ class WellFormedVisitor extends DefaultIterVisitor {
   sOp(node: A.SOp): boolean {
     return reachableOps(this, node.l, node.opL, node.op, node.left)
       && reachableOps(this, node.l, node.opL, node.op, node.right);
+  }
+  sOpChain(node: A.SOpChain): boolean {
+    /*
+      The flat chain's analogue of reachable-ops on the nested spine: the
+      outermost (last) operator descends its left spine while operators
+      match; at the first mismatch (from the right) it reports ONE
+      mixed-operator error and leaves everything left of the mismatch
+      unvisited; operands to the right of the mismatch are visited on
+      the unwind, innermost first.
+    */
+    const links = node.links;
+    const last = links[links.length - 1];
+    let mismatchIdx = -1;
+    for (let i = links.length - 2; i >= 0; i--) {
+      if (links[i].op !== last.op) {
+        mismatchIdx = i;
+        break;
+      }
+    }
+    let ok = true;
+    if (mismatchIdx >= 0) {
+      const opL2 = links[mismatchIdx].opL;
+      const op2 = links[mismatchIdx].op;
+      if (last.opL.before(opL2)) {
+        addError(new C.MixedBinops(node.l, opname(last.op), last.opL, opname(op2), opL2));
+      } else {
+        addError(new C.MixedBinops(node.l, opname(op2), opL2, opname(last.op), last.opL));
+      }
+    } else {
+      ok = node.first.visit(this);
+    }
+    for (let k = mismatchIdx + 1; k < links.length; k++) {
+      if (!ok) { break; }
+      ok = links[k].right.visit(this);
+    }
+    return ok;
   }
   sCasesBranch(node: A.SCasesBranch): boolean {
     const oldPbl = parentBlockLoc;
@@ -1270,6 +1313,9 @@ class TopLevelVisitor extends DefaultIterVisitor {
   }
   sOp(node: A.SOp): boolean {
     return wellFormedVisitor.sOp(node);
+  }
+  sOpChain(node: A.SOpChain): boolean {
+    return wellFormedVisitor.sOpChain(node);
   }
   sCheckTest(node: A.SCheckTest): boolean {
     return wellFormedVisitor.sCheckTest(node);

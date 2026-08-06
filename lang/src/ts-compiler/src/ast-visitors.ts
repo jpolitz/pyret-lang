@@ -238,6 +238,22 @@ export class DefaultMapVisitor {
     return new A.SScopeBlock(node.l, node.entries.map(e => e.visit(this)), node.tail.visit(this));
   }
 
+  sAppChain(node: A.SAppChain): A.Expr {
+    const base = node.base.visit(this);
+    const links = node.links.map((link): A.ChainLink => {
+      if (A.isChainDot(link)) {
+        return new A.ChainDot(link.l, link.field);
+      } else if (A.isChainApp(link)) {
+        return new A.ChainApp(link.l, link.args.map((a: A.Expr) => a.visit(this)), link.appInfo);
+      } else if (A.isChainMethod(link)) {
+        return new A.ChainMethod(link.l, link.dotL, link.field, link.args.map((a: A.Expr) => a.visit(this)), link.appInfo);
+      } else {
+        return new A.ChainBinop(link.l, link.fn.visit(this), link.rhs.visit(this), link.notWrapped, link.appInfo);
+      }
+    });
+    return new A.SAppChain(node.l, base, links);
+  }
+
   sUserBlock(node: A.SUserBlock): A.Expr {
     return new A.SUserBlock(node.l, node.body.visit(this));
   }
@@ -328,6 +344,13 @@ export class DefaultMapVisitor {
 
   sOp(node: A.SOp): A.Expr {
     return new A.SOp(node.l, node.opL, node.op, node.left.visit(this), node.right.visit(this));
+  }
+
+  sOpChain(node: A.SOpChain): A.Expr {
+    const first = node.first.visit(this);
+    const links = node.links.map((link) =>
+      new A.OpChainLink(link.l, link.opL, link.op, link.right.visit(this)));
+    return new A.SOpChain(node.l, first, links);
   }
 
   sCheckTest(node: A.SCheckTest): A.Expr {
@@ -891,6 +914,21 @@ export class DefaultIterVisitor {
     return node.entries.every(e => e.visit(this)) && node.tail.visit(this);
   }
 
+  sAppChain(node: A.SAppChain): boolean {
+    if (!node.base.visit(this)) { return false; }
+    return node.links.every((link) => {
+      if (A.isChainDot(link)) {
+        return true;
+      } else if (A.isChainApp(link)) {
+        return link.args.every((a: A.Expr) => a.visit(this));
+      } else if (A.isChainMethod(link)) {
+        return link.args.every((a: A.Expr) => a.visit(this));
+      } else {
+        return link.fn.visit(this) && link.rhs.visit(this);
+      }
+    });
+  }
+
   sUserBlock(node: A.SUserBlock): boolean {
     return node.body.visit(this);
   }
@@ -982,6 +1020,10 @@ export class DefaultIterVisitor {
 
   sOp(node: A.SOp): boolean {
     return node.left.visit(this) && node.right.visit(this);
+  }
+
+  sOpChain(node: A.SOpChain): boolean {
+    return node.first.visit(this) && node.links.every((link) => link.right.visit(this));
   }
 
   sCheckTest(node: A.SCheckTest): boolean {
@@ -1543,6 +1585,22 @@ export class DummyLocVisitor {
     return new A.SScopeBlock(dummyLoc, node.entries.map(e => e.visit(this)), node.tail.visit(this));
   }
 
+  sAppChain(node: A.SAppChain): A.Expr {
+    const base = node.base.visit(this);
+    const links = node.links.map((link): A.ChainLink => {
+      if (A.isChainDot(link)) {
+        return new A.ChainDot(dummyLoc, link.field);
+      } else if (A.isChainApp(link)) {
+        return new A.ChainApp(dummyLoc, link.args.map((a: A.Expr) => a.visit(this)), link.appInfo);
+      } else if (A.isChainMethod(link)) {
+        return new A.ChainMethod(dummyLoc, dummyLoc, link.field, link.args.map((a: A.Expr) => a.visit(this)), link.appInfo);
+      } else {
+        return new A.ChainBinop(dummyLoc, link.fn.visit(this), link.rhs.visit(this), link.notWrapped, link.appInfo);
+      }
+    });
+    return new A.SAppChain(dummyLoc, base, links);
+  }
+
   sUserBlock(node: A.SUserBlock): A.Expr {
     return new A.SUserBlock(dummyLoc, node.body.visit(this));
   }
@@ -1635,6 +1693,13 @@ export class DummyLocVisitor {
 
   sOp(node: A.SOp): A.Expr {
     return new A.SOp(dummyLoc, dummyLoc, node.op, node.left.visit(this), node.right.visit(this));
+  }
+
+  sOpChain(node: A.SOpChain): A.Expr {
+    const first = node.first.visit(this);
+    const links = node.links.map((link) =>
+      new A.OpChainLink(dummyLoc, dummyLoc, link.op, link.right.visit(this)));
+    return new A.SOpChain(dummyLoc, first, links);
   }
 
   sCheckTest(node: A.SCheckTest): A.Expr {
