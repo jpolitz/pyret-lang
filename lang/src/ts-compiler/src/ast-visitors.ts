@@ -222,6 +222,22 @@ export class DefaultMapVisitor {
     return new A.SBlock(node.l, node.stmts.map(s => s.visit(this)));
   }
 
+  sScopeLet(node: A.SScopeLet): A.ScopeEntry {
+    return new A.SScopeLet(node.l, node.binds.map(b => b.visit(this)));
+  }
+
+  sScopeTypeLet(node: A.SScopeTypeLet): A.ScopeEntry {
+    return new A.SScopeTypeLet(node.l, node.binds.map(b => b.visit(this)));
+  }
+
+  sScopeLetrec(node: A.SScopeLetrec): A.ScopeEntry {
+    return new A.SScopeLetrec(node.l, node.binds.map(b => b.visit(this)));
+  }
+
+  sScopeBlock(node: A.SScopeBlock): A.Expr {
+    return new A.SScopeBlock(node.l, node.entries.map(e => e.visit(this)), node.tail.visit(this));
+  }
+
   sUserBlock(node: A.SUserBlock): A.Expr {
     return new A.SUserBlock(node.l, node.body.visit(this));
   }
@@ -859,6 +875,22 @@ export class DefaultIterVisitor {
     return node.stmts.every(s => s.visit(this));
   }
 
+  sScopeLet(node: A.SScopeLet): boolean {
+    return node.binds.every(b => b.visit(this));
+  }
+
+  sScopeTypeLet(node: A.SScopeTypeLet): boolean {
+    return node.binds.every(b => b.visit(this));
+  }
+
+  sScopeLetrec(node: A.SScopeLetrec): boolean {
+    return node.binds.every(b => b.visit(this));
+  }
+
+  sScopeBlock(node: A.SScopeBlock): boolean {
+    return node.entries.every(e => e.visit(this)) && node.tail.visit(this);
+  }
+
   sUserBlock(node: A.SUserBlock): boolean {
     return node.body.visit(this);
   }
@@ -1493,6 +1525,22 @@ export class DummyLocVisitor {
 
   sBlock(node: A.SBlock): A.Expr {
     return new A.SBlock(dummyLoc, node.stmts.map(s => s.visit(this)));
+  }
+
+  sScopeLet(node: A.SScopeLet): A.ScopeEntry {
+    return new A.SScopeLet(dummyLoc, node.binds.map(b => b.visit(this)));
+  }
+
+  sScopeTypeLet(node: A.SScopeTypeLet): A.ScopeEntry {
+    return new A.SScopeTypeLet(dummyLoc, node.binds.map(b => b.visit(this)));
+  }
+
+  sScopeLetrec(node: A.SScopeLetrec): A.ScopeEntry {
+    return new A.SScopeLetrec(dummyLoc, node.binds.map(b => b.visit(this)));
+  }
+
+  sScopeBlock(node: A.SScopeBlock): A.Expr {
+    return new A.SScopeBlock(dummyLoc, node.entries.map(e => e.visit(this)), node.tail.visit(this));
   }
 
   sUserBlock(node: A.SUserBlock): A.Expr {
