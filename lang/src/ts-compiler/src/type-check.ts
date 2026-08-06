@@ -508,6 +508,11 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
             };
             return checkEntries(0, topLevel, context);
           }
+          case 's-app-chain':
+            // Reconstitute the nested form and type it as before; the
+            // checker's rebuilt output then keeps the nested shape (the
+            // pre-chain status quo whenever type checking is on).
+            return checking(A.appChainToNested(e), expectType, topLevel, context);
           case 's-user-block':
             return raise('s-user-block should have already been desugared');
           case 's-fun':
@@ -873,6 +878,10 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
         return synthEntries(0, topLevel, context)
           .mapType((t) => t.setLoc(l));
       }
+      case 's-app-chain':
+        // See the checking case: nested reconstitution, status-quo shape
+        // under type checking.
+        return synthesis(A.appChainToNested(e), topLevel, context);
       case 's-user-block':
         return raise('s-user-block should have already been desugared');
       case 's-fun':

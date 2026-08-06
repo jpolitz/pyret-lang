@@ -395,19 +395,34 @@ function desugarDotAppChain(expr: A.Expr): A.Expr {
     acc = desugarExpr(cur);
     break;
   }
+  // Emit a FLAT chain: one link per dot/app step. Curried steps keep the
+  // original lambda construction (closing off the chain built so far);
+  // an application whose callee is the bare base also stays nested, so
+  // that a lambda callee still reaches the inline-lams rewrite.
+  let base = acc;
+  let links: A.ChainLink[] = [];
+  const materialize = (): A.Expr =>
+    links.length === 0 ? base : new A.SAppChain(links[links.length - 1].l, base, links);
   for (let i = frames.length - 1; i >= 0; i--) {
     const fr = frames[i];
     if (fr.kind === 'dot') {
-      acc = new A.SDot(fr.l, acc, fr.field);
+      links.push(new A.ChainDot(fr.l, fr.field));
+    } else if (fr.params.length === 0) {
+      if (fr.dot !== undefined) {
+        links.push(new A.ChainMethod(fr.l, fr.dot.l, fr.dot.field, fr.dsArgs, undefined));
+      } else if (links.length === 0 && A.isSLam(base)) {
+        base = new A.SApp(fr.l, base, fr.dsArgs);
+      } else {
+        links.push(new A.ChainApp(fr.l, fr.dsArgs, undefined));
+      }
     } else {
-      const dsF = fr.dot !== undefined ? new A.SDot(fr.dot.l, acc, fr.dot.field) : acc;
-      acc = fr.params.length === 0
-        ? new A.SApp(fr.l, dsF, fr.dsArgs)
-        : new A.SLam(fr.l, '', [], fr.params, A.aBlank, '',
-            new A.SApp(fr.l, dsF, fr.curryArgs), undefined, undefined, false);
+      const dsF = fr.dot !== undefined ? new A.SDot(fr.dot.l, materialize(), fr.dot.field) : materialize();
+      base = new A.SLam(fr.l, '', [], fr.params, A.aBlank, '',
+        new A.SApp(fr.l, dsF, fr.curryArgs), undefined, undefined, false);
+      links = [];
     }
   }
-  return acc;
+  return materialize();
 }
 
 function desugarTypeLetBind(tb: A.TypeLetBind): A.TypeLetBind {
@@ -582,36 +597,20 @@ export function desugarExpr(expr: A.Expr): A.Expr {
         desugarAnn(expr.ann), '', desugarExpr(expr.body), undefined, undefined, expr.blocky);
       return new A.SApp(l, desugarExpr(expr.iterator), [theFunction, ...values]);
     }
-    case 's-op': {
+    case 's-op':
+      return raise('s-op should not appear: the parser emits s-op-chain');
+    case 's-op-chain': {
       const l = expr.l;
-      const op = expr.op;
-      const left = expr.left;
-      const right = expr.right;
-      // Unused in the .arr original too; kept voided for structural fidelity.
-      const thunk = (e: A.Expr): A.Expr =>
-        new A.SLam(l, '', [], [], A.aBlank, '',
-          A.isSBlock(e) ? e : new A.SBlock(l, [e]),
-          undefined, undefined, false);
-      const opbool = (fld: string): A.Expr =>
-        new A.SApp(l, new A.SDot(l, desugarExpr(left), fld), [thunk(desugarExpr(right))]);
-      void opbool;
-      // In-order flatten of the whole same-op region, iteratively -- a long
-      // `a or b or ...` chain is list-shaped work, not stack depth.
-      const collectOp = (opname: string): A.Expr[] => {
-        const out: A.Expr[] = [];
-        const todo: A.Expr[] = [expr];
-        while (todo.length > 0) {
-          const e = todo.pop() as A.Expr;
-          if (A.isSOp(e) && e.op === opname) { todo.push(e.right, e.left); }
-          else { out.push(e); }
-        }
-        return out;
-      };
+      const first = expr.first;
+      const links = expr.links;
+      // Well-formedness rejects mixed operators, so a chain that reaches
+      // desugar is single-op.
+      const op = links[0].op;
       if (op === 'opor' || op === 'opand') {
-        // Desugar the operands left-to-right (the recursive helper's order),
-        // then build the nested if from the last operand outward; only that
-        // last operand is checkBool-wrapped.
-        const operands = collectOp(op);
+        // Desugar the operands left-to-right, then build the nested if
+        // from the last operand outward; only that last operand is
+        // checkBool-wrapped.
+        const operands = [first, ...links.map((lk) => lk.right)];
         const dsOperands = operands.map(desugarExpr);
         const lastIdx = operands.length - 1;
         let acc: A.Expr = checkBool(operands[lastIdx].l, dsOperands[lastIdx], (oper) => oper);
@@ -622,18 +621,12 @@ export function desugarExpr(expr: A.Expr): A.Expr {
         }
         return acc;
       } else if (op === 'op^') {
-        const operands = collectOp('op^');
-        let acc = desugarExpr(operands[0]);
-        for (const f of operands.slice(1)) {
-          acc = new A.SApp(l, desugarExpr(f), [acc]);
+        let acc = desugarExpr(first);
+        for (const lk of links) {
+          acc = new A.SApp(l, desugarExpr(lk.right), [acc]);
         }
         return acc;
       } else {
-        // Binop-shaped ops (arithmetic, ==, =~, <=>, <>) parse
-        // left-associated, so operand COUNT is left-spine depth. Walk the
-        // spine iteratively: desugar the leftmost operand, then fold back up
-        // one dsCurryBinop per level, desugaring each level's right operand
-        // just before its rebuild -- the recursive evaluation order.
         const rebuildFor = (nl: Loc, nop: string): ((e1: A.Expr, e2: A.Expr) => A.Expr) | undefined => {
           const field = getArithOp(nop);
           if (field !== undefined) { return (e1, e2) => new A.SApp(nl, gid(nl, field), [e1, e2]); }
@@ -646,21 +639,39 @@ export function desugarExpr(expr: A.Expr): A.Expr {
             default: return undefined;
           }
         };
+        // The callee each link's nested s-app had (a global function id).
+        const fnFor = (nl: Loc, nop: string): { fn: A.Expr; notWrapped: boolean } => {
+          const fld = getArithOp(nop);
+          if (fld !== undefined) { return { fn: gid(nl, fld), notWrapped: false }; }
+          switch (nop) {
+            case 'op==': return { fn: gid(nl, 'equal-always'), notWrapped: false };
+            case 'op=~': return { fn: gid(nl, 'equal-now'), notWrapped: false };
+            case 'op<=>': return { fn: gid(nl, 'identical'), notWrapped: false };
+            case 'op<>': return { fn: gid(nl, 'equal-always'), notWrapped: true };
+            default: return raise('No implementation for ' + nop);
+          }
+        };
         if (rebuildFor(l, op) === undefined) { return raise('No implementation for ' + op); }
-        const spine: A.SOp[] = [];
-        let cur: A.Expr = expr;
-        while (A.isSOp(cur) && cur.op !== 'opor' && cur.op !== 'opand' && cur.op !== 'op^'
-            && rebuildFor(cur.l, cur.op) !== undefined) {
-          spine.push(cur);
-          cur = cur.left;
+        // Emit a FLAT app chain: one link per operator. Underscore-curried
+        // links (rare) take the original dsCurryBinop path, closing off
+        // the chain built so far into the lambda and starting fresh.
+        let base = desugarExpr(first);
+        let chainLinks: A.ChainLink[] = [];
+        const materialize = (): A.Expr =>
+          chainLinks.length === 0 ? base : new A.SAppChain(chainLinks[chainLinks.length - 1].l, base, chainLinks);
+        for (const lk of links) {
+          const rhs = desugarExpr(lk.right);
+          const accIsUnderscore = chainLinks.length === 0 && isUnderscore(base);
+          if (accIsUnderscore || isUnderscore(rhs)) {
+            base = dsCurryBinop(lk.l, materialize(), rhs,
+              rebuildFor(lk.l, lk.op) as (e1: A.Expr, e2: A.Expr) => A.Expr);
+            chainLinks = [];
+          } else {
+            const { fn, notWrapped } = fnFor(lk.l, lk.op);
+            chainLinks.push(new A.ChainBinop(lk.l, fn, rhs, notWrapped, undefined));
+          }
         }
-        let acc = desugarExpr(cur);
-        for (let i = spine.length - 1; i >= 0; i--) {
-          const node = spine[i];
-          acc = dsCurryBinop(node.l, acc, desugarExpr(node.right),
-            rebuildFor(node.l, node.op) as (e1: A.Expr, e2: A.Expr) => A.Expr);
-        }
-        return acc;
+        return materialize();
       }
     }
     case 's-id': return expr;

@@ -773,22 +773,17 @@ function translate(node: ParseNode, fileName: string): A.Program {
         // (binop-expr e)
         return tr(node.kids[0]);
       } else {
-        const mkOp = function(l: Srcloc, opL: Srcloc, op: string, leftE: any, rightE: any): any {
-          return new A.SOp(l, opL, op, leftE, rightE);
-        };
-        let expr = mkOp(pos2(node.kids[0].pos, node.kids[2].pos),
-                        pos(node.kids[1].pos),
-                        tr(node.kids[1]),
-                        tr(node.kids[0]),
-                        tr(node.kids[2]));
-        for (let i = 4; i < node.kids.length; i += 2) {
-          expr = mkOp(pos2(node.kids[0].pos, node.kids[i].pos),
-                      pos(node.kids[i - 1].pos),
-                      tr(node.kids[i - 1]),
-                      expr,
-                      tr(node.kids[i]));
+        // FLAT operator chain: one link per operator, each carrying the
+        // l/opL the left-nested s-op node used to have.
+        const first = tr(node.kids[0]);
+        const links: any[] = [];
+        for (let i = 2; i < node.kids.length; i += 2) {
+          links.push(new A.OpChainLink(pos2(node.kids[0].pos, node.kids[i].pos),
+                                       pos(node.kids[i - 1].pos),
+                                       tr(node.kids[i - 1]),
+                                       tr(node.kids[i])));
         }
-        return expr;
+        return new A.SOpChain(links[links.length - 1].l, first, links);
       }
     },
     'doc-string': function(node) {

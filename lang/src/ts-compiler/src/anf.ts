@@ -564,6 +564,96 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
     case 's-block':
       return anfBlock(e.stmts, k);
 
+    case 's-app-chain': {
+      /*
+        The flat application/operator chain. The nested translation
+        descended the left spine first, so the base translates first and
+        each link's app follows, its accumulated operand named exactly
+        when the enclosing link consumed it — with the consumer's hint
+        ('anf_fun' for an application callee, 'anf_method_obj' for a
+        method receiver, 'anf_bracket' for a dot, 'anf_arg' for a binop
+        operand) and the accumulated expression's loc. This loop does the
+        same forward, so gensym order matches the nested translation.
+      */
+      const heads: N.AExprHead[] = [];
+      const absorb = (translated: N.AExpr): void => {
+        if (!isHole(translated)) {
+          throw new InternalCompilerError('anf s-app-chain: continuation result not in tail position');
+        }
+        for (const h of translated.heads) {
+          heads.push(h);
+        }
+      };
+      // Translate one sub-expression to a value, naming it with `hint`
+      // if needed (anfName's behavior, with the value captured).
+      const nameExpr = (expr: A.Expr, hint: string): N.AVal => {
+        let out: N.AVal | undefined = undefined;
+        absorb(anf(expr, (lettable) => {
+          if (N.isAVal(lettable)) {
+            out = lettable.v;
+            return holeExpr();
+          }
+          const tmp = mkId(expr.l, hint);
+          out = tmp.idE;
+          return new N.AExpr([new N.ALet(expr.l, tmp.idB, lettable)], HOLE);
+        }));
+        if (out === undefined) {
+          throw new InternalCompilerError('anf s-app-chain: sub-expression continuation was not invoked');
+        }
+        return out;
+      };
+      let accVal: N.AVal | undefined = undefined;
+      let accLettable: N.ALettable | undefined = undefined;
+      let accL: N.Loc = e.base.l;
+      absorb(anf(e.base, (lettable) => {
+        if (N.isAVal(lettable)) {
+          accVal = lettable.v;
+        } else {
+          accLettable = lettable;
+        }
+        return holeExpr();
+      }));
+      const useAcc = (hint: string): N.AVal => {
+        if (accVal === undefined) {
+          const tmp = mkId(accL, hint);
+          heads.push(new N.ALet(accL, tmp.idB, accLettable!));
+          accVal = tmp.idE;
+        }
+        return accVal;
+      };
+      for (const link of e.links) {
+        if (A.isChainDot(link)) {
+          const v = useAcc('anf_bracket');
+          accLettable = new N.ADot(link.l, v, link.field);
+        } else if (A.isChainMethod(link)) {
+          const v = useAcc('anf_method_obj');
+          const vs = link.args.map((a) => nameExpr(a, 'anf_arg'));
+          accLettable = new N.AMethodApp(link.l, v, link.field, vs);
+        } else if (A.isChainApp(link)) {
+          const v = useAcc('anf_fun');
+          const vs = link.args.map((a) => nameExpr(a, 'anf_arg'));
+          accLettable = new N.AApp(link.l, v, vs, link.appInfo!);
+        } else {
+          // Nested order: callee first (anfName 'anf_fun'), then the
+          // accumulated operand's temp, then the right operand.
+          const vFn = nameExpr(link.fn, 'anf_fun');
+          const vAcc = useAcc('anf_arg');
+          const vRhs = nameExpr(link.rhs, 'anf_arg');
+          const app = new N.AApp(link.l, vFn, [vAcc, vRhs], link.appInfo!);
+          if (link.notWrapped) {
+            const tmp = mkId(link.l, 'anf_arg');
+            heads.push(new N.ALet(link.l, tmp.idB, app));
+            accLettable = new N.APrimApp(link.l, 'not', [tmp.idE], flatPrimApp);
+          } else {
+            accLettable = app;
+          }
+        }
+        accVal = undefined;
+        accL = link.l;
+      }
+      return prependHeads(heads, k(accLettable!));
+    }
+
     case 's-check-expr': {
       const { l, expr, ann } = e;
       const name = mkId(l, 'ann_check_temp');

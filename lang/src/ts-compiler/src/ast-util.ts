@@ -863,6 +863,29 @@ class SetRecursiveVisitor extends DefaultMapVisitor {
       new A.AppInfoC(this.isRecursive(node._fun), false));
   }
 
+  sAppChain(node: A.SAppChain): A.Expr {
+    // Each app-shaped link gets the AppInfo its nested s-app got. A
+    // link's callee is the chain accumulation (never recursive) except
+    // for the first link of a plain-application chain, whose callee is
+    // the base — mirror isRecursive on the unvisited base there.
+    const base = node.base.visit(this);
+    const links = node.links.map((link, i): A.ChainLink => {
+      if (A.isChainDot(link)) {
+        return new A.ChainDot(link.l, link.field);
+      } else if (A.isChainApp(link)) {
+        const isRec = i === 0 ? this.isRecursive(node.base) : false;
+        return new A.ChainApp(link.l, link.args.map((a: A.Expr) => a.visit(this)), new A.AppInfoC(isRec, false));
+      } else if (A.isChainMethod(link)) {
+        return new A.ChainMethod(link.l, link.dotL, link.field, link.args.map((a: A.Expr) => a.visit(this)),
+          new A.AppInfoC(false, false));
+      } else {
+        return new A.ChainBinop(link.l, link.fn.visit(this), link.rhs.visit(this), link.notWrapped,
+          new A.AppInfoC(this.isRecursive(link.fn), false));
+      }
+    });
+    return new A.SAppChain(node.l, base, links);
+  }
+
   sLam(node: A.SLam): A.Expr {
     return new A.SLam(
       node.l,
@@ -1062,6 +1085,31 @@ class SetTailVisitor extends DefaultMapVisitor {
       node._fun.visit(this.noTail()),
       node.args.map((e: A.Expr) => e.visit(this.noTail())),
       new A.AppInfoC(node.appInfo.isRecursive, this.isTail));
+  }
+
+  sAppChain(node: A.SAppChain): A.Expr {
+    // In the nested form, only the outermost app was in tail position
+    // (inner links sat in fun/receiver position, visited no-tail), and
+    // an op<> link's app sits under prim not(...), so it is never tail.
+    const noTail = this.noTail();
+    const base = node.base.visit(noTail);
+    const lastAppIdx = node.links.length - 1;
+    const links = node.links.map((link, i): A.ChainLink => {
+      const linkTail = i === lastAppIdx && this.isTail;
+      if (A.isChainDot(link)) {
+        return new A.ChainDot(link.l, link.field);
+      } else if (A.isChainApp(link)) {
+        return new A.ChainApp(link.l, link.args.map((a: A.Expr) => a.visit(noTail)),
+          new A.AppInfoC(link.appInfo!.isRecursive, linkTail));
+      } else if (A.isChainMethod(link)) {
+        return new A.ChainMethod(link.l, link.dotL, link.field, link.args.map((a: A.Expr) => a.visit(noTail)),
+          new A.AppInfoC(link.appInfo!.isRecursive, linkTail));
+      } else {
+        return new A.ChainBinop(link.l, link.fn.visit(noTail), link.rhs.visit(noTail), link.notWrapped,
+          new A.AppInfoC(link.appInfo!.isRecursive, linkTail && !link.notWrapped));
+      }
+    });
+    return new A.SAppChain(node.l, base, links);
   }
 
   sPrimApp(node: A.SPrimApp): A.Expr {
