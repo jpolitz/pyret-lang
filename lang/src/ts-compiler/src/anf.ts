@@ -266,35 +266,7 @@ function anfLinear(eInit: A.Expr, k: ANFCont): N.AExpr {
       case 's-let-expr': {
         const { binds, body } = e;
         for (const f of binds) {
-          switch (f.$name) {
-            case 's-var-bind': {
-              const l2 = f.l;
-              const b = asVariant(f.b, A.SBind);
-              const val = f.value;
-              if (A.isABlank(b.ann) || A.isAAny(b.ann)) {
-                emit(anfName(val, 'var', (newVal) =>
-                  new N.AExpr([new N.AVar(l2, new N.ABind(l2, b.id, b.ann), new N.AVal(newVal.l, newVal))], HOLE)));
-              } else {
-                const varName = mkId(l2, 'var');
-                emit(anf(val, (lettable) =>
-                  new N.AExpr([
-                    new N.ALet(l2, varName.idB, lettable),
-                    new N.AVar(l2, new N.ABind(l2, b.id, b.ann), new N.AVal(l2, varName.idE)),
-                  ], HOLE)));
-              }
-              break;
-            }
-            case 's-let-bind': {
-              const l2 = f.l;
-              const b = asVariant(f.b, A.SBind);
-              const val = f.value;
-              emit(anf(val, (lettable) =>
-                new N.AExpr([new N.ALet(l2, new N.ABind(l2, b.id, b.ann), lettable)], HOLE)));
-              break;
-            }
-            default:
-              throw new InternalCompilerError('No case matched in anf s-let-expr: ' + (f as any).$name);
-          }
+          emitLetBind(f);
         }
         e = body;
         continue;
@@ -308,8 +280,80 @@ function anfLinear(eInit: A.Expr, k: ANFCont): N.AExpr {
         e = new A.SLetExpr(l, letBinds, new A.SBlock(l, [...assigns, body]), true);
         continue;
       }
+      case 's-scope-block': {
+        // The flat post-resolve-scope block: entries in order, then the
+        // tail. Each entry kind translates exactly as its nested wrapper
+        // did (letrec via the same hoisted-vars-then-assignments rewrite).
+        for (const entry of e.entries) {
+          if (A.isSScopeLet(entry)) {
+            for (const b of entry.binds) {
+              emitLetBind(b);
+            }
+          } else if (A.isSScopeTypeLet(entry)) {
+            for (const f of entry.binds) {
+              let newBind: N.ATypeBind;
+              switch (f.$name) {
+                case 's-type-bind':
+                  newBind = new N.ATypeBind(f.l, f.name, f.ann);
+                  break;
+                case 's-newtype-bind':
+                  newBind = new N.ANewtypeBind(f.l, f.name, f.namet);
+                  break;
+                default:
+                  throw new InternalCompilerError('No case matched in anf s-scope-type-let: ' + (f as any).$name);
+              }
+              spine.push(new N.ATypeLet(entry.l, newBind));
+            }
+          } else if (A.isSScopeLetrec(entry)) {
+            for (const b of entry.binds) {
+              emitLetBind(new A.SVarBind(b.l, b.b, new A.SUndefined(entry.l)));
+            }
+            for (const b of entry.binds) {
+              const stmt = new A.SAssign(b.l, field(b.b, 'id'), b.value);
+              emit(anf(stmt, (lettable) => new N.AExpr([new N.ASeq(stmt.l, lettable)], HOLE)));
+            }
+          } else {
+            const f = entry;
+            emit(anf(f, (lettable) => new N.AExpr([new N.ASeq(f.l, lettable)], HOLE)));
+          }
+        }
+        e = e.tail;
+        continue;
+      }
       default:
         return prependHeads(spine, anf(e, k));
+    }
+  }
+
+  function emitLetBind(f: A.LetBind): void {
+    switch (f.$name) {
+      case 's-var-bind': {
+        const l2 = f.l;
+        const b = asVariant(f.b, A.SBind);
+        const val = f.value;
+        if (A.isABlank(b.ann) || A.isAAny(b.ann)) {
+          emit(anfName(val, 'var', (newVal) =>
+            new N.AExpr([new N.AVar(l2, new N.ABind(l2, b.id, b.ann), new N.AVal(newVal.l, newVal))], HOLE)));
+        } else {
+          const varName = mkId(l2, 'var');
+          emit(anf(val, (lettable) =>
+            new N.AExpr([
+              new N.ALet(l2, varName.idB, lettable),
+              new N.AVar(l2, new N.ABind(l2, b.id, b.ann), new N.AVal(l2, varName.idE)),
+            ], HOLE)));
+        }
+        break;
+      }
+      case 's-let-bind': {
+        const l2 = f.l;
+        const b = asVariant(f.b, A.SBind);
+        const val = f.value;
+        emit(anf(val, (lettable) =>
+          new N.AExpr([new N.ALet(l2, new N.ABind(l2, b.id, b.ann), lettable)], HOLE)));
+        break;
+      }
+      default:
+        throw new InternalCompilerError('No case matched in anf let bind: ' + (f as any).$name);
     }
   }
 }
@@ -359,8 +403,10 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
       return k(new N.AIdVarModref(e.l, e.id, e.uri, e.name));
     case 's-srcloc':
       return k(new N.AVal(e.l, new N.ASrcloc(e.l, e.loc)));
-    // The linear-spine shapes (deeply right-nested after scope resolution)
-    // are translated iteratively to keep stack depth bounded; see anfLinear.
+    // The linear-spine shapes are translated by anfLinear: the flat
+    // s-scope-block from resolve-scope, plus the bounded nested wrappers
+    // other passes still build locally.
+    case 's-scope-block':
     case 's-type-let-expr':
     case 's-let-expr':
     case 's-letrec':
