@@ -395,10 +395,15 @@ function desugarDotAppChain(expr: A.Expr): A.Expr {
     acc = desugarExpr(cur);
     break;
   }
-  // Emit a FLAT chain: one link per dot/app step. Curried steps keep the
-  // original lambda construction (closing off the chain built so far);
-  // an application whose callee is the bare base also stays nested, so
-  // that a lambda callee still reaches the inline-lams rewrite.
+  return assembleDesugaredChain(frames, acc);
+}
+
+// Emit a FLAT chain from the collected frames (innermost frame last):
+// one link per dot/app step. Curried steps keep the original lambda
+// construction (closing off the chain built so far); an application
+// whose callee is the bare base also stays nested, so that a lambda
+// callee still reaches the inline-lams rewrite.
+function assembleDesugaredChain(frames: ChainFrame[], acc: A.Expr): A.Expr {
   let base = acc;
   let links: A.ChainLink[] = [];
   const materialize = (): A.Expr =>
@@ -423,6 +428,65 @@ function desugarDotAppChain(expr: A.Expr): A.Expr {
     }
   }
   return materialize();
+}
+
+/*
+  Desugar a SURFACE s-app-chain (from the parser): the same per-link
+  logic as desugarDotAppChain's descent over the nested shape, driven
+  from the end of the link array (outermost first, preserving the
+  argument-desugaring effect order), with dot+app link pairs forming the
+  method frames the nested walker got from s-app-of-s-dot. Underscore
+  bases take dsCurry's curried branches, consuming the base.
+*/
+function desugarSurfaceChain(chain: A.SAppChain): A.Expr {
+  const frames: ChainFrame[] = [];
+  const links = chain.links;
+  let acc: A.Expr | undefined = undefined;
+  for (let i = links.length - 1; i >= 0; i--) {
+    const link = links[i];
+    if (A.isChainApp(link)) {
+      const l = link.l;
+      const dsArgs = link.args.map(desugarExpr);
+      const prevDot = (i > 0 && A.isChainDot(links[i - 1])) ? (links[i - 1] as A.ChainDot) : undefined;
+      if (prevDot !== undefined && i - 1 === 0 && isUnderscore(chain.base)) {
+        // dsCurry's curried-receiver branch: mkId, THEN dsCurryArgs
+        const curriedObj = mkId(l, 'recv_');
+        const pa = dsCurryArgs(l, dsArgs);
+        acc = new A.SLam(l, '', [], [curriedObj.idB, ...pa.left], A.aBlank, '',
+          new A.SApp(l, new A.SDot(l, curriedObj.idE, prevDot.field), pa.right), undefined, undefined, false);
+        break;
+      }
+      // dsCurry's fallthrough: dsCurryArgs before anything touches f
+      const pa = dsCurryArgs(l, dsArgs);
+      if (prevDot === undefined && i === 0 && isUnderscore(chain.base)) {
+        const fId = mkId(l, 'f_');
+        acc = new A.SLam(l, '', [], [fId.idB, ...pa.left], A.aBlank, '',
+          new A.SApp(l, fId.idE, pa.right), undefined, undefined, false);
+        break;
+      }
+      if (prevDot !== undefined) {
+        frames.push({ kind: 'app', l, dsArgs, params: pa.left, curryArgs: pa.right, dot: { l: prevDot.l, field: prevDot.field } });
+        i--; // the dot link is consumed by this frame
+      } else {
+        frames.push({ kind: 'app', l, dsArgs, params: pa.left, curryArgs: pa.right });
+      }
+    } else if (A.isChainDot(link)) {
+      if (i === 0 && isUnderscore(chain.base)) {
+        // dsCurryNullary's curried-receiver branch
+        const curriedObj = mkId(link.l, 'recv_');
+        acc = new A.SLam(link.l, '', [], [curriedObj.idB], A.aBlank, '',
+          new A.SDot(link.l, curriedObj.idE, link.field), undefined, undefined, false);
+        break;
+      }
+      frames.push({ kind: 'dot', l: link.l, field: link.field });
+    } else {
+      return raise('desugar: unexpected link in surface s-app-chain: ' + (link as any).$name);
+    }
+  }
+  if (acc === undefined) {
+    acc = desugarExpr(chain.base);
+  }
+  return assembleDesugaredChain(frames, acc);
 }
 
 function desugarTypeLetBind(tb: A.TypeLetBind): A.TypeLetBind {
@@ -505,6 +569,8 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       return desugarBodySpine(expr);
     case 's-scope-block':
       return new A.SScopeBlock(expr.l, expr.entries.map(desugarScopeEntry), desugarExpr(expr.tail));
+    case 's-app-chain':
+      return desugarSurfaceChain(expr);
     case 's-user-block':
       return desugarExpr(expr.body);
     case 's-template': return expr; // template-exn(l)
