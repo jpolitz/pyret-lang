@@ -17,6 +17,10 @@ const { runSpec, specTimeout } = require("../shared/dispatch");
 const { warmUp } = require("../shared/cpo-assertions");
 
 const ENV = process.env.PYRET_ENV;
+// A suite is either the name of a code.pyret.org/test/*.js spec file (the
+// usual case: a table of programs and expected output), or a function that
+// registers its own test()s -- for the cases where what is under test is the
+// editor's behaviour rather than a program's value.
 const SUITES = {
   "check-blocks": "check-blocks.js",
   "errors": "errors.js",
@@ -24,6 +28,8 @@ const SUITES = {
   "type-check": "type-check.js",
   "tables": "tables.js",
   "url-imports": "url-imports.js",
+  "stop-during-load": require("./stop-during-load"),
+  "rapid-rerun": require("./rapid-rerun"),
 };
 
 if (!ENV || !["cpo", "embed", "embed-static", "vscode", "vscode-ovsx"].includes(ENV)) {
@@ -122,9 +128,13 @@ after(async () => {
 });
 
 for (const suite of chosen) {
-  const file = SUITES[suite];
+  const entry = SUITES[suite];
   describe(suite, () => {
-    for (const s of loadSpecsFromFile(file)) {
+    if (typeof entry === "function") {
+      entry(() => session);
+      return;
+    }
+    for (const s of loadSpecsFromFile(entry)) {
       test(s.name || s.program, { timeout: specTimeout(s) }, async () => {
         await runSpec(session.page, s);
       });

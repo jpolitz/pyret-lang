@@ -1,0 +1,516 @@
+{
+ "starterFiles": {
+  "ref": "fall2026",
+  "commit": "80df26a2f60a67abd506481b2f8ad38b0b74a847"
+ },
+ "curriculum": {
+  "commit": "27bb2e5b94c700fd8ad7e8b3b1dac111d3ee37f7",
+  "sources": [
+   "shared/langs/en-us/starterFiles/ai-desmos.json",
+   "shared/langs/en-us/starterFiles/ai.json",
+   "shared/langs/en-us/starterFiles/alg2-desmos.json",
+   "shared/langs/en-us/starterFiles/alg2.json",
+   "shared/langs/en-us/starterFiles/algebra-desmos.json",
+   "shared/langs/en-us/starterFiles/algebra.json",
+   "shared/langs/en-us/starterFiles/core.json",
+   "shared/langs/en-us/starterFiles/data-science-desmos.json",
+   "shared/langs/en-us/starterFiles/data-science.json",
+   "shared/langs/en-us/starterFiles/editors.json",
+   "shared/langs/en-us/starterFiles/expressions+equations.json",
+   "shared/langs/en-us/starterFiles/flags.json",
+   "shared/langs/en-us/starterFiles/gamebasics.json",
+   "shared/langs/en-us/starterFiles/live-survey.json",
+   "shared/langs/en-us/starterFiles/piecewise.json",
+   "shared/langs/en-us/starterFiles/projects.json",
+   "shared/langs/en-us/starterFiles/reactive.json",
+   "lessons/Data-Science/choosing-your-dataset/langs/en-us/fragments/dataset-table.adoc"
+  ]
+ },
+ "entries": [
+  {
+   "path": "ai/Decision Tree Starter File.arr"
+  },
+  {
+   "path": "ai/Self-Driving-Car.arr"
+  },
+  {
+   "path": "ai/Spell Checker Starter File.arr"
+  },
+  {
+   "path": "ai/ai-animals.arr"
+  },
+  {
+   "path": "ai/ai-fast-food.arr"
+  },
+  {
+   "path": "ai/ai-images.arr"
+  },
+  {
+   "path": "ai/ai-music.arr",
+   "ref": "refs/heads/main"
+  },
+  {
+   "path": "ai/ai-old-lady.arr"
+  },
+  {
+   "path": "ai/ai-text.arr"
+  },
+  {
+   "path": "ai/ai-text2.arr"
+  },
+  {
+   "path": "algebra-2/Aaron Judge Hits.arr"
+  },
+  {
+   "path": "algebra-2/CO2 Hybrid Models.arr"
+  },
+  {
+   "path": "algebra-2/CO2 Starter File.arr"
+  },
+  {
+   "path": "algebra-2/Countries Starter File.arr"
+  },
+  {
+   "path": "algebra-2/Covid Starter File.arr"
+  },
+  {
+   "path": "algebra-2/Fuel Efficiency Starter File.arr"
+  },
+  {
+   "path": "algebra-2/London Ride.arr"
+  },
+  {
+   "path": "algebra-2/Miguel Cabrera Hits.arr"
+  },
+  {
+   "path": "algebra-2/State Demographics (Intro) Starter File.arr",
+   "shareurl": true
+  },
+  {
+   "path": "algebra-2/State Demographics Starter File.arr"
+  },
+  {
+   "path": "algebra-2/Unit Clock Starter File.arr"
+  },
+  {
+   "path": "algebra/Ninja Cat.arr"
+  },
+  {
+   "path": "algebra/Sally's Lemonade.arr",
+   "shareurl": true
+  },
+  {
+   "path": "algebra/Surface Area of Rectangular Prism.arr"
+  },
+  {
+   "path": "algebra/collaboration/collaboration - solution.arr"
+  },
+  {
+   "path": "algebra/collaboration/collaboration.arr"
+  },
+  {
+   "path": "algebra/combinatorics/Permutations and Combinations Starter File.arr"
+  },
+  {
+   "path": "algebra/inequalities/Compound Inequalities Starter File.arr"
+  },
+  {
+   "path": "algebra/inequalities/Sam the Butterfly.arr"
+  },
+  {
+   "path": "algebra/inequalities/Simple Inequalities Starter File.arr"
+  },
+  {
+   "path": "algebra/linearity/Exploring Linearity in Definitions.arr"
+  },
+  {
+   "path": "algebra/linearity/Exploring Linearity in Graphs.arr"
+  },
+  {
+   "path": "algebra/linearity/Exploring Linearity in Tables.arr"
+  },
+  {
+   "path": "core/Alices Restaurant.arr"
+  },
+  {
+   "path": "core/Bug Hunting.arr"
+  },
+  {
+   "path": "core/Defining Values.arr"
+  },
+  {
+   "path": "core/Mood Generator Starter File - ASK.arr"
+  },
+  {
+   "path": "core/Mood Generator Starter File - IF-ELSE.arr"
+  },
+  {
+   "path": "core/Red Shape.arr"
+  },
+  {
+   "path": "core/Rocket Height.arr",
+   "shareurl": true
+  },
+  {
+   "path": "core/bc.arr"
+  },
+  {
+   "path": "core/booleans.arr"
+  },
+  {
+   "path": "core/gt.arr"
+  },
+  {
+   "path": "data-science/Age v Height Starter File.arr"
+  },
+  {
+   "path": "data-science/Animals Starter File.arr"
+  },
+  {
+   "path": "data-science/Cheerios Starter File.arr"
+  },
+  {
+   "path": "data-science/Coin Flip.arr"
+  },
+  {
+   "path": "data-science/Custom Scatterplots.arr"
+  },
+  {
+   "path": "data-science/Dessert Survey.arr"
+  },
+  {
+   "path": "data-science/Dogs, Rabbits, Cats, & Tarantulas Starter File.arr",
+   "shareurl": true
+  },
+  {
+   "path": "data-science/Expanded Animals Starter File.arr",
+   "ref": "refs/heads/main"
+  },
+  {
+   "path": "data-science/Global Food Supply.arr"
+  },
+  {
+   "path": "data-science/Grouped Samples Starter File.arr"
+  },
+  {
+   "path": "data-science/Hair.arr"
+  },
+  {
+   "path": "data-science/Lizard Sample Starter File.arr"
+  },
+  {
+   "path": "data-science/New Animals Starter File.arr"
+  },
+  {
+   "path": "data-science/Olympic Records.arr"
+  },
+  {
+   "path": "data-science/Piecewise Visualizations with Images.arr"
+  },
+  {
+   "path": "data-science/Piecewise Visualizations with Intervals.arr"
+  },
+  {
+   "path": "data-science/Piecewise Visualizations.arr"
+  },
+  {
+   "path": "data-science/Putting it all together.arr"
+  },
+  {
+   "path": "data-science/Row Functions Starter File.arr"
+  },
+  {
+   "path": "data-science/Table Functions Starter File.arr"
+  },
+  {
+   "path": "data-science/Tooth Data.arr"
+  },
+  {
+   "path": "data-science/Trust but Verify.arr"
+  },
+  {
+   "path": "data-science/Word Length.arr"
+  },
+  {
+   "path": "data-science/dataset-library/air-quality.arr"
+  },
+  {
+   "path": "data-science/dataset-library/arctic-sea-ice.arr"
+  },
+  {
+   "path": "data-science/dataset-library/beverages.arr"
+  },
+  {
+   "path": "data-science/dataset-library/ca-college-admissions.arr"
+  },
+  {
+   "path": "data-science/dataset-library/cities-proximity-to-ocean.arr"
+  },
+  {
+   "path": "data-science/dataset-library/college-majors.arr"
+  },
+  {
+   "path": "data-science/dataset-library/countries-of-the-world.arr"
+  },
+  {
+   "path": "data-science/dataset-library/covid-by-county.arr"
+  },
+  {
+   "path": "data-science/dataset-library/e-sports.arr"
+  },
+  {
+   "path": "data-science/dataset-library/earthquakes.arr"
+  },
+  {
+   "path": "data-science/dataset-library/fast-food.arr"
+  },
+  {
+   "path": "data-science/dataset-library/game-reviews.arr"
+  },
+  {
+   "path": "data-science/dataset-library/gerrymandering.arr"
+  },
+  {
+   "path": "data-science/dataset-library/global-waste.arr"
+  },
+  {
+   "path": "data-science/dataset-library/health-by-county.arr"
+  },
+  {
+   "path": "data-science/dataset-library/lapd-arrests.arr"
+  },
+  {
+   "path": "data-science/dataset-library/marijuana-laws.arr"
+  },
+  {
+   "path": "data-science/dataset-library/mlb-hitting.arr"
+  },
+  {
+   "path": "data-science/dataset-library/modern-art.arr"
+  },
+  {
+   "path": "data-science/dataset-library/movies.arr"
+  },
+  {
+   "path": "data-science/dataset-library/music.arr"
+  },
+  {
+   "path": "data-science/dataset-library/nba-stats.arr"
+  },
+  {
+   "path": "data-science/dataset-library/nfl-passing.arr"
+  },
+  {
+   "path": "data-science/dataset-library/nfl-rushing.arr"
+  },
+  {
+   "path": "data-science/dataset-library/nypd-stop-and-frisk.arr"
+  },
+  {
+   "path": "data-science/dataset-library/organs-of-north-america.arr"
+  },
+  {
+   "path": "data-science/dataset-library/pokemon.arr"
+  },
+  {
+   "path": "data-science/dataset-library/refugees.arr"
+  },
+  {
+   "path": "data-science/dataset-library/ri-schools.arr"
+  },
+  {
+   "path": "data-science/dataset-library/state-demographics.arr"
+  },
+  {
+   "path": "data-science/dataset-library/us-colleges.arr"
+  },
+  {
+   "path": "data-science/dataset-library/us-income.arr"
+  },
+  {
+   "path": "data-science/dataset-library/us-jobs.arr"
+  },
+  {
+   "path": "data-science/dataset-library/voter-turnout.arr"
+  },
+  {
+   "path": "data-science/live-surveys/Live Survey for Bar and Pie Charts.arr"
+  },
+  {
+   "path": "data-science/live-surveys/Live Survey for Box Plots.arr"
+  },
+  {
+   "path": "data-science/live-surveys/Live Survey for Dot Plots.arr"
+  },
+  {
+   "path": "data-science/live-surveys/Live Survey for Histograms.arr"
+  },
+  {
+   "path": "data-science/live-surveys/Live Survey for Linear Regression.arr"
+  },
+  {
+   "path": "data-science/live-surveys/Live Survey for MOC.arr"
+  },
+  {
+   "path": "data-science/live-surveys/Live Survey for Scatter Plot.arr"
+  },
+  {
+   "path": "expressions-and-equations/Additive Inverse Starter File.arr"
+  },
+  {
+   "path": "expressions-and-equations/Equivalence Starter File.arr"
+  },
+  {
+   "path": "expressions-and-equations/Exponents Starter File.arr"
+  },
+  {
+   "path": "expressions-and-equations/Expressions and Equations Starter File.arr"
+  },
+  {
+   "path": "expressions-and-equations/Identity Starter File.arr"
+  },
+  {
+   "path": "expressions-and-equations/Is it 16 Starter File.arr"
+  },
+  {
+   "path": "expressions-and-equations/Is it 16 with Negatives.arr"
+  },
+  {
+   "path": "expressions-and-equations/Multiplicative Inverse Starter File.arr"
+  },
+  {
+   "path": "expressions-and-equations/Negation Starter File.arr"
+  },
+  {
+   "path": "expressions-and-equations/Negatives and Exponents Starter File.arr"
+  },
+  {
+   "path": "projects/Blank DS Starter File.arr"
+  },
+  {
+   "path": "projects/Functions Starter File.arr"
+  },
+  {
+   "path": "projects/Logo Starter File.arr"
+  },
+  {
+   "path": "projects/Logos Warm Up.arr"
+  },
+  {
+   "path": "projects/Method 1 - Compose Functions in a single definition.arr"
+  },
+  {
+   "path": "projects/Method 2 - Compose Functions 1 Step at a time.arr"
+  },
+  {
+   "path": "projects/My Function.arr"
+  },
+  {
+   "path": "projects/Snack Habits Template.arr"
+  },
+  {
+   "path": "projects/flags/Alaska Flag (quick - repeated use of a variable).arr"
+  },
+  {
+   "path": "projects/flags/Chinese Flag.arr"
+  },
+  {
+   "path": "projects/flags/Flags starter file.arr"
+  },
+  {
+   "path": "projects/flags/Lebanon Flag starter code (uses scale).arr"
+  },
+  {
+   "path": "projects/flags/Mexican Flag.arr"
+  },
+  {
+   "path": "projects/flags/Netherlands, Ireland, Mauritius.arr"
+  },
+  {
+   "path": "projects/flags/Panama Flag.arr"
+  },
+  {
+   "path": "projects/flags/Puerto Rico Flag.arr"
+  },
+  {
+   "path": "projects/flags/Trinidad and Tobago two ways.arr"
+  },
+  {
+   "path": "projects/flags/Turkey.arr"
+  },
+  {
+   "path": "projects/games/OG - Blank Game.arr"
+  },
+  {
+   "path": "projects/games/Simple Game (no collision).arr"
+  },
+  {
+   "path": "projects/games/Simple Game (w_2d movement).arr"
+  },
+  {
+   "path": "projects/games/Simple Game (w_dist lines).arr"
+  },
+  {
+   "path": "projects/games/Simple Game.arr"
+  },
+  {
+   "path": "reactive/1-Number State.arr"
+  },
+  {
+   "path": "reactive/1-Paddle Pong.arr"
+  },
+  {
+   "path": "reactive/2-Number State.arr"
+  },
+  {
+   "path": "reactive/Bakery.arr"
+  },
+  {
+   "path": "reactive/Bicycle.arr"
+  },
+  {
+   "path": "reactive/Cow Jump.arr"
+  },
+  {
+   "path": "reactive/Light Switch.arr"
+  },
+  {
+   "path": "reactive/Moving Character.arr"
+  },
+  {
+   "path": "reactive/Package Delivery.arr"
+  },
+  {
+   "path": "reactive/Pinwheels.arr"
+  },
+  {
+   "path": "reactive/Pinwheels2.arr"
+  },
+  {
+   "path": "reactive/Pulsing Star.arr"
+  },
+  {
+   "path": "reactive/Reactive NinjaCat.arr"
+  },
+  {
+   "path": "reactive/Sunset.arr"
+  },
+  {
+   "path": "reactive/Virtual Pet.arr"
+  },
+  {
+   "path": "reactive/Watermelon Smash.arr"
+  },
+  {
+   "path": "reactive/What to Wear.arr"
+  },
+  {
+   "path": "reactive/robot-emoji.arr"
+  }
+ ],
+ "knownDeadLinks": [
+  "ai/premiums.arr",
+  "libraries/text-stats-library.arr",
+  "reactive/emoji-refactor.arr"
+ ]
+}

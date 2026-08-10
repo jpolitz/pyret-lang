@@ -218,6 +218,37 @@
       return o;
     }
 
+    /*
+      The cancellation for the run currently in flight, if any (see repl.ts).
+      One per run, replacing the last: only the newest run can be stopped, and
+      an old one's token going stale is correct -- that run is over.
+    */
+    var currentCancellation = null;
+    function newCancellation() {
+      currentCancellation = T.repl.makeCancellation();
+      return currentCancellation;
+    }
+
+    /*
+      A cancelled run is a user break that happened to land before the program
+      became a Pyret computation, so it is reported as one: the same
+      ffi.userBreak the runtime raises when it kills a thread, which renders as
+      "Program stopped by user". Otherwise pressing Stop would mean two
+      different things to the student depending on which millisecond it landed
+      in -- that message during execution, and a silently empty output area
+      during the module load.
+
+      Resolving with that result rather than rejecting also keeps the editor
+      out of its wedged state: repl-ui.js hangs afterRun off .fin(), which runs
+      either way, so the Run button, the "Running..." indicator and the
+      `running` flag are restored regardless. Anything else is a real failure
+      and is displayed as before.
+    */
+    function reportRunEnd(ret, err) {
+      if (err instanceof T.repl.Cancelled) { tsLib.resolveWithUserBreak(ret); }
+      else { tsLib.resolveWithError(ret, err); }
+    }
+
     var jsRepl = {
       runtime: runtime,
       /*
@@ -225,24 +256,26 @@
       */
       restartInteractions: function(source, options) {
         var ret = Q.defer();
+        var cancel = newCancellation();
         setTimeout(function() {
           var opts = tsOptions(options);
           var defsLocator = tsRepl.makeDefinitionsLocator(
             function() { return source; },
             T.compileStructs.standardGlobals);
-          tsRepl.restartInteractions(defsLocator, opts)
+          tsRepl.restartInteractions(defsLocator, opts, cancel)
             .then(function(either) { tsLib.resolveWithEither(ret, either); })
-            .catch(function(err) { tsLib.resolveWithError(ret, err); });
+            .catch(function(err) { reportRunEnd(ret, err); });
         }, 0);
         return ret.promise;
       },
       run: function(str, name) {
         var ret = Q.defer();
+        var cancel = newCancellation();
         setTimeout(function() {
           var locator = tsRepl.makeInteractionLocator(function() { return str; });
-          tsRepl.runInteraction(locator)
+          tsRepl.runInteraction(locator, cancel)
             .then(function(either) { tsLib.resolveWithEither(ret, either); })
-            .catch(function(err) { tsLib.resolveWithError(ret, err); });
+            .catch(function(err) { reportRunEnd(ret, err); });
         }, 0);
         return ret.promise;
       },
@@ -251,7 +284,18 @@
           afterPause(resumer);
         });
       },
+      /*
+        Stop has to say two different things, because a run is only partly a
+        Pyret computation. breakAll() interrupts the executing program -- the
+        only phase the runtime knows about -- and is deliberately left
+        unconditional, so it stays the spam-it-like-Ctrl-C control it is meant
+        to be. The cancellation covers the phases where the runtime is running
+        nothing and a break would land on an idle stack: the awaited module
+        chase, and the synchronous compile. Without it the compiler simply
+        carries on and runs the program, seconds after the user pressed Stop.
+      */
       stop: function() {
+        if (currentCancellation !== null) { currentCancellation.cancel(); }
         runtime.breakAll();
       }
     };

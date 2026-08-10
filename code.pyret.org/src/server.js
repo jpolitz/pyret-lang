@@ -43,6 +43,12 @@ function start(config, onServerReady) {
       POSTMESSAGE_ORIGIN: process.env.POSTMESSAGE_ORIGIN,
       APP_NAME:   APP_NAME,
       APP_DOMAIN: APP_DOMAIN,
+      // Whether /editor?sheets=public may read public Google Sheets through
+      // the test-only proxy below. Rendered from the server rather than read
+      // off the URL so the switch cannot be flipped by a query parameter on a
+      // deployed instance: the routes only exist in development, and so does
+      // this flag.
+      PUBLIC_SHEETS_PROXY: config.development ? "true" : "false",
     };
   var express = require('express');
   var cookieSession = require('cookie-session');
@@ -209,6 +215,203 @@ function start(config, onServerReady) {
         res.status(500);
         res.send(String(err));
         res.end();
+      });
+    });
+
+    /*
+     * Read-only access to PUBLIC Google Sheets, without a Google session.
+     *
+     * Why this exists: browser-test/curriculum runs the Bootstrap starter
+     * files, and ~76 of them open a Google Sheet. The sheets are public, but
+     * `load-spreadsheet` goes through gapi -> OAuth, so an unauthenticated
+     * headless browser cannot read them and those files could only be tested
+     * as far as "it compiled and reached the Google call". Google's own
+     * public export endpoints have no CORS headers, so the browser cannot go
+     * direct either -- but the server can, and it needs no credentials at all
+     * to read a public sheet. See src/web/js/google-apis/sheets-public.js for
+     * the client side.
+     *
+     * DEVELOPMENT ONLY, deliberately: it is inside `if(config.development)`,
+     * so a production deploy does not serve it. It is an unauthenticated
+     * fetch-on-behalf-of-the-caller, which is fine for a test server and not
+     * something to expose publicly.
+     *
+     * Two endpoints, both narrow:
+     *   /test-only/gsheet/sheets?id=      -> [{name, gid, index}, ...]
+     *   /test-only/gsheet/data?id=&gid=   -> the gviz table JSON
+     *
+     * The id/gid patterns are the whole SSRF story: the URL is BUILT here from
+     * validated components against a fixed host, never taken from the caller.
+     */
+    var GSHEET_ID_RE  = /^[A-Za-z0-9_-]{10,200}$/;
+    var GSHEET_GID_RE = /^[0-9]{1,20}$/;
+    var GSHEET_MAX_BYTES  = 25 * 1024 * 1024; // datasets here run to a few MB
+    var GSHEET_TIMEOUT_MS = 30 * 1000;
+
+    // A whole curriculum run opens ~62 distinct spreadsheets, several of them
+    // more than once (nine starter files share the animal-shelter sheet), and
+    // the suite gets run repeatedly while working on it. Caching the upstream
+    // response for a few minutes takes that off Google and off the clock
+    // without changing what is tested -- these are static curricular datasets.
+    var GSHEET_CACHE_MS = 10 * 60 * 1000;
+    var GSHEET_CACHE_MAX = 400; // ~6x a whole curriculum run; bounded, not clever
+    var gsheetCache = new Map();
+
+    function cacheGet(key) {
+      var hit = gsheetCache.get(key);
+      if (!hit) return null;
+      if (Date.now() - hit.at > GSHEET_CACHE_MS) { gsheetCache.delete(key); return null; }
+      return hit.body;
+    }
+
+    /*
+     * Buffered (not streamed) because both responses need parsing before they
+     * are useful: one is HTML to scrape, the other is JSONP to unwrap.
+     *
+     * Retried because a curriculum run opens ~62 spreadsheets in a few
+     * minutes and Google occasionally answers one of them with a transient
+     * failure. Without this, that surfaces to the student program as a flat
+     * `No Spreadsheet with id "..." found` -- which reads exactly like a
+     * dataset that has been unpublished, and cost one debugging session
+     * chasing a file that was fine.
+     */
+    var GSHEET_RETRIES = 3;
+    var GSHEET_RETRY_MS = 600;
+
+    function fetchGoogleDocs(url, cb, attempt) {
+      attempt = attempt || 1;
+      var cached = cacheGet(url);
+      if (cached !== null) return process.nextTick(function() { cb(null, cached); });
+
+      // `request` can emit both 'error' and a partial 'response', so settle
+      // once and ignore the rest -- otherwise one failure would fan out into
+      // several retries.
+      var settled = false;
+      function finish(err, body, fatal) {
+        if (settled) return;
+        settled = true;
+        if (!err) return cb(null, body);
+        if (fatal || attempt >= GSHEET_RETRIES) return cb(err);
+        setTimeout(function() { fetchGoogleDocs(url, cb, attempt + 1); }, GSHEET_RETRY_MS * attempt);
+      }
+      var bytes = 0;
+      var chunks = [];
+      var req = request({
+        url: url,
+        timeout: GSHEET_TIMEOUT_MS,
+        agent: requestFilteringAgent.useAgent(url),
+        followRedirect: function(resp) {
+          try {
+            return new URL(resp.headers.location, url).hostname === 'docs.google.com';
+          } catch (_) { return false; }
+        },
+      });
+      req.on('error', function(err) { finish(err); });
+      req.on('response', function(upRes) {
+        if (upRes.statusCode !== 200) {
+          req.destroy();
+          return finish(new Error('upstream status ' + upRes.statusCode));
+        }
+        upRes.on('data', function(chunk) {
+          bytes += chunk.length;
+          // Fatal: a sheet over the cap will be over it again next time.
+          if (bytes > GSHEET_MAX_BYTES) { req.destroy(); return finish(new Error('too-large'), null, true); }
+          chunks.push(chunk);
+        });
+        upRes.on('end', function() {
+          var body = Buffer.concat(chunks).toString('utf8');
+          // Oldest-first eviction: Map preserves insertion order, so the first
+          // key is the oldest. Keeps a long-lived dev server from growing
+          // without bound if something loops over many sheets.
+          if (gsheetCache.size >= GSHEET_CACHE_MAX) {
+            gsheetCache.delete(gsheetCache.keys().next().value);
+          }
+          gsheetCache.set(url, { at: Date.now(), body: body });
+          finish(null, body);
+        });
+      });
+    }
+
+    function gsheetId(req, res) {
+      var id = req.query.id;
+      if (!GSHEET_ID_RE.test(String(id || ''))) {
+        res.status(400).send({ error: 'bad-spreadsheet-id' });
+        return null;
+      }
+      return id;
+    }
+
+    /*
+     * The sheet list (tab names + gids).
+     *
+     * There is no unauthenticated JSON API for this, but /htmlview -- the
+     * "publish to web" rendering, which works for any public sheet -- embeds
+     * the tab switcher as a run of
+     *   items.push({name: "pets", pageUrl: "...", gid: "0", ...});
+     * so the names and gids come straight out of that. Scraping belongs on
+     * this side rather than in the browser: it keeps a page of HTML off the
+     * wire and keeps the client dealing only in JSON.
+     */
+    app.get("/test-only/gsheet/sheets", function(req, res) {
+      var id = gsheetId(req, res);
+      if (!id) return;
+      fetchGoogleDocs("https://docs.google.com/spreadsheets/d/" + id + "/htmlview",
+        function(err, body) {
+          if (err) return res.status(502).send({ error: 'upstream-error', detail: String(err.message) });
+          var sheets = [];
+          var re = /items\.push\(\{name:\s*"((?:[^"\\]|\\.)*)"[^}]*?gid:\s*"(\d+)"/g;
+          var m;
+          while ((m = re.exec(body)) !== null) {
+            var name;
+            // The name is a JS string literal in the page source, so let JSON
+            // do the unescaping (é, \x3d, quotes) rather than guessing.
+            try { name = JSON.parse('"' + m[1].replace(/\\x([0-9a-fA-F]{2})/g, '\\u00$1') + '"'); }
+            catch (_) { name = m[1]; }
+            sheets.push({ name: name, gid: m[2], index: sheets.length });
+          }
+          if (sheets.length === 0) {
+            return res.status(502).send({
+              error: 'no-sheets-found',
+              detail: 'could not read the tab list from /htmlview; is the sheet public?' });
+          }
+          res.status(200).send({ spreadsheetId: id, sheets: sheets });
+        });
+    });
+
+    /*
+     * One sheet's data, via the visualization query endpoint.
+     *
+     * `tqx=out:json` rather than out:csv on purpose: CSV is only text, so the
+     * client would have to re-guess which columns are numbers. gviz reports
+     * Google's OWN per-column type plus each cell's raw and formatted value,
+     * which is the same information the real Sheets API hands to
+     * sheets.js's type inference -- so the inference downstream stays honest
+     * instead of being reinvented against a lossier format.
+     *
+     * gviz answers with a JSONP-ish envelope -- a junk comment, then
+     * `google.visualization.Query.setResponse({...});` -- which is unwrapped
+     * here so the client gets plain JSON.
+     */
+    app.get("/test-only/gsheet/data", function(req, res) {
+      var id = gsheetId(req, res);
+      if (!id) return;
+      var gid = req.query.gid;
+      if (!GSHEET_GID_RE.test(String(gid || ''))) {
+        return res.status(400).send({ error: 'bad-gid' });
+      }
+      var url = "https://docs.google.com/spreadsheets/d/" + id +
+                "/gviz/tq?tqx=out:json&gid=" + gid;
+      fetchGoogleDocs(url, function(err, body) {
+        if (err) return res.status(502).send({ error: 'upstream-error', detail: String(err.message) });
+        var m = /setResponse\(([\s\S]*)\)/.exec(body);
+        if (!m) return res.status(502).send({ error: 'unexpected-gviz-response' });
+        var parsed;
+        try { parsed = JSON.parse(m[1]); }
+        catch (e) { return res.status(502).send({ error: 'unparseable-gviz-response' }); }
+        if (parsed.status === 'error') {
+          return res.status(502).send({ error: 'gviz-error', detail: parsed.errors });
+        }
+        res.status(200).send(parsed);
       });
     });
   }
