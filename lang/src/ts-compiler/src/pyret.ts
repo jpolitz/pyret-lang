@@ -7,6 +7,8 @@ import * as CLI from './cli-module-loader';
 import * as CS from './compile-structs';
 import * as B from './locators/builtin';
 import * as S from './server';
+import * as PP from './parse-pyret';
+import * as RED from './render-error-display';
 import { raise } from './shared';
 
 // this value is the limit of number of steps that could be inlined in case body
@@ -277,7 +279,16 @@ main(C.otherArgs).then((exitCode) => {
   // build-runnable-standalone), the Pyret runtime prints
   // "The run ended in error:" followed by the message and a Pyret stack
   // before exiting 1. Mirror the message portion.
-  printError('The run ended in error:\n\n' +
-    (e && e.message !== undefined ? e.message : String(e)) + '\n');
+  //
+  // Parse errors are Pyret exceptions in the original, rendered through
+  // error.arr's render-reason; render ours the same way (the display
+  // begins with a paragraph, whose leading "\n" supplies the blank line).
+  if (e instanceof PP.PyretParseError) {
+    printError('The run ended in error:\n' +
+      RED.displayToString(e.renderReason(), String, []) + '\n');
+  } else {
+    printError('The run ended in error:\n\n' +
+      (e && e.message !== undefined ? e.message : String(e)) + '\n');
+  }
   process.exit(failureCode);
 });

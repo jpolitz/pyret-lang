@@ -39,6 +39,7 @@ import * as JSP from './js-of-pyret';
 import * as B from './builtin-modules';
 import * as MS from './make-standalone';
 import * as RED from './render-error-display';
+import * as T from './type-structs';
 import { Either, isLeft, mapGetValue, raise, TODOError } from './shared';
 
 export type Loadable = CS.Loadable;
@@ -50,6 +51,13 @@ function toRepr(x: any): string {
       x.arguments.map((a: string) => JSON.stringify(a)).join(', ') + '])';
   } else if (CS.isBuiltin(x)) {
     return 'builtin("' + x.modname + '")';
+  } else if (x instanceof T.TypeBase) {
+    // Some type errors ED.embed a Type directly (e.g. incorrect-number-of-args
+    // embeds the applicant's TArrow). The .arr `torepr` renders these via the
+    // data definition's _output -> "(Any, Any -> Number)"; the TypeBase
+    // toString produces the identical form. Without this case the JSON
+    // fallback below dumps the raw structure into the user's error message.
+    return x.toString();
   } else {
     return JSON.stringify(x);
   }

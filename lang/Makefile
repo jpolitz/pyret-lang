@@ -364,7 +364,7 @@ ts-compiler: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
 # the serve handler resolves lib-compiled/ next to its own pyret.js (see
 # src/ts-compiler/src/server.ts), the way the Pyret-hosted server uses
 # build/phaseA/lib-compiled. Used by the npm CLI's `--backend ts`.
-$(TS_COMP_OUT)/libs.jarr: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
+$(TS_COMP_OUT)/libs.jarr: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS) $(CONFIGA_RUNTIME_FILES)
 	$(TS_PYRET) --outfile $(TS_COMP_OUT)/libs.jarr \
                       --build-runnable src/arr/compiler/libs.arr \
                       --builtin-js-dir src/js/trove/ \
@@ -389,6 +389,34 @@ ts-unit-test: ts-compiler
 ts-parity-test: ts-compiler $(PHASEA)/pyret.jarr
 	bash $(TS_COMP_DIR)/tests/parity-test.sh
 
+# Type-checker parity: the whole tests/type-check corpus, compiled with
+# -type-check by both compilers, requiring identical diagnostics. This is
+# the coverage for type-check.ts itself -- the in-suite type-check tests
+# (main.arr) import src/arr/compiler/* and so only exercise the .arr type
+# checker, whichever compiler built them. See the header of the script.
+.PHONY : ts-type-check-parity
+ts-type-check-parity: ts-compiler $(PHASEA)/pyret.jarr
+	bash $(TS_COMP_DIR)/tests/type-check-parity.sh
+
+# Well-formedness/scope-error parity: the inline programs from the in-suite
+# wf and compile-error tests (extracted at runtime, so the corpus tracks the
+# suite), compiled by both compilers with default options, identical
+# diagnostics required. Direct coverage for well-formed.ts/resolve-scope.ts
+# error rendering at the CLI -- the in-suite tests only cover the .arr
+# checker, whichever compiler built them. See the script header.
+.PHONY : ts-wf-parity
+ts-wf-parity: ts-compiler $(PHASEA)/pyret.jarr
+	bash $(TS_COMP_DIR)/tests/wf-parity.sh
+
+# standalone-configA.json is shared with the .arr side and names
+# build/phaseA/js/* for the runtime support files (baseUrl build/phaseA),
+# so everything built with it needs those present -- even when the driving
+# compiler is the TS one and build/phaseA/pyret.jarr is never built. These
+# are plain copies plus the generated parser (i.e. what phaseA-deps builds),
+# NOT a compiler bootstrap. Declared so a clean tree can go straight to
+# `make ts-test` / `make all-ts-pyret-test` without building phaseA first.
+CONFIGA_RUNTIME_FILES := $(PHASEA_ALL_DEPS) $(patsubst src/%,$(PHASEA)/%,$(PARSERS))
+
 # Build and run the main Pyret test suite using the TS compiler
 TS_TEST_BUILD=$(TS_PYRET) \
 	  --builtin-js-dir src/js/trove/ \
@@ -396,44 +424,74 @@ TS_TEST_BUILD=$(TS_PYRET) \
 		--require-config src/scripts/standalone-configA.json \
 		--compiled-dir tests/ts-compiled/
 
-tests/pyret/main2-ts.jarr: ts-compiler tests/pyret/main2.arr $(TEST_FILES)
+tests/pyret/main2-ts.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/pyret/main2.arr $(TEST_FILES)
 	$(TS_TEST_BUILD) \
 		--outfile tests/pyret/main2-ts.jarr \
 		--build-runnable tests/pyret/main2.arr \
 		-check-all
 
-# The suite's own compiler tests (test-repl.arr and friends) compile
-# through CLI.default-test-context, whose module cache is tests/compiled/.
-# The stock suite warms that cache as a side effect of building main2.jarr
-# there; the ts build keeps its own compile cache in tests/ts-compiled/, so
-# warm tests/compiled/ explicitly (compiled caches are interchangeable
-# between the two compilers). Without this, every repl-test restart
-# recompiles all builtins in-suite -- hours instead of seconds.
-TS_SUITE_CACHE_WARM=tests/compiled/.ts-suite-warm
-$(TS_SUITE_CACHE_WARM): $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS)
-	@$(call MKDIR,tests/compiled)
-	echo '"warm"' > $(TS_COMP_OUT)/suite-cache-warm.arr
-	$(TS_PYRET) --build-runnable $(TS_COMP_OUT)/suite-cache-warm.arr \
-                      --outfile $(TS_COMP_OUT)/suite-cache-warm.jarr \
+# Warming a compile cache: compile a trivial program into the target dir,
+# which drags in every builtin. Without a warm cache, each in-suite compile
+# (every repl-test restart) recompiles all builtins -- hours instead of
+# seconds. Compiled caches are interchangeable between the two compilers,
+# so the TS compiler can warm either dir. Stamp file is <dir>/.ts-suite-warm.
+#
+# The scratch program is deleted once the cache is populated, and is NOT its
+# own make target (a target would go missing -> rebuild -> rewarm every time).
+# It has to go: tests/pyret/tests/test-pprint.arr walks the whole lang/ tree at
+# runtime and round-trips every .arr it finds at 3 widths, so any .arr left
+# under lang/ -- build artifacts included -- silently adds 3 to the suite's
+# test count and makes the TS total differ from the .arr total. Per-dir names
+# keep parallel warms from racing; only the .jarr (not matched by the walk)
+# is left behind.
+tests/%/.ts-suite-warm: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS) $(CONFIGA_RUNTIME_FILES)
+	@$(call MKDIR,tests/$*)
+	echo '"warm"' > $(TS_COMP_OUT)/suite-cache-warm-$*.arr
+	$(TS_PYRET) --build-runnable $(TS_COMP_OUT)/suite-cache-warm-$*.arr \
+                      --outfile $(TS_COMP_OUT)/suite-cache-warm-$*.jarr \
                       --builtin-js-dir src/js/trove/ \
                       --builtin-arr-dir src/arr/trove/ \
-                      --compiled-dir tests/compiled/ \
+                      --compiled-dir tests/$*/ \
                       --deps-file $(TS_COMP_OUT)/bundled-node-compile-deps.js \
                       -no-check-mode -no-display-progress \
                       --require-config src/scripts/standalone-configA.json
-	touch $(TS_SUITE_CACHE_WARM)
+	$(call RM,$(TS_COMP_OUT)/suite-cache-warm-$*.arr)
+	touch $@
+
+# The suite's own compiler tests (test-repl.arr and friends) compile through
+# CLI.default-test-context, whose module cache is tests/compiled/. The stock
+# suite warms that cache as a side effect of building main2.jarr there; the ts
+# build keeps its own compile cache in tests/ts-compiled/, so tests/compiled/
+# has to be warmed explicitly.
+TS_SUITE_CACHE_WARM=tests/compiled/.ts-suite-warm
+# repl-test drives the in-process load-lib runtime, whose cacheBaseDir is
+# tests/ts-compiled (src/ts-compiler/tests/in-process-host.js).
+TS_COMPILED_CACHE_WARM=tests/ts-compiled/.ts-suite-warm
+# Both stamps are already named as prerequisites below, so make won't treat
+# them as intermediates -- but say so, since a deleted stamp means an
+# unnecessary rewarm.
+.SECONDARY: $(TS_SUITE_CACHE_WARM) $(TS_COMPILED_CACHE_WARM)
 
 .PHONY : ts-pyret-test
 ts-pyret-test: tests/pyret/main2-ts.jarr $(TS_SUITE_CACHE_WARM)
 	$(NODE) tests/pyret/main2-ts.jarr
 
+# Mirrors all-pyret-test on the .arr side: one build, one run, covering
+# main2 + type-check + regression + lib-test. The narrower ts-pyret-test /
+# ts-type-check-test / ts-regression-test targets remain available for
+# narrowing down a failure by hand, exactly as their .arr counterparts do.
 .PHONY : ts-test
-ts-test: ts-unit-test ts-parity-test ts-repl-test ts-pyret-test ts-type-check-test ts-regression-test ts-io-test
+ts-test: ts-unit-test ts-parity-test ts-type-check-parity ts-wf-parity ts-repl-test all-ts-pyret-test ts-io-test
 
 .PHONY : ts-clean
 ts-clean:
 	$(call RMDIR,$(TS_COMP_OUT))
+	$(call RMDIR,$(PHASEBTS))
+	$(call RMDIR,$(PHASECTS))
 	$(call RMDIR,tests/ts-compiled)
+	$(call RMDIR,compiled-ts)
+	$(call RMDIR,build/serve-smoke-compiled)
+	$(call RM,$(TS_SUITE_CACHE_WARM))
 	$(call RM,tests/pyret/main2-ts.jarr)
 	$(call RM,tests/pyret/regression-ts.jarr)
 	$(call RM,tests/type-check/main-ts.jarr)
@@ -452,7 +510,7 @@ ts-clean:
                       --require-config src/scripts/standalone-configA.json
 
 # TS-compiler analogues of the remaining test entry points
-tests/pyret/regression-ts.jarr: ts-compiler tests/pyret/regression.arr $(REG_TEST_FILES)
+tests/pyret/regression-ts.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/pyret/regression.arr $(REG_TEST_FILES)
 	$(TS_TEST_BUILD) \
 		--build-runnable tests/pyret/regression.arr --outfile tests/pyret/regression-ts.jarr
 
@@ -460,7 +518,7 @@ tests/pyret/regression-ts.jarr: ts-compiler tests/pyret/regression.arr $(REG_TES
 ts-regression-test: tests/pyret/regression-ts.jarr
 	$(NODE) tests/pyret/regression-ts.jarr
 
-tests/type-check/main-ts.jarr: ts-compiler tests/type-check/main.arr $(TYPE_TEST_FILES)
+tests/type-check/main-ts.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/type-check/main.arr $(TYPE_TEST_FILES)
 	$(TS_TEST_BUILD) \
 		--build-runnable tests/type-check/main.arr --outfile tests/type-check/main-ts.jarr
 
@@ -472,7 +530,7 @@ ts-type-check-test: ts-compiler tests/type-check/main-ts.jarr
 ts-io-test: ts-compiler
 	$(NPM_EXEC) jest --detectOpenHandles --forceExit --verbose "src/ts-compiler/tests/io-ts.test.js"
 
-tests/pyret/all-ts.jarr: ts-compiler $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) $(MAIN_TEST_FILES)
+tests/pyret/all-ts.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) $(MAIN_TEST_FILES)
 	$(TS_TEST_BUILD) \
 		--build-runnable tests/all.arr \
     --outfile tests/pyret/all-ts.jarr \
@@ -483,12 +541,13 @@ all-ts-pyret-test: tests/pyret/all-ts.jarr $(TS_SUITE_CACHE_WARM)
 	$(NODE) tests/pyret/all-ts.jarr
 
 .PHONY : ts-repl-test
-# The repl test now drives repl.ts against a REAL in-process load-lib runtime
-# (src/ts-compiler/tests/in-process-host.js), so it needs the warm builtin
-# cache in tests/ts-compiled/ that building main2-ts.jarr produces. Uses the
-# node:test runner because the in-process runtime pulls in requirejs, which
-# can't load inside a jest worker.
-ts-repl-test: ts-compiler tests/pyret/main2-ts.jarr
+# The repl test drives repl.ts against a REAL in-process load-lib runtime
+# (src/ts-compiler/tests/in-process-host.js), so it needs a warm builtin cache
+# in tests/ts-compiled/ -- the cheap warm above, not a full main2-ts.jarr
+# build, since the test only exercises base builtins. Uses the node:test
+# runner because the in-process runtime pulls in requirejs, which can't load
+# inside a jest worker.
+ts-repl-test: ts-compiler $(TS_COMPILED_CACHE_WARM)
 	$(NODE) --test src/ts-compiler/tests/repl-test.js
 
 # ============================================================
@@ -591,11 +650,6 @@ $(PHASEBTS)/config.json: src/scripts/node_modules-config.json
 	cp $< $@
 $(PHASECTS)/config.json: src/scripts/node_modules-config.json
 	cp $< $@
-
-# TS-seeded self-fixpoint: phaseB-ts must equal phaseC-ts.
-.PHONY : no-diff-ts
-no-diff-ts: phaseB-ts phaseC-ts
-	diff $(PHASEBTS)/pyret.jarr $(PHASECTS)/pyret.jarr
 
 # The grand convergence check.  Builds both chains and asserts that all
 # four standalones are one byte-identical fixpoint reached from two

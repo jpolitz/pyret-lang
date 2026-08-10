@@ -41,7 +41,13 @@ fidelity rule 2 (one TS function per Pyret function — held everywhere).
    course for *internal* errors: every added `default: throw new
    InternalCompilerError(...)` arm is a new string; `torepr`/`tostring` in raise
    messages became ~5 divergent local reimplementations; parse-pyret invented a
-   whole `PyretParseError` message vocabulary. User-facing render-reason strings
+   whole `PyretParseError` message vocabulary. [Merge cleanup: the parse-error
+   vocabulary turned out to be user-facing — the CLI printed `e.message` for any
+   unparsable program, caught by the type-check parity harness on
+   `should-not/methods-contested-extension.arr`. The classes now carry ported
+   `renderReason()`s mirroring error.arr and the CLI renders through them,
+   byte-identical; the terse `message` strings remain as internal fallback.]
+   User-facing render-reason strings
    *were* kept exact (verified in well-formed and compile-errors). The de-facto
    rule is "user-facing strings exact; internal strings best-effort" — the doc
    should say that, because the current text forbids what the port does hundreds

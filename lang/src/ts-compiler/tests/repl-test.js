@@ -6,7 +6,7 @@
 // Exercises repl.ts end to end: provide rewriting, globals chaining across
 // interactions, realm threading, compile-error reporting, and that a failed
 // interaction does not drop earlier bindings. Asserts actual computed values.
-// Needs a warm builtin cache in tests/ts-compiled (built by `make ts-pyret-test`).
+// Needs a warm builtin cache in tests/ts-compiled; `make ts-repl-test` warms it.
 
 const path = require('path');
 const { describe, test, before } = require('node:test');

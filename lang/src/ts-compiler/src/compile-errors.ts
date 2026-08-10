@@ -458,13 +458,15 @@ export class UnwelcomeWhere extends CompileErrorBase {
         text(".")])]);
   }
   renderReason(): ED.ErrorDisplay {
-    // NOTE: ED.loc(self.kind) in the source passes a string where a srcloc
-    // is expected; ported faithfully.
+    // The original had ED.loc(self.kind) -- a string where a srcloc is
+    // expected -- which crashed BOTH renderers (caught by wf-parity on the
+    // unwelcome-where programs). Fixed to ED.text in compile-structs.arr and
+    // here together.
     return error([
       para([
         code(text("`where`")),
         text(" blocks are only allowed on named function and declarations; a where block may not be added to a "),
-        edLoc(this.kind as any),
+        text(this.kind),
         text(" at "),
         edLoc(this.loc),
         text(".")])]);

@@ -6,6 +6,13 @@ Every file pair was read in full by an independent reviewer; findings below are 
 places the port is *not* a straight application of the mechanical translation rules.
 Line numbers are working-tree; `ts:` = the TS file, `arr:` = the Pyret/JS original.
 
+Findings below cite one-off probe scripts under `lang/src/ts-compiler/tests/divergence/`.
+Those probes were investigation artifacts, wired into no `make` target and no CI job; they
+were removed during merge cleanup. Their conclusions are recorded here, and the findings
+that still needed a standing guard were promoted to real tests (`TRecord.key()`
+field-order independence → `tests/run-unit-tests.js`; multi-error ordering → parity
+program `err-multi-unbound.arr`). To read a probe itself, recover it from git history.
+
 Severity tiers: **[!!]** likely-observable behavior/output divergence, **[!]** latent
 hazard or changed failure mode, **[~]** deliberate + documented, worth confirming,
 **[i]** informational (error-string drift, dropped dead code/tests).

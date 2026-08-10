@@ -983,7 +983,7 @@ data CompileError:
         [ED.para:
           ED.code(ED.text("`where`")),
           ED.text(" blocks are only allowed on named function and declarations; a where block may not be added to a "),
-          ED.loc(self.kind),
+          ED.text(self.kind),
           ED.text(" at "),
           ED.loc(self.loc),
           ED.text(".")]]

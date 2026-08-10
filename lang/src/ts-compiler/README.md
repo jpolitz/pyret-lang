@@ -34,9 +34,18 @@ Pyret-hosted compiler's.
 | `make ts-compiler` | Generates the parser, installs the local TypeScript toolchain, compiles to `build/ts-compiler/`, and copies the runtime support files (mirroring phaseA's layout). |
 | `make ts-unit-test` | Unit tests for individual compiler modules. |
 | `make ts-parity-test` | Compiles and runs each program in `tests/programs/` with **both** compilers using the same options (including `-type-check`, `-no-check-mode`, `--checks-format json`, and compile-error cases) and diffs results. |
-| `make ts-pyret-test` | Builds `tests/pyret/main2.arr` (the full Pyret test suite) with the TS compiler and runs it. |
+| `make ts-type-check-parity` | Compiles the whole `tests/type-check/` corpus (174 programs) with `-type-check` under **both** compilers and requires identical diagnostics. This is the direct coverage for `type-check.ts`: the in-suite type-check tests import `src/arr/compiler/*` and so exercise the `.arr` type checker whichever compiler built them. `?-N` existential labels are canonicalized by first appearance (numbering follows solve-loop iteration order, deliberately left divergent — see port-review-nonmechanical.md). |
+| `make ts-wf-parity` | Same idea for well-formedness/scope errors: extracts the inline programs from the in-suite wf tests (`test-well-formed.arr`, `test-compile-errors.arr`) at runtime — so the corpus tracks the suite — and compiles each under both compilers with default options, identical diagnostics required. Direct coverage for `well-formed.ts`/`resolve-scope.ts` error rendering at the CLI. |
+| `make ts-repl-test` | Drives `repl.ts` against a real in-process load-lib runtime. |
+| `make ts-io-test` | The io-tests, pointed at this compiler. |
+| `make all-ts-pyret-test` | Builds `tests/all.arr` (main2 + type-check + regression + lib-test) with the TS compiler and runs it. The counterpart of `make all-pyret-test` on the .arr side. |
 | `make ts-test` | All of the above. |
+| `make bootstrap-converge` | Builds both bootstrap chains and asserts all four standalones are one byte-identical fixpoint (see below). |
 | `make ts-clean` | Removes TS build outputs and caches. |
+
+For narrowing down a failure, `ts-pyret-test`, `ts-type-check-test`, and
+`ts-regression-test` build and run the individual suites that `all-ts-pyret-test`
+covers together, mirroring their `.arr` counterparts.
 
 The CLI is a drop-in for the Pyret-hosted one:
 
@@ -52,14 +61,32 @@ and parse-error messages.
 
 ## Verification status
 
-- `ts-parity-test`: 16/16 programs identical (stdout, exit codes, and
+- `ts-parity-test`: 28/28 programs identical (stdout, exit codes, and
   compile-error text byte-for-byte, modulo the "Pyret stack:" trailer —
-  see Deviations).
+  see Deviations). Includes one `err-parse-*.arr` per parse-error kind
+  reachable from source text (7 of the 9 kinds; `parse-error-bad-app` and
+  `parse-error-bad-check-operator` have renderers but no reachable trigger
+  in the current grammar — `is` at top level classifies as next-token, and
+  `f (1)` parses and then fails well-formedness).
+- `ts-type-check-parity`: 174/174 corpus programs produce identical
+  diagnostics under `-type-check` (modulo the trailer and `?-N` label
+  numbering, canonicalized — see the target table above). First runs of
+  this harness caught and led to fixes for two real divergences: embedded
+  types in arity errors rendered as raw JSON (`toRepr` in
+  cli-module-loader.ts now uses `TypeBase.toString()`), and parse errors
+  printed a terse internal message instead of error.arr's rendering (the
+  `PyretParseError` classes now carry ported `renderReason()`s).
+- `ts-wf-parity`: 147/147 extracted programs identical (38 distinct
+  CompileError variants). Its first run caught a `render-reason` crash in
+  BOTH compilers — `unwelcome-where` passed a string to `ED.loc`, so the
+  CLI rendering of that error had never worked anywhere; fixed to
+  `ED.text` in compile-structs.arr and compile-errors.ts together (CPO was
+  unaffected: the editor uses the fancy renderer, which was correct).
 - All test entry points pass when built with this compiler, with output
   identical to the phaseA-built equivalents:
   `tests/pyret/main2.arr` (12,994 tests), `tests/pyret/regression.arr`
   (243, byte-identical output), `tests/type-check/main.arr` (210,
-  byte-identical output), `tests/all.arr` (13,408, `-check-all`), and the
+  byte-identical output), `tests/all.arr` (13,440, `-check-all`), and the
   io-tests (13/13 via `src/ts-compiler/tests/io-ts.test.js`, a copy of
   `tests/io-tests/io.test.js` pointed at this compiler). `parse-test`
   covers both compilers: the generated parser/tokenizer under

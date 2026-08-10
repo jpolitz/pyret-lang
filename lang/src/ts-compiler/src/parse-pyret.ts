@@ -14,6 +14,7 @@
 */
 
 import * as A from './ast';
+import * as ED from './error-display';
 import { Srcloc } from './srcloc';
 import { jsnums, PyretNumber } from './interop/js-numbers';
 import { amdRequire } from './interop/amd';
@@ -89,35 +90,82 @@ export class PyretParseError extends Error {
     super(message);
     this.name = 'PyretParseError';
   }
+  // error.arr's render-reason for the corresponding ParseError variant.
+  // The Pyret-hosted CLI renders uncaught parse errors through these (via
+  // render-error-display), so the top-level handler in pyret.ts must too
+  // for byte-identical diagnostics. Subclasses override; this fallback
+  // covers any kind without a ported renderer.
+  renderReason(): ED.ErrorDisplay {
+    return ED.para(ED.text(this.message));
+  }
 }
 
 function locStr(loc: Srcloc): string {
   return `${loc.source}, ${loc.startLine}:${loc.startColumn}-${loc.endLine}:${loc.endColumn}`;
 }
 
+// error.arr's draw-and-highlight
+function drawAndHighlight(l: Srcloc): ED.ErrorDisplay {
+  return ED.locDisplay(l, "error-highlight", ED.loc(l));
+}
+
 export class ParseErrorNextToken extends PyretParseError {
   constructor(loc: Srcloc, public readonly nextToken: string) {
     super('parse-error-next-token', loc, `parse error around ${JSON.stringify(nextToken)} at ${locStr(loc)}`);
+  }
+  renderReason(): ED.ErrorDisplay {
+    return ED.error(
+      ED.para(ED.text("Pyret didn't understand your program around "), drawAndHighlight(this.loc!)),
+      ED.para(ED.text("You may need to add or remove some text to fix your program.")),
+      ED.para(ED.text("Look carefully before the highlighted text.")),
+      ED.para(ED.text("Is there a missing colon ("), ED.code(ED.text(":")),
+        ED.text("), comma ("), ED.code(ED.text(",")),
+        ED.text("), string marker ("), ED.code(ED.text("\"")),
+        ED.text("), or keyword?")),
+      ED.para(ED.text("Is there something there that shouldn’t be?")));
   }
 }
 export class ParseErrorEOF extends PyretParseError {
   constructor(loc: Srcloc) {
     super('parse-error-eof', loc, `parse error at end of file at ${locStr(loc)}`);
   }
+  renderReason(): ED.ErrorDisplay {
+    return ED.error(ED.para(
+      ED.text("Pyret didn't understand the very end of your program."),
+      ED.text("You may be missing an \"end\", or closing punctuation like \")\" or \"]\" right at the end.")));
+  }
 }
 export class ParseErrorUnterminatedString extends PyretParseError {
   constructor(loc: Srcloc) {
     super('parse-error-unterminated-string', loc, `unterminated string at ${locStr(loc)}`);
+  }
+  renderReason(): ED.ErrorDisplay {
+    return ED.error(ED.paraNospace(
+      ED.text("Pyret thinks your program has an incomplete string literal around "),
+      drawAndHighlight(this.loc!),
+      ED.text("; you may be missing closing punctuation.")));
   }
 }
 export class ParseErrorBadNumber extends PyretParseError {
   constructor(loc: Srcloc) {
     super('parse-error-bad-number', loc, `bad number at ${locStr(loc)}`);
   }
+  renderReason(): ED.ErrorDisplay {
+    return ED.error(ED.paraNospace(
+      ED.text("Pyret thinks your program probably has a number at "),
+      drawAndHighlight(this.loc!),
+      ED.text("; number literals in Pyret require at least one digit before the decimal point.")));
+  }
 }
 export class ParseErrorBadOper extends PyretParseError {
   constructor(loc: Srcloc) {
     super('parse-error-bad-operator', loc, `bad operator at ${locStr(loc)}`);
+  }
+  renderReason(): ED.ErrorDisplay {
+    return ED.error(ED.paraNospace(
+      ED.text("The operator at "),
+      drawAndHighlight(this.loc!),
+      ED.text(" has no surrounding whitespace.")));
   }
 }
 export class ParseErrorBadCheckOper extends PyretParseError {
@@ -125,21 +173,53 @@ export class ParseErrorBadCheckOper extends PyretParseError {
   constructor(public readonly op: any) {
     super('parse-error-bad-check-operator', op && op.l, `bad check operator at ${op && op.l ? locStr(op.l) : '<unknown>'}`);
   }
+  renderReason(): ED.ErrorDisplay {
+    return ED.error(
+      ED.paraNospace(
+        ED.text("The testing operator at "),
+        drawAndHighlight(this.op.l),
+        ED.text(" must be used inside a"),
+        ED.code(ED.text("check")), ED.text(" or "), ED.code(ED.text("where")), ED.text(" block.")),
+      ED.para(
+        ED.text("Did you mean to use one of the comparison operators instead?")));
+  }
 }
 export class ParseErrorColonColon extends PyretParseError {
   // NOTE: the JS ffi signature accepts a nextToken argument but drops it.
   constructor(loc: Srcloc, public readonly nextToken?: string) {
     super('parse-error-colon-colon', loc, `unexpected :: at ${locStr(loc)}`);
   }
+  renderReason(): ED.ErrorDisplay {
+    // NOTE: the loc sits at the error's top level (between the paras), not
+    // inside one -- error.arr's structure, preserved for byte parity.
+    return ED.error(
+      ED.para(ED.text("Pyret didn't understand your program around ")),
+      drawAndHighlight(this.loc!),
+      ED.para(ED.text(" If you were trying to write a type annotation (with "), ED.code(ED.text("::")),
+        ED.text("), remember that annotations only apply directly to names.  "),
+        ED.text("If you were not trying to write an annotation, perhaps use a single colon instead.")));
+  }
 }
 export class ParseErrorBadApp extends PyretParseError {
   constructor(public readonly funLoc: Srcloc, public readonly argsLoc: Srcloc) {
     super('parse-error-bad-app', funLoc, `bad application at ${locStr(funLoc)} (arguments at ${locStr(argsLoc)})`);
   }
+  renderReason(): ED.ErrorDisplay {
+    return ED.error(ED.para(
+      ED.text("Pyret thinks the code at "), ED.loc(this.funLoc.plus(this.argsLoc)),
+      ED.text(" is probably a function call, but there should be no space"),
+      ED.text(" between the function and its arguments.")));
+  }
 }
 export class ParseErrorBadFunHeader extends PyretParseError {
   constructor(public readonly funLoc: Srcloc, public readonly argsLoc: Srcloc) {
     super('parse-error-bad-fun-header', funLoc, `bad function header at ${locStr(funLoc)} (arguments at ${locStr(argsLoc)})`);
+  }
+  renderReason(): ED.ErrorDisplay {
+    return ED.error(ED.para(
+      ED.text("Pyret thinks the code at "), ED.loc(this.funLoc.plus(this.argsLoc)),
+      ED.text(" is probably a function header, but there should be no space"),
+      ED.text(" between the arguments.")));
   }
 }
 
