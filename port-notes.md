@@ -55,6 +55,19 @@ histories diffs cache history, not compilers. (Same reason bootstrap-converge
 works: both chains compile the same worklist.) Caches stay functionally
 interchangeable; they are just not byte-stable across run shapes.
 
+Orphaned test files in tests/pyret/tests/ (found 2026-08-10 by diffing the
+directory against the complete all.arr build worklist; ALL pre-date the port
+and were never imported by main.arr or main2.arr):
+  - Recent, probably just forgotten wiring -- WIRE IN, don't delete:
+    test-matrices.arr + test-matrices2.arr (2024), test-bar-chart.arr (2025)
+  - test-npm-import.arr (2025): needs the pyret-test-files npm package
+    installed, which is why it can't sit in main2; needs its own target or a
+    setup step
+  - Old, likely superseded -- verify then delete: test-roughnum (2014),
+    test-str-dict (2014, vs test-string-dict which IS wired), test-within
+    (2014), test-adaptive-simpson (2015), test-each-loop (2017),
+    test-include-block + its helper provider.arr (2018)
+
 Other post-merge cleanup, same batch:
   - delete lang/Makefile.old (dead since the lang/ move)
   - prune tests/type-check/should/ and should-not/ (dead dirs no harness runs;

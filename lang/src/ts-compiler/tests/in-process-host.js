@@ -4,7 +4,7 @@
 // ("in-process load-lib execution is not ported"). But CPO runs them in-process
 // in the browser via load-lib's run-program against a persistent, forking realm
 // — and that machinery is plain JS that works in node too. This harness does
-// exactly that, so repl.ts / repartee.ts can be tested end-to-end (real
+// exactly that, so repl.ts can be tested end-to-end (real
 // compilation AND real execution) in lang/, without CPO.
 //
 // It bootstraps a Pyret runtime + the runtime-lib/load-lib troves (via the
@@ -61,7 +61,7 @@ async function makeStandaloneSource(src, uri, context, options) {
 
 // Returns a Promise of an in-process host:
 //   { executor, realm, modules, makeFinder, context, runtime, loadLibMod }
-// ready to plug into repl.makeRepl / repartee.makeReparteeRunner.
+// ready to plug into repl.makeRepl.
 function makeHost(opts) {
   opts = opts || {};
   const cacheBaseDir = opts.cacheBaseDir || 'tests/ts-compiled';

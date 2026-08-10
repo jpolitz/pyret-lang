@@ -233,9 +233,6 @@ TEST_BUILD=$(NODE) $(PYRET_TEST_PHASE)/pyret.jarr \
 		--require-config $(PYRET_TEST_CONFIG) \
 		--compiled-dir tests/compiled/
 
-.PHONY : test-all
-test-all: test
-
 .PHONY : test
 test: pyret-test compiler-test type-check-test pyret-io-test jsnums-test
 
@@ -423,6 +420,15 @@ ts-type-check-parity: ts-compiler $(PHASEA)/pyret.jarr
 ts-wf-parity: ts-compiler $(PHASEA)/pyret.jarr
 	bash $(TS_COMP_DIR)/tests/wf-parity.sh
 
+# The npm CLI's compile-server path (`pyret --backend ts`): starts pyret.js
+# in -serve mode exactly as the npm client does and drives the ws+unix
+# protocol -- good compile (and the standalone RUNS), failing compile,
+# reconnect, shutdown. Needs ts-libA because the serve handler injects
+# lib-compiled as a read-only cache (how the npm package ships builtins).
+.PHONY : ts-serve-test
+ts-serve-test: ts-compiler $(TS_COMP_OUT)/libs.jarr $(CONFIGA_RUNTIME_FILES)
+	bash $(TS_COMP_DIR)/tests/serve-test.sh
+
 # standalone-configA.json is shared with the .arr side and names
 # build/phaseA/js/* for the runtime support files (baseUrl build/phaseA),
 # so everything built with it needs those present -- even when the driving
@@ -507,7 +513,7 @@ ts-pyret-test: tests/pyret/main2-ts.jarr
 # ts-type-check-test / ts-regression-test targets remain available for
 # narrowing down a failure by hand, exactly as their .arr counterparts do.
 .PHONY : ts-test
-ts-test: ts-unit-test ts-parity-test ts-type-check-parity ts-wf-parity ts-repl-test all-ts-pyret-test ts-io-test
+ts-test: ts-unit-test ts-parity-test ts-type-check-parity ts-wf-parity ts-repl-test ts-serve-test all-ts-pyret-test ts-io-test
 
 .PHONY : ts-clean
 ts-clean:

@@ -34,10 +34,11 @@ Pyret-hosted compiler's.
 | `make ts-compiler` | Generates the parser, installs the local TypeScript toolchain, compiles to `build/ts-compiler/`, and copies the runtime support files (mirroring phaseA's layout). |
 | `make ts-unit-test` | Unit tests for individual compiler modules. |
 | `make ts-parity-test` | Compiles and runs each program in `tests/programs/` with **both** compilers using the same options (including `-type-check`, `-no-check-mode`, `--checks-format json`, and compile-error cases) and diffs results. |
-| `make ts-type-check-parity` | Compiles the whole `tests/type-check/` corpus (174 programs) with `-type-check` under **both** compilers and requires identical diagnostics. This is the direct coverage for `type-check.ts`: the in-suite type-check tests import `src/arr/compiler/*` and so exercise the `.arr` type checker whichever compiler built them. `?-N` existential labels are canonicalized by first appearance (numbering follows solve-loop iteration order, deliberately left divergent — see port-review-nonmechanical.md). |
-| `make ts-wf-parity` | Same idea for well-formedness/scope errors: extracts the inline programs from the in-suite wf tests (`test-well-formed.arr`, `test-compile-errors.arr`) at runtime — so the corpus tracks the suite — and compiles each under both compilers with default options, identical diagnostics required. Direct coverage for `well-formed.ts`/`resolve-scope.ts` error rendering at the CLI. |
+| `make ts-type-check-parity` | Compiles the whole `tests/type-check/` corpus (174 programs) with `-type-check` under **both** compilers and requires identical diagnostics. Runs both compilers as compile servers (the npm client's `-serve` protocol) so the `.arr` compiler's ~2s startup is paid once, not per program — and the compared diagnostics are the servers' echo frames, pinning server-mode rendering parity as well. This is the direct coverage for `type-check.ts`: the in-suite type-check tests import `src/arr/compiler/*` and so exercise the `.arr` type checker whichever compiler built them. `?-N` existential labels are canonicalized by first appearance (numbering follows solve-loop iteration order, deliberately left divergent — see port-review-nonmechanical.md). |
+| `make ts-wf-parity` | Same idea for well-formedness/scope errors: extracts the inline programs from the in-suite wf tests (`test-well-formed.arr`, `test-compile-errors.arr`) at runtime — so the corpus tracks the suite — and compiles each under both compilers (same compile-server engine as `ts-type-check-parity`) with default options, identical diagnostics required. Direct coverage for `well-formed.ts`/`resolve-scope.ts` error rendering. |
 | `make ts-pyret-test` | Builds `tests/pyret/main2.arr` (the language/runtime suite — no compile-at-runtime tests, no cache warm needed) with the TS compiler and runs it: pure TS-codegen coverage. |
 | `make ts-repl-test` | Drives `repl.ts` against a real in-process load-lib runtime. |
+| `make ts-serve-test` | Starts `pyret.js -serve` exactly as the npm CLI client does and drives the ws+unix protocol: good compile (the served standalone must run), failing compile, reconnect, shutdown. The coverage for `pyret --backend ts`'s compile server. |
 | `make ts-io-test` | The io-tests, pointed at this compiler. |
 | `make all-ts-pyret-test` | Builds `tests/all.arr` (main2 + type-check + regression + lib-test) with the TS compiler and runs it. The counterpart of `make all-pyret-test` on the .arr side. |
 | `make ts-test` | All of the above. |
@@ -75,13 +76,19 @@ and parse-error messages.
   in the current grammar — `is` at top level classifies as next-token, and
   `f (1)` parses and then fails well-formedness).
 - `ts-type-check-parity`: 174/174 corpus programs produce identical
-  diagnostics under `-type-check` (modulo the trailer and `?-N` label
+  diagnostics under `-type-check` (modulo `?-N` label
   numbering, canonicalized — see the target table above). First runs of
   this harness caught and led to fixes for two real divergences: embedded
   types in arity errors rendered as raw JSON (`toRepr` in
   cli-module-loader.ts now uses `TypeBase.toString()`), and parse errors
   printed a terse internal message instead of error.arr's rendering (the
   `PyretParseError` classes now carry ported `renderReason()`s).
+- `ts-serve-test`: all steps pass (compile-success with a runnable
+  standalone, compile-failure with the right error, reconnect, shutdown
+  actually terminates the process). First runs caught that the smoke
+  client's guessed `base-dir` broke the require-config's relative-path
+  resolution — the npm client anchors base-dir at the project root, which
+  is load-bearing for `make-standalone`'s raw-js resolution.
 - `ts-wf-parity`: 147/147 extracted programs identical (38 distinct
   CompileError variants). Its first run caught a `render-reason` crash in
   BOTH compilers — `unwelcome-where` passed a string to `ED.loc`, so the

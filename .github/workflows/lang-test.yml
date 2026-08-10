@@ -56,6 +56,12 @@ jobs:
     - name: run tests
       run: make all-ts-pyret-test
 
+    # The npm CLI's compile-server path (`pyret --backend ts`): -serve mode
+    # driven over the npm client's ws+unix protocol -- compile / failure /
+    # reconnect / shutdown, and the served standalone must run.
+    - name: compile-server test
+      run: make ts-serve-test
+
   bootstrap-converge:
     name: bootstrap convergence (.arr == TS, byte-identical)
 

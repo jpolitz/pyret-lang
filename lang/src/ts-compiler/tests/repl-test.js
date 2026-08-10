@@ -1,7 +1,7 @@
 // REPL-library tests (node:test), driven by the REAL in-process load-lib runtime.
 //   node --test src/ts-compiler/tests/repl-test.js     (or `make ts-repl-test`)
 // (node:test rather than jest because the in-process runtime needs requirejs,
-// which can't load inside a jest worker. See repartee-test.js for the note.)
+// which can't load inside a jest worker.)
 //
 // Exercises repl.ts end to end: provide rewriting, globals chaining across
 // interactions, realm threading, compile-error reporting, and that a failed
