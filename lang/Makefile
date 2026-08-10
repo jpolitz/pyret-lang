@@ -237,7 +237,7 @@ TEST_BUILD=$(NODE) $(PYRET_TEST_PHASE)/pyret.jarr \
 test-all: test
 
 .PHONY : test
-test: pyret-test type-check-test pyret-io-test jsnums-test
+test: pyret-test compiler-test type-check-test pyret-io-test jsnums-test
 
 .PHONY : parse-test
 parse-test: tests/parse/parse.js build/phaseA/js/pyret-tokenizer.js build/phaseA/js/pyret-parser.js
@@ -246,7 +246,7 @@ parse-test: tests/parse/parse.js build/phaseA/js/pyret-tokenizer.js build/phaseA
 TEST_FILES := $(wildcard tests/pyret/tests/*.arr)
 TYPE_TEST_FILES := $(wildcard tests/type-check/bad/*.arr) $(wildcard tests/type-check/good/*.arr) $(wildcard tests/type-check/should/*.arr) $(wildcard tests/type-check/should-not/*.arr)
 REG_TEST_FILES := $(wildcard tests/pyret/regression/*.arr)
-MAIN_TEST_FILES := tests/pyret/main2.arr tests/type-check/main.arr tests/pyret/regression.arr tests/lib-test/lib-test-main.arr tests/all.arr
+MAIN_TEST_FILES := tests/pyret/main2.arr tests/pyret/compiler-tests.arr tests/type-check/main.arr tests/pyret/regression.arr tests/lib-test/lib-test-main.arr tests/all.arr
 
 tests/pyret/all.jarr: phaseA $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) $(MAIN_TEST_FILES)
 	$(TEST_BUILD) \
@@ -265,9 +265,24 @@ tests/pyret/main2.jarr: phaseA tests/pyret/main2.arr  $(TEST_FILES)
 		-check-all # NOTE(joe): check-all doesn't yet do anything
 
 
+# main2 is the language/runtime suite: none of its modules import
+# src/arr/compiler or compile anything at test runtime. The modules that DO
+# live in compiler-tests.arr (see its header), whose run needs the
+# tests/compiled cache warm -- on this .arr side, building the jarr into
+# tests/compiled warms it as a side effect of the same $(TEST_BUILD).
 .PHONY : pyret-test
 pyret-test: phaseA tests/pyret/main2.jarr
 	$(NODE) tests/pyret/main2.jarr
+
+tests/pyret/compiler-tests.jarr: phaseA tests/pyret/compiler-tests.arr $(TEST_FILES)
+	$(TEST_BUILD) \
+		--outfile tests/pyret/compiler-tests.jarr \
+		--build-runnable tests/pyret/compiler-tests.arr \
+		-check-all
+
+.PHONY : compiler-test
+compiler-test: phaseA tests/pyret/compiler-tests.jarr
+	$(NODE) tests/pyret/compiler-tests.jarr
 
 .PHONY : pyret-io-test
 pyret-io-test: phaseA
@@ -472,9 +487,20 @@ TS_COMPILED_CACHE_WARM=tests/ts-compiled/.ts-suite-warm
 # unnecessary rewarm.
 .SECONDARY: $(TS_SUITE_CACHE_WARM) $(TS_COMPILED_CACHE_WARM)
 
+# main2 no longer contains compile-at-runtime tests (they moved to
+# compiler-tests.arr), so the TS-built run needs NO cache warm: this is a
+# pure TS-codegen suite.
 .PHONY : ts-pyret-test
-ts-pyret-test: tests/pyret/main2-ts.jarr $(TS_SUITE_CACHE_WARM)
+ts-pyret-test: tests/pyret/main2-ts.jarr
 	$(NODE) tests/pyret/main2-ts.jarr
+
+# There is deliberately NO ts-compiler-test: the TS compiler's build of
+# compiler-tests.arr is byte-identical to phaseA's (verified 2026-08-10,
+# clean-room: fresh compiled dirs, same worklist, sha256-equal 35MB jarrs),
+# so a TS-built run would re-run the same bytes `make compiler-test` runs.
+# The TS compiler still compiles these modules as part of all-ts.jarr, which
+# keeps them as codegen inputs; to narrow an all-ts failure in one of them,
+# use `make compiler-test` -- it is the same program.
 
 # Mirrors all-pyret-test on the .arr side: one build, one run, covering
 # main2 + type-check + regression + lib-test. The narrower ts-pyret-test /

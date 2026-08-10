@@ -39,6 +39,16 @@ COMMON_OPTS=(--builtin-js-dir src/js/trove/
 rm -rf "$WORK/programs" "$WORK/out"
 mkdir -p "$WORK/programs" "$WORK/out" "$WORK/compiled-arr" "$WORK/compiled-ts"
 
+# The generated .arr programs must not outlive the run -- even on failure:
+# tests/pyret/tests/test-pprint.arr walks the whole lang/ tree at suite
+# runtime and adds 3 tests per .arr file it finds, so leftover generated
+# programs silently inflate the main suite's test count (build artifacts
+# included; see the cache-warm comment in the Makefile for the same issue).
+# The manifest and per-program .out/.diff files survive for debugging; to
+# reproduce a failing program, re-run this script (extraction is
+# deterministic) or find its source at the manifest's file:line.
+trap 'rm -f "$WORK/programs"/p*.arr' EXIT
+
 count=$(node src/ts-compiler/tests/extract-suite-programs.js "$WORK/programs" "${SOURCES[@]}")
 echo "extracted $count unique programs from ${SOURCES[*]}"
 

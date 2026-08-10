@@ -36,6 +36,7 @@ Pyret-hosted compiler's.
 | `make ts-parity-test` | Compiles and runs each program in `tests/programs/` with **both** compilers using the same options (including `-type-check`, `-no-check-mode`, `--checks-format json`, and compile-error cases) and diffs results. |
 | `make ts-type-check-parity` | Compiles the whole `tests/type-check/` corpus (174 programs) with `-type-check` under **both** compilers and requires identical diagnostics. This is the direct coverage for `type-check.ts`: the in-suite type-check tests import `src/arr/compiler/*` and so exercise the `.arr` type checker whichever compiler built them. `?-N` existential labels are canonicalized by first appearance (numbering follows solve-loop iteration order, deliberately left divergent — see port-review-nonmechanical.md). |
 | `make ts-wf-parity` | Same idea for well-formedness/scope errors: extracts the inline programs from the in-suite wf tests (`test-well-formed.arr`, `test-compile-errors.arr`) at runtime — so the corpus tracks the suite — and compiles each under both compilers with default options, identical diagnostics required. Direct coverage for `well-formed.ts`/`resolve-scope.ts` error rendering at the CLI. |
+| `make ts-pyret-test` | Builds `tests/pyret/main2.arr` (the language/runtime suite — no compile-at-runtime tests, no cache warm needed) with the TS compiler and runs it: pure TS-codegen coverage. |
 | `make ts-repl-test` | Drives `repl.ts` against a real in-process load-lib runtime. |
 | `make ts-io-test` | The io-tests, pointed at this compiler. |
 | `make all-ts-pyret-test` | Builds `tests/all.arr` (main2 + type-check + regression + lib-test) with the TS compiler and runs it. The counterpart of `make all-pyret-test` on the .arr side. |
@@ -44,8 +45,13 @@ Pyret-hosted compiler's.
 | `make ts-clean` | Removes TS build outputs and caches. |
 
 For narrowing down a failure, `ts-pyret-test`, `ts-type-check-test`, and
-`ts-regression-test` build and run the individual suites that `all-ts-pyret-test`
-covers together, mirroring their `.arr` counterparts.
+`ts-regression-test` build and run the individual suites that
+`all-ts-pyret-test` covers together, mirroring their `.arr` counterparts.
+For a failure in a compiler-tests module, use `make compiler-test` (the
+`.arr`-built one): the TS compiler's build of `compiler-tests.arr` is
+byte-identical to phaseA's (clean-room verified — fresh compiled dirs, same
+worklist, sha256-equal standalones), so there is deliberately no
+`ts-compiler-test`; it would re-run the same bytes.
 
 The CLI is a drop-in for the Pyret-hosted one:
 
