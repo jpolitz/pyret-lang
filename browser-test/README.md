@@ -134,6 +134,15 @@ Two mechanisms keep the inputs and assertions identical to upstream:
 
 ## Layout
 
+One suite is harness-local rather than mirrored from upstream:
+`big-programs` (`tests/big-programs.js`) generates large programs — many
+top-level functions, many `ask` arms, many `data` variants — and asserts they
+compile and pass their check blocks. These pin the compiler's stack behavior in
+a real browser (fixed ~1MB stack; the CLI respawns node with `--stack-size=8192`
+so it never sees these overflows), at scales chosen to fail on the recursive
+ANF formulations the ts compiler replaced (the ~800-function bad-stack.arr
+report is the funs shape).
+
 ```
 run.js                  friendly CLI: --env/--grep -> `node --test ...` + PYRET_ENV
 tests/suite.test.js     the node:test entry: boots one env, one test() per spec
@@ -218,4 +227,5 @@ Other flags: `--suites=check-blocks,errors,...` (default `all`),
 Captured run logs land in `results/` (`run-all.sh` writes one per
 env x compiler cell). Current state of the matrix: **236 passing,
 0 failing** in all six configurations (cpo / embed / vscode, each on
-both the stock and the ts compiler).
+both the stock and the ts compiler), plus the 3 generated
+`big-programs` specs (verified on cpo in both compiler flavors).

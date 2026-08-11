@@ -78,62 +78,110 @@ export function anfName(expr: A.Expr, nameHint: string, k: (v: N.AVal) => N.AExp
   });
 }
 
-// For expressions that ANF directly to a value (with no generated names
-// and no wrapper expression), produce that value. Mirrors the
-// corresponding cases of anf() exactly; used to keep anfNameRec's stack
-// depth bounded on long lists (e.g. a module's defined values, which are
-// one identifier per top-level definition).
-function quickAnfValue(e: A.Expr): N.AVal$ | undefined {
-  switch (e.$name) {
-    case 's-num':
-      return new N.AVal(e.l, new N.ANum(e.l, e.n));
-    case 's-frac':
-      return new N.AVal(e.l, new N.ANum(e.l, jsnums.divide(e.num, e.den, throwingErrbacks)));
-    case 's-rfrac':
-      return new N.AVal(e.l, new N.ANum(e.l,
-        jsnums.toRoughnum(jsnums.divide(e.num, e.den, throwingErrbacks), throwingErrbacks)));
-    case 's-str':
-      return new N.AVal(e.l, new N.AStr(e.l, e.s));
-    case 's-undefined':
-      return new N.AVal(e.l, new N.AUndefined(e.l));
-    case 's-bool':
-      return new N.AVal(e.l, new N.ABool(e.l, e.b));
-    case 's-prim-val':
-      return new N.AVal(e.l, new N.APrimVal(e.l, e.name));
-    case 's-id':
-      return new N.AVal(e.l, new N.AId(e.l, e.id));
-    case 's-id-modref':
-      return new N.AVal(e.l, new N.AIdModref(e.l, e.id, e.uri, e.name));
-    case 's-srcloc':
-      return new N.AVal(e.l, new N.ASrcloc(e.l, e.loc));
-    default:
-      return undefined;
-  }
-}
+/*
+  Iterative version of the natural recursion (which nests one whole anf()
+  activation per element and overflows fixed-size stacks on long lists —
+  e.g. a module's defined values, which are one identifier per top-level
+  definition). Elements are translated left-to-right, exactly as in the
+  recursive formulation, so gensym-generated names are identical.
 
+  Each element's continuation is single-shot and its result becomes the
+  tail of that element's translation, so instead of translating the rest
+  of the list inside the continuation, the continuation returns a node
+  with a placeholder tail that the next element's translation (and
+  finally k's result) is patched into — the same technique as
+  anfNameArrRec/anfLinear. Two shapes arise:
+
+  - the element needs a name: build its ALet here, exactly as anfName
+    would, with the body as the placeholder;
+  - the element ANFs directly to a value (no generated name, no
+    wrapper): return a fresh placeholder node. Usually anf() hands it
+    straight back (the element contributes no nodes at all, and the
+    previous element's pending patch stays where it is); but when the
+    value sits at the end of a statement spine (e.g. a block whose last
+    expression is a literal), anf() embeds the placeholder in the
+    spine's tail position, where tailPatcher finds it.
+*/
 export function anfNameRec(
   exprs: A.Expr[],
   nameHint: string,
   k: (vs: N.AVal[]) => N.AExpr
 ): N.AExpr {
-  // Consume the maximal prefix of value-expressions iteratively (these
-  // contribute no wrappers and no generated names, so this is exactly
-  // what the recursive formulation produces); recur only for the rest.
-  const quickVs: any[] = [];
-  let i = 0;
-  while (i < exprs.length) {
-    const quick = quickAnfValue(exprs[i]);
-    if (quick === undefined) { break; }
-    quickVs.push(quick.v);
-    i++;
+  const vs: N.AVal[] = [];
+  let result: N.AExpr | undefined = undefined;
+  let patch: ((rest: N.AExpr) => void) | undefined = undefined;
+  const emit = (translated: N.AExpr, nextPatch: (rest: N.AExpr) => void): void => {
+    if (result === undefined) {
+      result = translated;
+    } else {
+      patch!(translated);
+    }
+    patch = nextPatch;
+  };
+  for (const f of exprs) {
+    let hole: N.ALet | undefined = undefined;
+    let placeholder: N.AExpr | undefined = undefined;
+    const translated = anf(f, (lettable) => {
+      if (N.isAVal(lettable)) {
+        vs.push(lettable.v);
+        placeholder = new N.ALettable(lettable.l, lettable);
+        return placeholder;
+      } else {
+        const t = mkId(f.l, nameHint);
+        vs.push(t.idE);
+        hole = new N.ALet(f.l, t.idB, lettable, undefined as unknown as N.AExpr);
+        return hole;
+      }
+    });
+    if (hole !== undefined) {
+      const h: N.ALet = hole;
+      emit(translated, (rest) => { h.body = rest; });
+    } else if (placeholder !== undefined) {
+      if (translated !== placeholder) {
+        emit(translated, tailPatcher(translated, placeholder));
+      }
+    } else {
+      throw new InternalCompilerError('anfNameRec: element continuation was not invoked: ' + f.$name);
+    }
   }
-  if (i === exprs.length) {
-    return k(quickVs);
+  const tail = k(vs);
+  if (result === undefined) {
+    return tail;
   }
-  const f = exprs[i];
-  const r = exprs.slice(i + 1);
-  return anfName(f, nameHint, (v) =>
-    anfNameRec(r, nameHint, (vs) => k([...quickVs, v, ...vs])));
+  patch!(tail);
+  return result;
+}
+
+// Find `placeholder` in a tail position of `root` and return the patch
+// that replaces it. anf() only ever embeds a continuation's result in
+// the tail of the spine wrappers below; anything else is ill-formed.
+function tailPatcher(root: N.AExpr, placeholder: N.AExpr): (rest: N.AExpr) => void {
+  let cur: N.AExpr = root;
+  for (;;) {
+    switch (cur.$name) {
+      case 'a-type-let':
+      case 'a-let':
+      case 'a-arr-let':
+      case 'a-var': {
+        const node = cur;
+        if (node.body === placeholder) {
+          return (rest) => { node.body = rest; };
+        }
+        cur = node.body;
+        break;
+      }
+      case 'a-seq': {
+        const node = cur;
+        if (node.e2 === placeholder) {
+          return (rest) => { node.e2 = rest; };
+        }
+        cur = node.e2;
+        break;
+      }
+      default:
+        throw new InternalCompilerError('anfNameRec: continuation result not in a tail position: ' + cur.$name);
+    }
+  }
 }
 
 export function anfNameArr(expr: A.Expr, name: A.Name, idx: number, k: () => N.AExpr): N.AExpr {
@@ -469,14 +517,42 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
             throw new InternalCompilerError('No case matched in anfVariant: ' + (v as any).$name);
         }
       }
+      // Iterative for the same reason as anfNameRec (the natural
+      // recursion nests one frame set per variant): each variant's
+      // continuation returns a placeholder for the rest, patched when
+      // the next variant is translated; ks still runs after every
+      // variant. A variant with no named with-members contributes no
+      // nodes, exactly as in the recursive formulation.
       function anfVariants(vs: A.Variant[], ks: (avs: N.AVariant[]) => N.AExpr): N.AExpr {
-        if (vs.length === 0) {
-          return ks([]);
-        } else {
-          const f = vs[0];
-          const r = vs.slice(1);
-          return anfVariant(f, (v) => anfVariants(r, (restVs) => ks([v, ...restVs])));
+        const avs: N.AVariant[] = [];
+        let result: N.AExpr | undefined = undefined;
+        let patch: ((rest: N.AExpr) => void) | undefined = undefined;
+        for (const f of vs) {
+          let placeholder: N.AExpr | undefined = undefined;
+          const translated = anfVariant(f, (av) => {
+            avs.push(av);
+            placeholder = new N.ALettable(f.l, new N.AVal(f.l, new N.AUndefined(f.l)));
+            return placeholder;
+          });
+          if (placeholder === undefined) {
+            throw new InternalCompilerError('anf s-data-expr: variant continuation was not invoked');
+          }
+          if (translated !== placeholder) {
+            const nextPatch = tailPatcher(translated, placeholder);
+            if (result === undefined) {
+              result = translated;
+            } else {
+              patch!(translated);
+            }
+            patch = nextPatch;
+          }
         }
+        const tail = ks(avs);
+        if (result === undefined) {
+          return tail;
+        }
+        patch!(tail);
+        return result;
       }
       const exprs = shared.map(getValue);
 
@@ -489,32 +565,69 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
     }
 
     case 's-if-else': {
-      const l = e.l;
-      const _else = e._else;
-      function anfIfBranches(k2: ANFCont, branches: A.IfBranch[]): N.AExpr {
+      /*
+        Iterative version of the natural recursion, which nests one
+        anfName activation per arm and overflows fixed-size stacks on
+        long `ask`/`if-else-if` chains. Note the arms of a chain are
+        NOT one branch list by the time they reach this pass: desugarIf
+        rewrites an N-arm if into N right-nested single-branch
+        s-if-else nodes, so this walks both a node's branch list and
+        the chain of s-if-else nodes in else position. Each arm's AIf
+        is built with a placeholder else-slot, patched when the next
+        arm is translated. Arm tests and bodies are translated in the
+        original order, and k still runs after every arm; its result
+        replaces the placeholder standing where the recursive
+        formulation embedded it (inside the first arm's translation).
+      */
+      let node = e;
+      let result: N.AExpr | undefined = undefined;
+      let kPlaceholder: N.AExpr | undefined = undefined;
+      let firstIf: N.AIf | undefined = undefined;
+      let prevIf: N.AIf | undefined = undefined;
+      let isFirst = true;
+      for (;;) {
+        const { l, branches, _else } = node;
         if (branches.length === 0) {
           return raise('Empty branches');
-        } else {
-          const f = branches[0];
-          const r = branches.slice(1);
-          if (r.length === 0) {
-            return anfName(
-              f.test,
-              'anf_if',
-              (test) => k2(new N.AIf(l, test, anfTerm(f.body), anfTerm(_else)))
-            );
-          } else {
-            return anfName(
-              f.test,
-              'anf_if',
-              (test) =>
-                k2(new N.AIf(l, test, anfTerm(f.body),
-                  anfIfBranches((ifExpr) => new N.ALettable(l, ifExpr), r)))
-            );
-          }
         }
+        const elseIsIf = _else.$name === 's-if-else';
+        for (let i = 0; i < branches.length; i++) {
+          const f = branches[i];
+          const first = isFirst;
+          const isLastArm = (i === branches.length - 1) && !elseIsIf;
+          let aif: N.AIf | undefined = undefined;
+          const translated = anfName(f.test, 'anf_if', (test) => {
+            aif = new N.AIf(l, test, anfTerm(f.body),
+              isLastArm ? anfTerm(_else) : (undefined as unknown as N.AExpr));
+            const wrapped = new N.ALettable(l, aif);
+            if (first) {
+              kPlaceholder = wrapped;
+            }
+            return wrapped;
+          });
+          if (aif === undefined) {
+            throw new InternalCompilerError('anf s-if-else: branch continuation was not invoked');
+          }
+          if (first) {
+            result = translated;
+            firstIf = aif;
+          } else {
+            prevIf!.e = translated;
+          }
+          prevIf = aif;
+          isFirst = false;
+        }
+        if (!elseIsIf) {
+          break;
+        }
+        node = _else as typeof e;
       }
-      return anfIfBranches(k, e.branches);
+      const kRes = k(firstIf!);
+      if (result === kPlaceholder) {
+        return kRes;
+      }
+      tailPatcher(result!, kPlaceholder!)(kRes);
+      return result!;
     }
     case 's-cases-else': {
       const { l, typ, val, branches, _else } = e;

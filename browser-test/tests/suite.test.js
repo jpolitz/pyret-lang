@@ -24,6 +24,9 @@ const SUITES = {
   "type-check": "type-check.js",
   "tables": "tables.js",
   "url-imports": "url-imports.js",
+  // Harness-local suite (generated large-program stress shapes; not an
+  // upstream code.pyret.org/test file -- see tests/big-programs.js).
+  "big-programs": { local: "./big-programs.js" },
 };
 
 if (!ENV || !["cpo", "embed", "embed-static", "vscode", "vscode-ovsx"].includes(ENV)) {
@@ -122,9 +125,12 @@ after(async () => {
 });
 
 for (const suite of chosen) {
-  const file = SUITES[suite];
+  const entry = SUITES[suite];
+  const specs = typeof entry === "string"
+    ? loadSpecsFromFile(entry)
+    : require(entry.local).specs();
   describe(suite, () => {
-    for (const s of loadSpecsFromFile(file)) {
+    for (const s of specs) {
       test(s.name || s.program, { timeout: specTimeout(s) }, async () => {
         await runSpec(session.page, s);
       });

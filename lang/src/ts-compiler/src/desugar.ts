@@ -323,6 +323,149 @@ export function desugarLetrecBinds(binds: A.LetrecBind[]): A.LetrecBind[] {
     new A.SLetrecBind(bind.l, desugarBind(bind.b), desugarExpr(bind.value)));
 }
 
+// The desugaring of a dot/app chain (`o.m(1).n(2)…`) recurses once per link
+// through desugarExpr -> dsCurry -> dsCurryNullary, so chain LENGTH became
+// stack depth. This walker consumes the whole receiver spine with an explicit
+// frame stack instead: descend doing exactly the work the recursive path did
+// before it descended (args, then dsCurryArgs, in that order -- mkId order is
+// observable in the output), then rebuild bottom-up. Each arm mirrors a
+// branch of dsCurry/dsCurryNullary; those stay as-is for their other callers.
+type ChainFrame =
+  | { kind: 'dot', l: Loc, field: string }
+  | { kind: 'app', l: Loc, dsArgs: A.Expr[], params: A.Bind[], curryArgs: A.Expr[], dot?: { l: Loc, field: string } };
+
+function desugarDotAppChain(expr: A.Expr): A.Expr {
+  const frames: ChainFrame[] = [];
+  let cur: A.Expr = expr;
+  let acc: A.Expr;
+  for (;;) {
+    if (A.isSApp(cur)) {
+      const l = cur.l;
+      const dsArgs = cur.args.map(desugarExpr);
+      const f = cur._fun;
+      if (A.isSDot(f) && isUnderscore(f.obj)) {
+        // dsCurry's curried-receiver branch: mkId, THEN dsCurryArgs
+        const curriedObj = mkId(l, 'recv_');
+        const pa = dsCurryArgs(l, dsArgs);
+        acc = new A.SLam(l, '', [], [curriedObj.idB, ...pa.left], A.aBlank, '',
+          new A.SApp(l, new A.SDot(l, curriedObj.idE, f.field), pa.right), undefined, undefined, false);
+        break;
+      }
+      // dsCurry's fallthrough: dsCurryArgs before anything touches f
+      const pa = dsCurryArgs(l, dsArgs);
+      if (isUnderscore(f)) {
+        const fId = mkId(l, 'f_');
+        acc = new A.SLam(l, '', [], [fId.idB, ...pa.left], A.aBlank, '',
+          new A.SApp(l, fId.idE, pa.right), undefined, undefined, false);
+        break;
+      }
+      if (A.isSDot(f)) {
+        frames.push({ kind: 'app', l, dsArgs, params: pa.left, curryArgs: pa.right, dot: { l: f.l, field: f.field } });
+        cur = f.obj;
+        continue;
+      }
+      frames.push({ kind: 'app', l, dsArgs, params: pa.left, curryArgs: pa.right });
+      cur = f;
+      continue;
+    }
+    if (A.isSDot(cur)) {
+      if (isUnderscore(cur.obj)) {
+        // dsCurryNullary's curried-receiver branch
+        const curriedObj = mkId(cur.l, 'recv_');
+        acc = new A.SLam(cur.l, '', [], [curriedObj.idB], A.aBlank, '',
+          new A.SDot(cur.l, curriedObj.idE, cur.field), undefined, undefined, false);
+        break;
+      }
+      frames.push({ kind: 'dot', l: cur.l, field: cur.field });
+      cur = cur.obj;
+      continue;
+    }
+    acc = desugarExpr(cur);
+    break;
+  }
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const fr = frames[i];
+    if (fr.kind === 'dot') {
+      acc = new A.SDot(fr.l, acc, fr.field);
+    } else {
+      const dsF = fr.dot !== undefined ? new A.SDot(fr.dot.l, acc, fr.dot.field) : acc;
+      acc = fr.params.length === 0
+        ? new A.SApp(fr.l, dsF, fr.dsArgs)
+        : new A.SLam(fr.l, '', [], fr.params, A.aBlank, '',
+            new A.SApp(fr.l, dsF, fr.curryArgs), undefined, undefined, false);
+    }
+  }
+  return acc;
+}
+
+function desugarTypeLetBind(tb: A.TypeLetBind): A.TypeLetBind {
+  switch (tb.$name) {
+    case 's-type-bind': return new A.STypeBind(tb.l, tb.name, tb.params, desugarAnn(tb.ann));
+    case 's-newtype-bind': return tb;
+  }
+}
+
+// Post-resolve-scope ASTs nest one s-let-expr/s-letrec level (through an
+// s-block whose LAST statement carries the rest) per binding group, so a
+// flat script's statement count became desugar's recursion depth. Walk that
+// body spine iteratively: binds (and the block's leading statements) are
+// desugared on the way down, in source order, exactly as the recursive arms
+// evaluated them; the nodes are rebuilt on the way back up.
+type BodyFrame =
+  | { kind: 'block', l: Loc, dsInit: A.Expr[] }
+  | { kind: 'let', l: Loc, binds: A.LetBind[], blocky: boolean }
+  | { kind: 'letrec', l: Loc, binds: A.LetrecBind[], blocky: boolean }
+  | { kind: 'tlet', l: Loc, binds: A.TypeLetBind[], blocky: boolean };
+
+function continuesBodySpine(e: A.Expr): boolean {
+  return e.$name === 's-let-expr' || e.$name === 's-letrec' || e.$name === 's-type-let-expr';
+}
+
+function desugarBodySpine(expr: A.Expr): A.Expr {
+  const frames: BodyFrame[] = [];
+  let cur: A.Expr = expr;
+  let acc: A.Expr;
+  for (;;) {
+    if (A.isSBlock(cur)) {
+      const last = cur.stmts.length > 0 ? cur.stmts[cur.stmts.length - 1] : undefined;
+      if (last !== undefined && continuesBodySpine(last)) {
+        frames.push({ kind: 'block', l: cur.l, dsInit: cur.stmts.slice(0, -1).map(desugarExpr) });
+        cur = last;
+        continue;
+      }
+      acc = new A.SBlock(cur.l, cur.stmts.map(desugarExpr));
+      break;
+    }
+    if (A.isSLetExpr(cur)) {
+      frames.push({ kind: 'let', l: cur.l, binds: desugarLetBinds(cur.binds), blocky: cur.blocky });
+      cur = cur.body;
+      continue;
+    }
+    if (A.isSLetrec(cur)) {
+      frames.push({ kind: 'letrec', l: cur.l, binds: desugarLetrecBinds(cur.binds), blocky: cur.blocky });
+      cur = cur.body;
+      continue;
+    }
+    if (A.isSTypeLetExpr(cur)) {
+      frames.push({ kind: 'tlet', l: cur.l, binds: cur.binds.map(desugarTypeLetBind), blocky: cur.blocky });
+      cur = cur.body;
+      continue;
+    }
+    acc = desugarExpr(cur);
+    break;
+  }
+  for (let i = frames.length - 1; i >= 0; i--) {
+    const fr = frames[i];
+    switch (fr.kind) {
+      case 'block': acc = new A.SBlock(fr.l, [...fr.dsInit, acc]); break;
+      case 'let': acc = new A.SLetExpr(fr.l, fr.binds, acc, fr.blocky); break;
+      case 'letrec': acc = new A.SLetrec(fr.l, fr.binds, acc, fr.blocky); break;
+      case 'tlet': acc = new A.STypeLetExpr(fr.l, fr.binds, acc, fr.blocky); break;
+    }
+  }
+  return acc;
+}
+
 export function desugarExpr(expr: A.Expr): A.Expr {
   switch (expr.$name) {
     case 's-module': {
@@ -332,14 +475,12 @@ export function desugarExpr(expr: A.Expr): A.Expr {
     case 's-instantiate':
       return new A.SInstantiate(expr.l, desugarExpr(expr.expr), expr.params.map(desugarAnn));
     case 's-block':
-      return new A.SBlock(expr.l, expr.stmts.map(desugarExpr));
+      return desugarBodySpine(expr);
     case 's-user-block':
       return desugarExpr(expr.body);
     case 's-template': return expr; // template-exn(l)
-    case 's-app': {
-      const dsArgs = expr.args.map(desugarExpr);
-      return dsCurry(expr.l, expr._fun, dsArgs);
-    }
+    case 's-app':
+      return desugarDotAppChain(expr);
     case 's-prim-app':
       return new A.SPrimApp(expr.l, expr._fun, expr.args.map(desugarExpr), expr.appInfo);
     case 's-lam':
@@ -350,21 +491,10 @@ export function desugarExpr(expr: A.Expr): A.Expr {
         expr.doc, desugarExpr(expr.body), expr._checkLoc, desugarOpt(desugarExpr, expr._check), expr.blocky);
     case 's-type': return new A.SType(expr.l, expr.name, expr.params, desugarAnn(expr.ann));
     case 's-newtype': return expr;
-    case 's-type-let-expr': {
-      const desugarTypeBind = (tb: A.TypeLetBind): A.TypeLetBind => {
-        switch (tb.$name) {
-          case 's-type-bind': return new A.STypeBind(tb.l, tb.name, tb.params, desugarAnn(tb.ann));
-          case 's-newtype-bind': return tb;
-        }
-      };
-      return new A.STypeLetExpr(expr.l, expr.binds.map(desugarTypeBind), desugarExpr(expr.body), expr.blocky);
-    }
-    case 's-let-expr': {
-      const newBinds = desugarLetBinds(expr.binds);
-      return new A.SLetExpr(expr.l, newBinds, desugarExpr(expr.body), expr.blocky);
-    }
+    case 's-type-let-expr':
+    case 's-let-expr':
     case 's-letrec':
-      return new A.SLetrec(expr.l, desugarLetrecBinds(expr.binds), desugarExpr(expr.body), expr.blocky);
+      return desugarBodySpine(expr);
     case 's-data-expr': {
       const extendVariant = (v: A.Variant): A.Variant => {
         switch (v.$name) {
@@ -418,7 +548,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
         expr.blocky);
     case 's-assign': return new A.SAssign(expr.l, expr.id, desugarExpr(expr.value));
     case 's-dot':
-      return dsCurryNullary((l2, obj, m) => new A.SDot(l2, obj, m), expr.l, expr.obj, expr.field);
+      return desugarDotAppChain(expr);
     case 's-bracket': {
       const l = expr.l;
       return dsCurryBinop(l, desugarExpr(expr.obj), desugarExpr(expr.key), (e1, e2) =>
@@ -443,71 +573,80 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       const op = expr.op;
       const left = expr.left;
       const right = expr.right;
-      const field = getArithOp(op);
-      if (field !== undefined) {
-        return dsCurryBinop(l, desugarExpr(left), desugarExpr(right),
-          (e1, e2) => new A.SApp(l, gid(l, field), [e1, e2]));
-      } else {
-        const thunk = (e: A.Expr): A.Expr =>
-          new A.SLam(l, '', [], [], A.aBlank, '',
-            A.isSBlock(e) ? e : new A.SBlock(l, [e]),
-            undefined, undefined, false);
-        const opbool = (fld: string): A.Expr =>
-          new A.SApp(l, new A.SDot(l, desugarExpr(left), fld), [thunk(desugarExpr(right))]);
-        void opbool;
-        const collectOp = (opname: string, exp: A.Expr): A.Expr[] => {
-          if (A.isSOp(exp)) {
-            if (exp.op === opname) { return [...collectOp(opname, exp.left), ...collectOp(opname, exp.right)]; }
-            else { return [exp]; }
-          } else { return [exp]; }
-        };
-        const collectOrs = (exp: A.Expr) => collectOp('opor', exp);
-        const collectAnds = (exp: A.Expr) => collectOp('opand', exp);
-        const collectCarets = (exp: A.Expr) => collectOp('op^', exp);
-        const eqOp = (funName: string): A.Expr =>
-          dsCurryBinop(l, desugarExpr(left), desugarExpr(right),
-            (e1, e2) => new A.SApp(l, gid(l, funName), [e1, e2]));
-        if (op === 'op==') { return eqOp('equal-always'); }
-        else if (op === 'op=~') { return eqOp('equal-now'); }
-        else if (op === 'op<=>') { return eqOp('identical'); }
-        else if (op === 'op<>') {
-          return dsCurryBinop(l, desugarExpr(left), desugarExpr(right),
-            (e1, e2) =>
-              new A.SPrimApp(l, 'not', [new A.SApp(l, gid(l, 'equal-always'), [e1, e2])], flatPrimApp));
-        } else if (op === 'opor') {
-          const helper = (operands: A.Expr[]): A.Expr => {
-            if (operands.length === 1) {
-              return checkBool(operands[0].l, desugarExpr(operands[0]), (orOper) => orOper);
-            } else {
-              return new A.SIfElse(l,
-                [new A.SIfBranch(l, desugarExpr(operands[0]), new A.SBool(l, true))],
-                helper(operands.slice(1)), false);
-            }
-          };
-          const operands = collectOrs(expr);
-          return helper(operands);
-        } else if (op === 'opand') {
-          const helper = (operands: A.Expr[]): A.Expr => {
-            if (operands.length === 1) {
-              return checkBool(operands[0].l, desugarExpr(operands[0]), (andOper) => andOper);
-            } else {
-              return new A.SIfElse(l,
-                [new A.SIfBranch(l, desugarExpr(operands[0]), helper(operands.slice(1)))],
-                new A.SBool(l, false), false);
-            }
-          };
-          const operands = collectAnds(expr);
-          return helper(operands);
-        } else if (op === 'op^') {
-          const operands = collectCarets(expr);
-          let acc = desugarExpr(operands[0]);
-          for (const f of operands.slice(1)) {
-            acc = new A.SApp(l, desugarExpr(f), [acc]);
-          }
-          return acc;
-        } else {
-          return raise('No implementation for ' + op);
+      // Unused in the .arr original too; kept voided for structural fidelity.
+      const thunk = (e: A.Expr): A.Expr =>
+        new A.SLam(l, '', [], [], A.aBlank, '',
+          A.isSBlock(e) ? e : new A.SBlock(l, [e]),
+          undefined, undefined, false);
+      const opbool = (fld: string): A.Expr =>
+        new A.SApp(l, new A.SDot(l, desugarExpr(left), fld), [thunk(desugarExpr(right))]);
+      void opbool;
+      // In-order flatten of the whole same-op region, iteratively -- a long
+      // `a or b or ...` chain is list-shaped work, not stack depth.
+      const collectOp = (opname: string): A.Expr[] => {
+        const out: A.Expr[] = [];
+        const todo: A.Expr[] = [expr];
+        while (todo.length > 0) {
+          const e = todo.pop() as A.Expr;
+          if (A.isSOp(e) && e.op === opname) { todo.push(e.right, e.left); }
+          else { out.push(e); }
         }
+        return out;
+      };
+      if (op === 'opor' || op === 'opand') {
+        // Desugar the operands left-to-right (the recursive helper's order),
+        // then build the nested if from the last operand outward; only that
+        // last operand is checkBool-wrapped.
+        const operands = collectOp(op);
+        const dsOperands = operands.map(desugarExpr);
+        const lastIdx = operands.length - 1;
+        let acc: A.Expr = checkBool(operands[lastIdx].l, dsOperands[lastIdx], (oper) => oper);
+        for (let i = lastIdx - 1; i >= 0; i--) {
+          acc = op === 'opor'
+            ? new A.SIfElse(l, [new A.SIfBranch(l, dsOperands[i], new A.SBool(l, true))], acc, false)
+            : new A.SIfElse(l, [new A.SIfBranch(l, dsOperands[i], acc)], new A.SBool(l, false), false);
+        }
+        return acc;
+      } else if (op === 'op^') {
+        const operands = collectOp('op^');
+        let acc = desugarExpr(operands[0]);
+        for (const f of operands.slice(1)) {
+          acc = new A.SApp(l, desugarExpr(f), [acc]);
+        }
+        return acc;
+      } else {
+        // Binop-shaped ops (arithmetic, ==, =~, <=>, <>) parse
+        // left-associated, so operand COUNT is left-spine depth. Walk the
+        // spine iteratively: desugar the leftmost operand, then fold back up
+        // one dsCurryBinop per level, desugaring each level's right operand
+        // just before its rebuild -- the recursive evaluation order.
+        const rebuildFor = (nl: Loc, nop: string): ((e1: A.Expr, e2: A.Expr) => A.Expr) | undefined => {
+          const field = getArithOp(nop);
+          if (field !== undefined) { return (e1, e2) => new A.SApp(nl, gid(nl, field), [e1, e2]); }
+          switch (nop) {
+            case 'op==': return (e1, e2) => new A.SApp(nl, gid(nl, 'equal-always'), [e1, e2]);
+            case 'op=~': return (e1, e2) => new A.SApp(nl, gid(nl, 'equal-now'), [e1, e2]);
+            case 'op<=>': return (e1, e2) => new A.SApp(nl, gid(nl, 'identical'), [e1, e2]);
+            case 'op<>': return (e1, e2) =>
+              new A.SPrimApp(nl, 'not', [new A.SApp(nl, gid(nl, 'equal-always'), [e1, e2])], flatPrimApp);
+            default: return undefined;
+          }
+        };
+        if (rebuildFor(l, op) === undefined) { return raise('No implementation for ' + op); }
+        const spine: A.SOp[] = [];
+        let cur: A.Expr = expr;
+        while (A.isSOp(cur) && cur.op !== 'opor' && cur.op !== 'opand' && cur.op !== 'op^'
+            && rebuildFor(cur.l, cur.op) !== undefined) {
+          spine.push(cur);
+          cur = cur.left;
+        }
+        let acc = desugarExpr(cur);
+        for (let i = spine.length - 1; i >= 0; i--) {
+          const node = spine[i];
+          acc = dsCurryBinop(node.l, acc, desugarExpr(node.right),
+            rebuildFor(node.l, node.op) as (e1: A.Expr, e2: A.Expr) => A.Expr);
+        }
+        return acc;
       }
     }
     case 's-id': return expr;

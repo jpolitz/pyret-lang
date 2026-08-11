@@ -1276,48 +1276,80 @@ export function freevarsAnnAcc(ann: A.Ann, seenSoFar: NameDict<A.Name>): NameDic
   }
 }
 
+/*
+  The spine is one chain node per statement, and the natural recursion is
+  a fold on the way back up: the deepest body's free variables are
+  computed first, then each binding is processed innermost-to-outermost.
+  Walk down iteratively collecting the spine, then process it in reverse,
+  so stack use is bounded on long programs (e.g. browsers); nested
+  expressions still recur through freevarsLAcc, bounded by nesting depth.
+  The dict operations happen in exactly the order of the recursive
+  formulation.
+*/
 export function freevarsEAcc(expr: AExpr, seenSoFar: NameDict<A.Name>): NameDict<A.Name> {
-  switch (expr.$name) {
-    case 'a-type-let': {
-      const bodyIds = freevarsEAcc(expr.body, seenSoFar);
-      const b = expr.bind;
-      switch (b.$name) {
-        case 'a-type-bind': {
-          bodyIds.delete(b.name.key());
-          return freevarsAnnAcc(b.ann, bodyIds);
+  const spine: Exclude<AExpr, ALettable$>[] = [];
+  let cur: AExpr = expr;
+  let descending = true;
+  while (descending) {
+    switch (cur.$name) {
+      case 'a-type-let':
+      case 'a-let':
+      case 'a-arr-let':
+      case 'a-var':
+        spine.push(cur);
+        cur = cur.body;
+        break;
+      case 'a-seq':
+        spine.push(cur);
+        cur = cur.e2;
+        break;
+      default:
+        descending = false;
+    }
+  }
+  let acc: NameDict<A.Name>;
+  switch (cur.$name) {
+    case 'a-lettable':
+      acc = freevarsLAcc(cur.e, seenSoFar);
+      break;
+    default:
+      throw new InternalCompilerError('No cases matched in freevars-e-acc: ' + (cur as any).$name);
+  }
+  for (let i = spine.length - 1; i >= 0; i--) {
+    const node = spine[i];
+    switch (node.$name) {
+      case 'a-type-let': {
+        const b = node.bind;
+        switch (b.$name) {
+          case 'a-type-bind': {
+            acc.delete(b.name.key());
+            acc = freevarsAnnAcc(b.ann, acc);
+            break;
+          }
+          case 'a-newtype-bind': {
+            acc.delete(b.name.key());
+            acc.delete(b.namet.key());
+            break;
+          }
+          default:
+            throw new InternalCompilerError('No cases matched in freevars-e-acc: ' + (b as any).$name);
         }
-        case 'a-newtype-bind': {
-          bodyIds.delete(b.name.key());
-          bodyIds.delete(b.namet.key());
-          return bodyIds;
-        }
-        default:
-          throw new InternalCompilerError('No cases matched in freevars-e-acc: ' + (b as any).$name);
+        break;
+      }
+      case 'a-let':
+      case 'a-arr-let':
+      case 'a-var': {
+        acc.delete(node.bind.id.key());
+        acc = freevarsAnnAcc(node.bind.ann, freevarsLAcc(node.e, acc));
+        break;
+      }
+      case 'a-seq': {
+        acc = freevarsLAcc(node.e1, acc);
+        break;
       }
     }
-    case 'a-let': {
-      const fromBody = freevarsEAcc(expr.body, seenSoFar);
-      fromBody.delete(expr.bind.id.key());
-      return freevarsAnnAcc(expr.bind.ann, freevarsLAcc(expr.e, fromBody));
-    }
-    case 'a-arr-let': {
-      const fromBody = freevarsEAcc(expr.body, seenSoFar);
-      fromBody.delete(expr.bind.id.key());
-      return freevarsAnnAcc(expr.bind.ann, freevarsLAcc(expr.e, fromBody));
-    }
-    case 'a-var': {
-      const fromBody = freevarsEAcc(expr.body, seenSoFar);
-      fromBody.delete(expr.bind.id.key());
-      return freevarsAnnAcc(expr.bind.ann, freevarsLAcc(expr.e, fromBody));
-    }
-    case 'a-seq': {
-      const fromE2 = freevarsEAcc(expr.e2, seenSoFar);
-      return freevarsLAcc(expr.e1, fromE2);
-    }
-    case 'a-lettable': return freevarsLAcc(expr.e, seenSoFar);
-    default:
-      throw new InternalCompilerError('No cases matched in freevars-e-acc: ' + (expr as any).$name);
   }
+  return acc;
 }
 
 export function freevarsE(expr: AExpr): FrozenNameDict<A.Name> {
