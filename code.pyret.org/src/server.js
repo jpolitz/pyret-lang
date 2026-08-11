@@ -25,12 +25,16 @@ function start(config, onServerReady) {
 
   var defaultOpts = {
       PYRET: process.env.PYRET,
-      // TypeScript-compiler flavor (opt-in; see editor.html). The ts jarr
-      // URL defaults to the stock jarr URL with -ts inserted, and the
-      // compiler bundle is served alongside it.
-      PYRET_TS: process.env.PYRET_TS ||
-        (process.env.PYRET ? process.env.PYRET.replace("cpo-main.jarr", "cpo-main-ts.jarr") : ""),
-      PYRET_TS_COMPILER: process.env.PYRET_TS_COMPILER || (config.baseUrl + "/js/ts-compiler.js"),
+      // TypeScript-compiler flavor (opt-in; see editor.html). The ts asset
+      // URLs are never configured: editor.html derives them client-side from
+      // PYRET's directory + canonical names (every host publishes the three
+      // files side by side). PYRET_TS below is the same rule applied early,
+      // so the /editor route can point the preload link and window.PYRET at
+      // the jarr that will actually load in ts mode. No PYRET -> no ts
+      // flavor: ?compiler=ts silently serves the stock compiler.
+      PYRET_TS: process.env.PYRET
+        ? process.env.PYRET.slice(0, process.env.PYRET.lastIndexOf("/") + 1) + "cpo-main-ts.jarr.gz.js"
+        : "",
       CPO_COMPILER: process.env.CPO_COMPILER || "pyret",
       BASE_URL: config.baseUrl,
       GOOGLE_API_KEY: config.google.apiKey,
@@ -106,6 +110,19 @@ function start(config, onServerReady) {
     res.set("Content-Encoding", "gzip");
     res.set("Content-Type", "application/javascript");
     res.send(fs.readFileSync("build/web/js/cpo-main.jarr.gz.js"));
+  });
+  // The ts assets are gzip-at-rest under the same .gz.js convention, so they
+  // need the same explicit routes -- express.static would serve the raw gzip
+  // bytes with no Content-Encoding.
+  app.get("/js/cpo-main-ts.jarr.gz.js", function(req, res) {
+    res.set("Content-Encoding", "gzip");
+    res.set("Content-Type", "application/javascript");
+    res.send(fs.readFileSync("build/web/js/cpo-main-ts.jarr.gz.js"));
+  });
+  app.get("/js/ts-compiler.gz.js", function(req, res) {
+    res.set("Content-Encoding", "gzip");
+    res.set("Content-Type", "application/javascript");
+    res.send(fs.readFileSync("build/web/js/ts-compiler.gz.js"));
   });
 
   app.use(cookieSession({

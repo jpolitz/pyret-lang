@@ -40,7 +40,7 @@
 
     function tsCompiler() {
       if(!window.PyretTSCompiler) {
-        throw new Error("The TypeScript compiler bundle (ts-compiler.js) is not loaded on this page");
+        throw new Error("The TypeScript compiler bundle (ts-compiler.gz.js) is not loaded on this page");
       }
       return window.PyretTSCompiler;
     }
