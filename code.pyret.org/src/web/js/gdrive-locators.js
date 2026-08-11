@@ -10,6 +10,29 @@ define("cpo/gdrive-locators", [], function() {
       cpo) {
     var gf = runtime.getField;
     var gmf = function(m, f) { return gf(gf(m, "values"), f); };
+    // Lezer frontend opt-in (see file-locator.js): ?parser=lezer routes parsing
+    // through parse-pyret's `surface-parse-lezer`, with a safety fall-through to the
+    // built-in `surface-parse`. Default keeps the built-in parser.
+    function lezerToggleOn() {
+      try { return /[?&]parser=lezer\b/.test(window.location.search); }
+      catch (e) { return false; }
+    }
+    function cpoSurfaceParse(contents, uri) {
+      var values = gf(parsePyret, "values");
+      if (lezerToggleOn() && runtime.hasField(values, "surface-parse-lezer")) {
+        if (!window.__LEZER_LOGGED__) {
+          window.__LEZER_LOGGED__ = true;
+          console.log("[lezer] parsing via Lezer frontend (?parser=lezer):", uri);
+        }
+        try {
+          return gf(values, "surface-parse-lezer").app(contents, uri);
+        } catch (e) {
+          console.error("[lezer] failed, falling back to built-in parser:", e);
+          return gf(values, "surface-parse").app(contents, uri);
+        }
+      }
+      return gf(values, "surface-parse").app(contents, uri);
+    }
     function fileRequestFailure(failure, filename) {
       var message = "";
       var defaultMessage = "There was an error fetching file with name " + filename +
@@ -208,7 +231,7 @@ define("cpo/gdrive-locators", [], function() {
             if(ast) { return ast; }
             else {
               return runtime.safeCall(function() {
-                return gmf(parsePyret, "surface-parse").app(contents, uri);
+                return cpoSurfaceParse(contents, uri);
               }, function(ret) {
                 ast = gmf(compileLib, "pyret-ast").app(ret);
                 return ast; 

@@ -91,6 +91,8 @@ fun main(args :: List<String>) -> Number block:
     C.flag(C.once, "Ignore all annotations in the runtime, treating them as if they were blank."),
     "url-file-mode",
     C.next-val-default(C.Str, "all-remote", none, C.once, "How to handle url-file imports (all-remote, all-local, or local-if-present)"),
+    "use-lezer",
+    C.flag(C.once, "Use the Lezer parser frontend"),
   ]
 
   params-parsed = C.parse-args(options, args)
@@ -115,6 +117,7 @@ fun main(args :: List<String>) -> Number block:
       inline-case-body-limit = r.get-value("inline-case-body-limit")
       type-check = r.has-key("type-check")
       tail-calls = not(r.has-key("improper-tail-calls"))
+      use-lezer = r.has-key("use-lezer")
       compiled-dir = r.get-value("compiled-dir")
       standalone-file = r.get-value("standalone-file")
       add-profiling = r.has-key("profile")
@@ -159,7 +162,8 @@ fun main(args :: List<String>) -> Number block:
         result = CLI.run(r.get-value("run"), CS.default-compile-options.{
             standalone-file: standalone-file,
             display-progress: display-progress,
-            checks: checks
+            checks: checks,
+            use-lezer: use-lezer
           }, run-args)
         _ = print(result.message + "\n")
         result.exit-code
@@ -197,7 +201,8 @@ fun main(args :: List<String>) -> Number block:
             module-eval: module-eval,
             user-annotations: user-annotations,
             runtime-annotations: runtime-annotations,
-            url-file-mode: url-file-mode
+            url-file-mode: url-file-mode,
+            use-lezer: use-lezer
           })
         success-code
       else if r.has-key("serve"):
@@ -216,6 +221,7 @@ fun main(args :: List<String>) -> Number block:
             collect-all: false,
             ignore-unbound: false,
             proper-tail-calls: tail-calls,
+            use-lezer: use-lezer,
             compile-module: false,
             display-progress: display-progress
           })

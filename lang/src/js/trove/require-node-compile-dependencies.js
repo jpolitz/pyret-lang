@@ -40,3 +40,11 @@ define("ws", [], function () { return ws });
 
 resolve = nodeRequire("resolve");
 define("resolve", [], function () { return resolve });
+
+// NOTE: the Lezer parser frontend (for --use-lezer) is NOT loaded here. It is a
+// normal raw-js module "lezer-pyret-frontend" declared in the require-configs
+// (standalone-config{A,B,C}.json, node_modules-config.json) pointing at
+// ../lezer-pyret/lezer-bundle.js, and listed in parse-pyret's nativeRequires —
+// exactly like pyret-base/js/pyret-tokenizer and pyret-parser. So it is bundled
+// into the compiler and every standalone that uses parse-pyret, with no special
+// handling required here.

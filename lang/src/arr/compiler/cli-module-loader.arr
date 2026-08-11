@@ -195,8 +195,8 @@ fun get-cached-if-available-known-mtimes(basedir, loc, max-dep-times) block:
   end
 end
 
-fun get-file-locator(basedir, real-path):
-  loc = FL.file-locator(real-path, CS.standard-globals)
+fun get-file-locator(basedir, real-path, use-lezer):
+  loc = FL.file-locator(real-path, CS.standard-globals, use-lezer)
   get-cached-if-available(basedir, loc)
 end
 
@@ -298,7 +298,8 @@ end
 type CLIContext = {
   current-load-path :: String,
   cache-base-dir :: String,
-  url-file-mode :: CS.UrlFileMode
+  url-file-mode :: CS.UrlFileMode,
+  use-lezer :: Boolean
 }
 
 fun get-real-path(current-load-path :: String, this-path :: String):
@@ -321,7 +322,7 @@ fun locate-file(ctxt :: CLIContext, rel-path :: String):
   real-path = get-real-path(clp, rel-path)
   new-context = ctxt.{current-load-path: Filesystem.dirname(real-path)}
   if Filesystem.exists(real-path):
-    some(CL.located(get-file-locator(ctxt.cache-base-dir, real-path), new-context))
+    some(CL.located(get-file-locator(ctxt.cache-base-dir, real-path, ctxt.use-lezer), new-context))
   else:
     none
   end
@@ -379,7 +380,7 @@ fun module-finder(ctxt :: CLIContext, dep :: CS.Dependency):
         real-path = get-real-path(clp, args.get(0))
         new-context = ctxt.{current-load-path: Filesystem.dirname(real-path)}
         if Filesystem.exists(real-path):
-          CL.located(FL.file-locator(real-path, CS.standard-globals), new-context)
+          CL.located(FL.file-locator(real-path, CS.standard-globals, ctxt.use-lezer), new-context)
         else:
           raise("Cannot find import " + torepr(dep))
         end
@@ -401,14 +402,16 @@ default-start-context = {
   current-load-path: Filesystem.resolve("./"),
   cache-base-dir: Filesystem.resolve("./compiled"),
   compiled-read-only-dirs: empty,
-  url-file-mode: CS.all-remote
+  url-file-mode: CS.all-remote,
+  use-lezer: false
 }
 
 default-test-context = {
   current-load-path: Filesystem.resolve("./"),
   cache-base-dir: Filesystem.resolve("./tests/compiled"),
   compiled-read-only-dirs: empty,
-  url-file-mode: CS.all-remote
+  url-file-mode: CS.all-remote,
+  use-lezer: false
 }
 
 fun compile(path, options):
@@ -417,7 +420,8 @@ fun compile(path, options):
     current-load-path: Filesystem.resolve(options.base-dir),
     cache-base-dir: options.compiled-cache,
     compiled-read-only-dirs: options.compiled-read-only.map(Filesystem.resolve),
-    url-file-mode: options.url-file-mode
+    url-file-mode: options.url-file-mode,
+    use-lezer: options.use-lezer
   }, base-module)
   wl = CL.compile-worklist(module-finder, base.locator, base.context)
   compiled = CL.compile-program(wl, options)
@@ -482,7 +486,8 @@ fun build-program(path, options, stats) block:
     current-load-path: Filesystem.resolve(options.base-dir),
     cache-base-dir: options.compiled-cache,
     compiled-read-only-dirs: options.compiled-read-only.map(Filesystem.resolve),
-    url-file-mode: options.url-file-mode
+    url-file-mode: options.url-file-mode,
+    use-lezer: options.use-lezer
   }, base-module)
   clear-and-print("Compiling worklist...")
   wl = CL.compile-worklist(module-finder, base.locator, base.context)

@@ -14,7 +14,7 @@ import pathlib as P
 #    with:
 
 fun mockable-file-locator(file-ops):
-  lam(path, globals):
+  lam(path, globals, use-lezer):
     var ast = nothing
     {
       path: path,
@@ -35,7 +35,14 @@ fun mockable-file-locator(file-ops):
           str = f.read-file()
           f.close-file()
           # spy "Parsing": uri: self.uri() end
-          ast := CL.pyret-ast(PP.surface-parse(str, self.uri()))
+          # Select the Lezer parser frontend when --use-lezer is set; otherwise the
+          # canonical RNGLR surface-parse. Both produce the same ast.arr Program.
+          parsed = if use-lezer:
+            PP.surface-parse-lezer(str, self.uri())
+          else:
+            PP.surface-parse(str, self.uri())
+          end
+          ast := CL.pyret-ast(parsed)
         end
         ast
       end,

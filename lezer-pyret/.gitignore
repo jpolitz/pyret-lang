@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# build artifacts (regenerable: `npm run build`, `node gen-table.js`, esbuild).
+# NOTE: lezer-bundle.js is intentionally COMMITTED (not ignored) — it is a raw-js
+# module ("lezer-pyret-frontend") referenced by lang's require-configs and listed in
+# parse-pyret's nativeRequires, so it must exist on a fresh checkout / CI. It is an
+# AMD `define(...)` wrapper around the esbuild bundle. Rebuild it with:
+#   node_modules/.bin/esbuild bundle-entry.js --bundle --platform=node --format=cjs \
+#     --loader:.grammar=text \
+#     --banner:js='define("lezer-pyret-frontend", [], function() { var module = { exports: {} }; var exports = module.exports;' \
+#     --footer:js='return module.exports; });' \
+#     --outfile=lezer-bundle.js
+cm6-demo/bundle.js
+cm6-demo/verify-bundle.cjs
+cm6-demo/pyret-parser.gen.js
+cm6-demo/pyret-terms.gen.js

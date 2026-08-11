@@ -9,6 +9,7 @@ fun make-npm-locator(package-name, path, current-load-path):
     package-path = R.resolve(package-name, current-load-path)
     F.file-locator(
         FS.resolve(FS.join(FS.dirname(package-path), path)),
-        CS.standard-globals
+        CS.standard-globals,
+        false
     )
 end
