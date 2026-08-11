@@ -31,6 +31,70 @@ const MOUNT = "vscode-test-web://mount";
 // workspace -- that traversal is the shape load-path tracking has to get right.
 const FILE = "/algebra-2/test.arr";
 
+/*
+ * "Markers" here are coming from vscode/src/diagnostics.ts, which only triggers
+ * in development mode + a user-hidden setting.
+ */
+async function readLifecycleMarkers(page) {
+  try {
+    return await page.evaluate(() => {
+      const PREFIX = "PYRET-DIAG";
+      const hits = Array.from(document.querySelectorAll(".statusbar-item"))
+        .map((s) => (s.textContent || "").trim())
+        .filter((t) => t.indexOf(PREFIX) === 0);
+      if (hits.length > 0) { return hits; }
+      // The status bar's markup is VS Code's, not ours, so don't let a class
+      // rename turn "the extension never activated" into "no markers found".
+      // Fall back to any leaf element carrying the prefix, and say which path
+      // produced the answer so an empty result is unambiguous.
+      const anywhere = [];
+      document.querySelectorAll("*").forEach((el) => {
+        if (el.children.length !== 0) { return; }
+        const t = (el.textContent || "").trim();
+        if (t.indexOf(PREFIX) === 0) { anywhere.push(t); }
+      });
+      return anywhere.length > 0
+        ? anywhere.map((t) => t + " (via full-document scan)")
+        : ["<none: no " + PREFIX + " markers anywhere in the workbench DOM>"];
+    });
+  } catch (e) {
+    return ["<unreadable: " + e.message + ">"];
+  }
+}
+
+/*
+ * Everything the harness can see about the workbench at a moment of interest:
+ * which tabs are open, what the active editor group holds (a text editor, a
+ * webview, or nothing -- the difference between "VS Code fell back to the
+ * plain text editor" and "VS Code opened the custom editor and stalled"),
+ * plus the extension lifecycle markers. Collected on every failure and on
+ * every recovery step, so a log line is never just "it didn't work".
+ */
+async function workbenchSnapshot(page) {
+  let snap;
+  try {
+    snap = await page.evaluate(() => ({
+      openTabs: Array.from(document.querySelectorAll(".tabs-container .tab"))
+        .map((t) => (t.getAttribute("aria-label") || t.textContent || "").trim()),
+      placeholder: (document.querySelector(".editor-placeholder") || {}).textContent || null,
+      notifications: Array.from(document.querySelectorAll(".notification-list-item-message"))
+        .map((n) => (n.textContent || "").trim()),
+      explorerRows: Array.from(document.querySelectorAll(".monaco-list-row"))
+        .map((r) => (r.getAttribute("aria-label") || "").trim()).filter(Boolean),
+      activeEditor: {
+        textEditor: !!document.querySelector(".editor-instance .monaco-editor"),
+        webviewElement: !!document.querySelector(".webview"),
+        iframeCount: document.querySelectorAll("iframe").length,
+      },
+    }));
+  } catch (e) {
+    snap = { unreadable: e.message };
+  }
+  snap.frameUrls = page.frames().map((f) => f.url());
+  snap.lifecycle = await readLifecycleMarkers(page);
+  return snap;
+}
+
 async function setup() {
   const scope = resourceScope();
   try {
@@ -63,41 +127,89 @@ async function setup() {
     // inside it addresses as mount/<relative path>. Opening it triggers the
     // pyret-parley.cpo custom editor.
     const payload = JSON.stringify([["openFile", MOUNT + FILE]]);
+    const tNav = Date.now();
     await page.goto(endpoint + "?payload=" + encodeURIComponent(payload),
       { waitUntil: "domcontentloaded", timeout: 120000 });
     await page.waitForSelector(".monaco-workbench", { timeout: 120000 });
+    const tWorkbench = Date.now();
 
-    // Bounded, and loud about WHY. A missing editor frame here used to be a
-    // silent 120s poll ending in "not found within timeout", which says nothing
-    // about whether the file opened at all, opened in the wrong editor, or
-    // opened in the custom editor whose webview then failed to load.
-    // PYRET_BOOT_TIMEOUT dials it down while debugging.
-    //
-    // The bound matches the goto/workbench waits above rather than being tighter
-    // than them: a 2-core GitHub runner routinely needs more than 30s to boot
-    // this webview (30s was green on a dev box and red on every CI run), and the
-    // point of the bound is to fail with the diagnostics below instead of
-    // hanging, not to police how slow a cold runner is allowed to be.
+    /*
+     * NOTE(joe Aug '26): There are some annoying flakes that kept coming up in
+     * CI that were clearly related to startup in the (maybe headless browser
+     * only?) vscode about not actually getting the extension loaded on opening
+     * a .arr file. Here, Claude came up with a plan to recover and try again
+     *
+     * Claude says: Two escalating recoveries, each loud in the log so CI keeps
+     * measuring how often the stall happens and which nudge fixed it:
+     *   1. close the stuck tab and reopen the file from the Explorer -- a
+     *      fresh open against the SAME extension host. If this works, the
+     *      provider was alive and only the first resolve was lost (the
+     *      lost-wakeup theory, confirmed from inside).
+     *   2. reload the whole page (the ?payload= re-fires) -- a fresh
+     *      workbench, for whatever a re-open can't fix.
+     *
+     */
     const bootTimeout = parseInt(process.env.PYRET_BOOT_TIMEOUT || "120000", 10);
-    let frame;
+    const stallTimeout = Math.min(30000, Math.floor(bootTimeout / 4));
+    const attempts = [];
+    let frame = null;
+    let via = "payload-open";
     try {
-      frame = await findEditorFrame(page, bootTimeout);
+      frame = await findEditorFrame(page, stallTimeout);
     } catch (e) {
-      const diag = await page.evaluate(() => ({
-        openTabs: Array.from(document.querySelectorAll(".tabs-container .tab"))
-          .map((t) => (t.getAttribute("aria-label") || t.textContent || "").trim()),
-        placeholder: (document.querySelector(".editor-placeholder") || {}).textContent || null,
-        notifications: Array.from(document.querySelectorAll(".notification-list-item-message"))
-          .map((n) => (n.textContent || "").trim()),
-        explorerRows: Array.from(document.querySelectorAll(".monaco-list-row"))
-          .map((r) => (r.getAttribute("aria-label") || "").trim()).filter(Boolean),
-      }));
-      diag.frameUrls = page.frames().map((f) => f.url());
+      attempts.push({ attempt: "payload-open", waitedMs: stallTimeout, snapshot: await workbenchSnapshot(page) });
+      console.log("vscode env: STALL -- no editor frame " + stallTimeout + "ms after payload open; " +
+        "trying close+reopen. " + JSON.stringify(attempts[0].snapshot.lifecycle));
+    }
+
+    if (!frame) {
+      via = "close-and-reopen";
+      try {
+        const tab = page.locator(".tabs-container .tab", { hasText: "test.arr" }).first();
+        await tab.hover();
+        await tab.locator(".tab-actions .action-label").first().click();
+        await page.waitForSelector(".tabs-container .tab", { state: "detached", timeout: 5000 });
+        await page.click('.monaco-list-row[aria-label="test.arr"]');
+        frame = await findEditorFrame(page, stallTimeout);
+      } catch (e) {
+        attempts.push({ attempt: "close-and-reopen", error: e.message.split("\n")[0],
+          snapshot: await workbenchSnapshot(page) });
+        console.log("vscode env: close+reopen did not produce a frame either; reloading the workbench.");
+      }
+    }
+
+    if (!frame) {
+      via = "page-reload";
+      try {
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 60000 });
+        await page.waitForSelector(".monaco-workbench", { timeout: 60000 });
+        frame = await findEditorFrame(page, Math.min(60000, bootTimeout));
+      } catch (e) {
+        attempts.push({ attempt: "page-reload", error: e.message.split("\n")[0],
+          snapshot: await workbenchSnapshot(page) });
+      }
+    }
+
+    if (!frame) {
+      const diag = {
+        attempts,
+        timings: { navToWorkbenchMs: tWorkbench - tNav, gaveUpAfterMs: Date.now() - tWorkbench },
+      };
       throw new Error(
-        "vscode env: no editor frame after " + bootTimeout + "ms opening " + FILE + "\n" +
+        "vscode env: no editor frame opening " + FILE + ", even after close+reopen and a reload\n" +
         JSON.stringify(diag, null, 2)
       );
     }
+    // Print the markers on the way out of a SUCCESSFUL boot: what the healthy
+    // ordering and timing look like is exactly the baseline a failing run has
+    // to be read against -- and `via` says whether this boot needed a nudge,
+    // which is the flake-rate signal to grep CI for.
+    console.log("vscode env lifecycle (ok): " + JSON.stringify({
+      via,
+      markers: await readLifecycleMarkers(page),
+      navToWorkbenchMs: tWorkbench - tNav,
+      workbenchToFrameMs: Date.now() - tWorkbench,
+    }));
     return { page, frame, cleanup: scope.closeAll };
   } catch (e) {
     await scope.closeAll();
