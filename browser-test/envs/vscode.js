@@ -32,15 +32,8 @@ const MOUNT = "vscode-test-web://mount";
 const FILE = "/algebra-2/test.arr";
 
 /*
- * Read the extension's lifecycle markers out of the workbench status bar (see
- * vscode/src/diagnostics.ts; the fixture workspaces turn them on).
- *
- * Which markers are present separates the two ways this env fails. No
- * `activate` at all means the extension never woke up, so nothing ever
- * registered a provider for pyret-parley.cpo -- the open raced activation.
- * `activate` + `provider-registered` but no `resolve-enter` means VS Code had
- * a provider and never asked it to resolve. `resolve-enter` without
- * `resolve-done` means the resolve itself hung inside makePyretPane.
+ * "Markers" here are coming from vscode/src/diagnostics.ts, which only triggers
+ * in development mode + a user-hidden setting.
  */
 async function readLifecycleMarkers(page) {
   try {
@@ -141,18 +134,13 @@ async function setup() {
     const tWorkbench = Date.now();
 
     /*
-     * The boot stalls about a third of the time, and the lifecycle markers say
-     * how: the extension activates and registers its provider on the healthy
-     * schedule (~0.5s after the workbench, registration 1ms after activation),
-     * and then VS Code never calls resolveCustomTextEditor -- no resolve-enter
-     * marker, no webview iframe, for the full 120s. Healthy boots show the
-     * frame ~1.2s after the workbench. That is a lost wakeup inside VS Code's
-     * custom-editor open (present on the pinned 1.129.1, just rarer than on
-     * 1.130.0), so the remedy has to come from outside: notice the stall
-     * quickly and drive the open again.
+     * NOTE(joe Aug '26): There are some annoying flakes that kept coming up in
+     * CI that were clearly related to startup in the (maybe headless browser
+     * only?) vscode about not actually getting the extension loaded on opening
+     * a .arr file. Here, Claude came up with a plan to recover and try again
      *
-     * Two escalating recoveries, each loud in the log so CI keeps measuring
-     * how often the stall happens and which nudge fixed it:
+     * Claude says: Two escalating recoveries, each loud in the log so CI keeps
+     * measuring how often the stall happens and which nudge fixed it:
      *   1. close the stuck tab and reopen the file from the Explorer -- a
      *      fresh open against the SAME extension host. If this works, the
      *      provider was alive and only the first resolve was lost (the
@@ -160,12 +148,6 @@ async function setup() {
      *   2. reload the whole page (the ?payload= re-fires) -- a fresh
      *      workbench, for whatever a re-open can't fix.
      *
-     * The waits are budgeted 30/30/60 so the whole hunt stays inside the old
-     * 120s bound: the enclosing before() hook has 240s, and editorReady can
-     * legitimately need 120s of it after we hand the frame back. Healthy
-     * appearance is ~1.2s, so 30s is not a tight bound on a slow runner; and
-     * a stall misjudged as slowness just costs one reopen, not a failure.
-     * PYRET_BOOT_TIMEOUT still dials the total down while debugging locally.
      */
     const bootTimeout = parseInt(process.env.PYRET_BOOT_TIMEOUT || "120000", 10);
     const stallTimeout = Math.min(30000, Math.floor(bootTimeout / 4));

@@ -1,19 +1,21 @@
 import * as vscode from 'vscode';
 
 /*
- * Timestamped lifecycle markers for the browser-test harness.
+ * NOTE(joe Aug '26): this file is only used by CI for now. The issue it solves
+ * is flaky CI runs where VScode wasn't consistently getting the .arr file open
+ * and the extension loaded correctly, which would just hang.
  *
- * The --env=vscode suite intermittently ends with the .arr tab open and no
- * webview ("no editor frame after 120000ms"), and the two explanations are
- * indistinguishable from outside the extension host: either the extension
- * never activated (so no provider was ever registered for pyret-parley.cpo),
- * or it activated and resolveCustomTextEditor never ran / never finished.
+ * Claude said: The --env=vscode suite intermittently ends with the .arr tab open
+ * and no webview ("no editor frame after 120000ms"), and the two explanations
+ * are indistinguishable from outside the extension host: either the extension
+ * never activated (so no provider was ever registered for pyret-parley.cpo), or
+ * it activated and resolveCustomTextEditor never ran / never finished.
  *
  * These markers separate the two. They surface as status bar items rather than
- * notifications or console lines because the harness has to be able to read
- * them from the workbench DOM at the moment it gives up: the extension host
- * runs inside a web worker whose console Playwright cannot see, and toasts
- * both auto-dismiss and sit on top of the UI the other tests click.
+ * notifications or console lines because the harness has to be able to read them
+ * from the workbench DOM at the moment it gives up: the extension host runs
+ * inside a web worker whose console Playwright cannot see, and toasts both
+ * auto-dismiss and sit on top of the UI the other tests click.
  *
  * Off unless pyret-parley.diagnostics is set, which only the browser-test
  * fixture workspaces do.
