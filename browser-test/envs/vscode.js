@@ -31,6 +31,44 @@ const MOUNT = "vscode-test-web://mount";
 // workspace -- that traversal is the shape load-path tracking has to get right.
 const FILE = "/algebra-2/test.arr";
 
+/*
+ * Read the extension's lifecycle markers out of the workbench status bar (see
+ * vscode/src/diagnostics.ts; the fixture workspaces turn them on).
+ *
+ * Which markers are present separates the two ways this env fails. No
+ * `activate` at all means the extension never woke up, so nothing ever
+ * registered a provider for pyret-parley.cpo -- the open raced activation.
+ * `activate` + `provider-registered` but no `resolve-enter` means VS Code had
+ * a provider and never asked it to resolve. `resolve-enter` without
+ * `resolve-done` means the resolve itself hung inside makePyretPane.
+ */
+async function readLifecycleMarkers(page) {
+  try {
+    return await page.evaluate(() => {
+      const PREFIX = "PYRET-DIAG";
+      const hits = Array.from(document.querySelectorAll(".statusbar-item"))
+        .map((s) => (s.textContent || "").trim())
+        .filter((t) => t.indexOf(PREFIX) === 0);
+      if (hits.length > 0) { return hits; }
+      // The status bar's markup is VS Code's, not ours, so don't let a class
+      // rename turn "the extension never activated" into "no markers found".
+      // Fall back to any leaf element carrying the prefix, and say which path
+      // produced the answer so an empty result is unambiguous.
+      const anywhere = [];
+      document.querySelectorAll("*").forEach((el) => {
+        if (el.children.length !== 0) { return; }
+        const t = (el.textContent || "").trim();
+        if (t.indexOf(PREFIX) === 0) { anywhere.push(t); }
+      });
+      return anywhere.length > 0
+        ? anywhere.map((t) => t + " (via full-document scan)")
+        : ["<none: no " + PREFIX + " markers anywhere in the workbench DOM>"];
+    });
+  } catch (e) {
+    return ["<unreadable: " + e.message + ">"];
+  }
+}
+
 async function setup() {
   const scope = resourceScope();
   try {
@@ -63,9 +101,11 @@ async function setup() {
     // inside it addresses as mount/<relative path>. Opening it triggers the
     // pyret-parley.cpo custom editor.
     const payload = JSON.stringify([["openFile", MOUNT + FILE]]);
+    const tNav = Date.now();
     await page.goto(endpoint + "?payload=" + encodeURIComponent(payload),
       { waitUntil: "domcontentloaded", timeout: 120000 });
     await page.waitForSelector(".monaco-workbench", { timeout: 120000 });
+    const tWorkbench = Date.now();
 
     // Bounded, and loud about WHY. A missing editor frame here used to be a
     // silent 120s poll ending in "not found within timeout", which says nothing
@@ -93,11 +133,21 @@ async function setup() {
           .map((r) => (r.getAttribute("aria-label") || "").trim()).filter(Boolean),
       }));
       diag.frameUrls = page.frames().map((f) => f.url());
+      diag.lifecycle = await readLifecycleMarkers(page);
+      diag.timings = { navToWorkbenchMs: tWorkbench - tNav, gaveUpAfterMs: Date.now() - tWorkbench };
       throw new Error(
         "vscode env: no editor frame after " + bootTimeout + "ms opening " + FILE + "\n" +
         JSON.stringify(diag, null, 2)
       );
     }
+    // Print the same markers on the way out of a SUCCESSFUL boot: what the
+    // healthy ordering and timing look like is exactly the baseline a failing
+    // run has to be read against.
+    console.log("vscode env lifecycle (ok): " + JSON.stringify({
+      markers: await readLifecycleMarkers(page),
+      navToWorkbenchMs: tWorkbench - tNav,
+      workbenchToFrameMs: Date.now() - tWorkbench,
+    }));
     return { page, frame, cleanup: scope.closeAll };
   } catch (e) {
     await scope.closeAll();

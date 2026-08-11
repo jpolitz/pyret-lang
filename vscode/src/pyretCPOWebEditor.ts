@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { URI, Utils } from 'vscode-uri';
 import { Buffer } from 'buffer';
+import { mark } from './diagnostics';
 // See cross-file dependencies with code.pyret.org/src/scripts/inline-selfcontained.js
 const code = require('../build/web/views/editor.selfcontained.html');
 
@@ -72,6 +73,7 @@ export class PyretCPOWebProvider implements vscode.CustomTextEditorProvider {
         retainContextWhenHidden: true,
       }
     });
+    mark('provider-registered');
     return providerRegistration;
   }
 
@@ -91,8 +93,10 @@ export class PyretCPOWebProvider implements vscode.CustomTextEditorProvider {
     webviewPanel: vscode.WebviewPanel,
     _token: vscode.CancellationToken
   ): Promise<void> {
+    mark('resolve-enter');
     console.log("Pyret: resolving custom text editor at: ", document.uri);
     makePyretPane(webviewPanel, this.context, document, 'cpo');
+    mark('resolve-done');
   }
 }
 
