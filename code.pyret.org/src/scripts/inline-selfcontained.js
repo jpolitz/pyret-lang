@@ -65,13 +65,12 @@ const TEMPLATE_VARS = {
   BASE_URL: BASE,
   PYRET: BASE + "/js/cpo-main.jarr.gz.js",
   PYRET_GZIPPED: "true",
-  // The TS-compiler flavor (editor.html's CPO_COMPILER script). The asset
-  // paths are baked like PYRET's, but the choice between backends is only
-  // known at webview startup (the pyret-parley.compiler setting), so
-  // CPO_COMPILER is a runtime sentinel. The ts assets only need to exist in
+  // The TS-compiler flavor (editor.html's CPO_COMPILER script). Its asset
+  // URLs are derived in-page from PYRET's directory + canonical names, so
+  // baking PYRET above covers them; only the choice between backends is a
+  // runtime sentinel (known at webview startup, from the
+  // pyret-parley.compiler setting). The gz ts assets only need to exist in
   // the build (`make web-ts`) when a host actually selects ts.
-  PYRET_TS: BASE + "/js/cpo-main-ts.jarr.gz.js",
-  PYRET_TS_COMPILER: BASE + "/js/ts-compiler.js",
   CPO_COMPILER: COMPILER,
   HASH_OPTIONS: HASH,
   URL_FILE_MODE: URL_FILE_MODE,
