@@ -115,12 +115,6 @@
 						"The TypeScript port of the compiler (`cpo-main-ts.jarr` + `ts-compiler.js`; requires the extension to be built from a code.pyret.org build that ran `make web-ts`)"
 					],
 					"description": "Which compiler backend the editor webview loads (the same knob as code.pyret.org's ?compiler= flag)"
-				},
-				"pyret-parley.diagnostics": {
-					"type": "boolean",
-					"default": false,
-					"scope": "resource",
-					"description": "Show extension lifecycle markers (activation, custom editor resolution) as status bar items. For the browser-test harness; not useful in normal editing."
 				}
 			}
 		}

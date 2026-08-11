@@ -17,19 +17,24 @@ import * as vscode from 'vscode';
  * inside a web worker whose console Playwright cannot see, and toasts both
  * auto-dismiss and sit on top of the UI the other tests click.
  *
- * Off unless pyret-parley.diagnostics is set, which only the browser-test
- * fixture workspaces do.
+ * Off unless BOTH hold: the extension is running in development mode (loaded
+ * via extensionDevelopmentPath -- the harness's regime; marketplace installs
+ * are Production) AND the workspace sets pyret-parley.diagnostics. That
+ * setting is deliberately not contributed in package.json, so it never
+ * appears in the Settings UI; the API still reads unregistered keys out of a
+ * workspace's settings.json, and only the browser-test fixture workspaces
+ * write it.
  */
 
 const PREFIX = 'PYRET-DIAG';
 
-let enabled: boolean | undefined;
+let enabled = false;
 
-function isEnabled(): boolean {
-  if (enabled === undefined) {
-    enabled = vscode.workspace.getConfiguration('pyret-parley').get<boolean>('diagnostics') === true;
-  }
-  return enabled;
+/** Call once at the top of activate(), before the first mark(). */
+export function initDiagnostics(context: vscode.ExtensionContext): void {
+  enabled =
+    context.extensionMode === vscode.ExtensionMode.Development &&
+    vscode.workspace.getConfiguration('pyret-parley').get<boolean>('diagnostics') === true;
 }
 
 /**
@@ -40,7 +45,7 @@ function isEnabled(): boolean {
 const items: vscode.StatusBarItem[] = [];
 
 export function mark(stage: string): void {
-  if (!isEnabled()) { return; }
+  if (!enabled) { return; }
   const text = `${PREFIX} ${stage} t=${Date.now()}`;
   // Also on the console: harmless, and visible if VS Code ever forwards
   // extension-host logs to the parent window.
