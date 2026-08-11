@@ -11,17 +11,17 @@
  * or directly:   PYRET_ENV=embed node --test --test-name-pattern=tables tests/suite.test.js
  */
 const { test, describe, before, after } = require("node:test");
-const { loadSpecsFromFile } = require("../shared/load-cpo-specs");
+const { loadSpecs } = require("../shared/load-cpo-specs");
 const { makePlaywrightPage } = require("../shared/playwright-page");
 const { runSpec, specTimeout } = require("../shared/dispatch");
 const { warmUp } = require("../shared/cpo-assertions");
 
 const ENV = process.env.PYRET_ENV;
-// A suite is either the name of a code.pyret.org/test/*.js spec file (the
-// usual case: a table of programs and expected output), a { local } handle on
-// a harness-local spec list, or a function that registers its own test()s --
-// for the cases where what is under test is the editor's behaviour rather
-// than a program's value.
+// A suite is either a string naming where its specs come from -- a
+// code.pyret.org/test/*.js file, or a relative path to a harness-local module
+// exporting specs() -- or a function that registers its own test()s, for the
+// cases where what is under test is the editor's behaviour rather than a
+// program's value.
 const SUITES = {
   "check-blocks": "check-blocks.js",
   "errors": "errors.js",
@@ -29,9 +29,9 @@ const SUITES = {
   "type-check": "type-check.js",
   "tables": "tables.js",
   "url-imports": "url-imports.js",
-  // Harness-local suite (generated large-program stress shapes; not an
+  // Harness-local specs (generated large-program stress shapes; not an
   // upstream code.pyret.org/test file -- see tests/big-programs.js).
-  "big-programs": { local: "./big-programs.js" },
+  "big-programs": "./big-programs.js",
   "stop-during-load": require("./stop-during-load"),
   "rapid-rerun": require("./rapid-rerun"),
   "effective-ids": require("./effective-ids"),
@@ -139,10 +139,7 @@ for (const suite of chosen) {
       entry(() => session);
       return;
     }
-    const specs = typeof entry === "string"
-      ? loadSpecsFromFile(entry)
-      : require(entry.local).specs();
-    for (const s of specs) {
+    for (const s of loadSpecs(entry)) {
       test(s.name || s.program, { timeout: specTimeout(s) }, async () => {
         await runSpec(session.page, s);
       });
