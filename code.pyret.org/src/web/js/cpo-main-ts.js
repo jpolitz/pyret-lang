@@ -218,6 +218,22 @@
       return o;
     }
 
+    var currentCancellation = null;
+    function newCancellation() {
+      currentCancellation = T.repl.makeCancellation();
+      return currentCancellation;
+    }
+
+    /*
+      A cancelled run is a user break that happened to land before the program
+      became a Pyret computation, so it is reported as one: the same
+      ffi.userBreak the runtime raises.
+    */
+    function reportRunEnd(ret, err) {
+      if (err instanceof T.repl.Cancelled) { tsLib.resolveWithUserBreak(ret); }
+      else { tsLib.resolveWithError(ret, err); }
+    }
+
     var jsRepl = {
       runtime: runtime,
       /*
@@ -225,24 +241,26 @@
       */
       restartInteractions: function(source, options) {
         var ret = Q.defer();
+        var cancel = newCancellation();
         setTimeout(function() {
           var opts = tsOptions(options);
           var defsLocator = tsRepl.makeDefinitionsLocator(
             function() { return source; },
             T.compileStructs.standardGlobals);
-          tsRepl.restartInteractions(defsLocator, opts)
+          tsRepl.restartInteractions(defsLocator, opts, cancel)
             .then(function(either) { tsLib.resolveWithEither(ret, either); })
-            .catch(function(err) { tsLib.resolveWithError(ret, err); });
+            .catch(function(err) { reportRunEnd(ret, err); });
         }, 0);
         return ret.promise;
       },
       run: function(str, name) {
         var ret = Q.defer();
+        var cancel = newCancellation();
         setTimeout(function() {
           var locator = tsRepl.makeInteractionLocator(function() { return str; });
-          tsRepl.runInteraction(locator)
+          tsRepl.runInteraction(locator, cancel)
             .then(function(either) { tsLib.resolveWithEither(ret, either); })
-            .catch(function(err) { tsLib.resolveWithError(ret, err); });
+            .catch(function(err) { reportRunEnd(ret, err); });
         }, 0);
         return ret.promise;
       },
@@ -251,7 +269,13 @@
           afterPause(resumer);
         });
       },
+      /*
+        breakAll() kills all Pyret computation; the cancellation
+        is for pure JS computation (the compiler) that is no longer
+        Pyret code on a break-able Pyret stack
+      */
       stop: function() {
+        if (currentCancellation !== null) { currentCancellation.cancel(); }
         runtime.breakAll();
       }
     };

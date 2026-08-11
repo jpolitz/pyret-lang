@@ -96,11 +96,53 @@ async function runProgramWith<Realm, Result>(
   }
 }
 
+export class Cancelled extends Error {
+  constructor() {
+    super('The run was cancelled');
+    this.name = 'Cancelled';
+  }
+}
+
+// cancel() rejects the promise *and* sets isCancelled()
+// The promise half is used to race([]) against other async work,
+// while the isCancelled() half is used for synchronous checks for early
+// returns.
+export interface Cancellation {
+  cancel(): void;
+  promise: Promise<never>;
+  isCancelled(): boolean;
+}
+
+export function makeCancellation(): Cancellation {
+  let cancelled = false;
+  const { promise, reject } = Promise.withResolvers<never>();
+  // *Always* catch these. They can be rejected from many places, sometimes
+  // before relevant places can install handlers, or after relevant places have
+  // cleared them. These should never bubble up as "UnhandledRejections"
+  promise.catch(() => undefined);
+  return {
+    promise,
+    isCancelled: () => cancelled,
+    cancel: () => {
+      if (cancelled) { return; }
+      cancelled = true;
+      reject(new Cancelled());
+    },
+  };
+}
+
+// A cancellation that is never triggered, for callers that do not have one.
+const NEVER_CANCELLED: Cancellation = {
+  promise: new Promise<never>(() => undefined),
+  isCancelled: () => false,
+  cancel: () => undefined,
+};
+
 export interface Repl<A2, Realm = any, Result = any> {
-  restartInteractions(defsLocator: CL.Locator, options: CS.CompileOptions): Promise<Either<any[], Result>>;
+  restartInteractions(defsLocator: CL.Locator, options: CS.CompileOptions, cancel?: Cancellation): Promise<Either<any[], Result>>;
   makeInteractionLocator(getInteractions: () => string): CL.Locator;
   makeDefinitionsLocator(getDefs: () => string, globals: CS.Globals): CL.Locator;
-  runInteraction(locator: CL.Locator): Promise<Either<any[], Result>>;
+  runInteraction(locator: CL.Locator, cancel?: Cancellation): Promise<Either<any[], Result>>;
 }
 
 export function makeRepl<A2, Realm = any, Result = any>(
@@ -136,12 +178,27 @@ export function makeRepl<A2, Realm = any, Result = any>(
     currentRealm = executor.getResultRealm(result);
   }
 
-  async function runInteraction(locator: CL.Locator): Promise<Either<any[], Result>> {
-    const worklist = await CL.compileWorklistKnownModules(finder, locator, compileContext, currentModules as any);
+  async function runInteraction(
+    locator: CL.Locator,
+    cancel: Cancellation = NEVER_CANCELLED
+  ): Promise<Either<any[], Result>> {
+    // Cancellation here kills this function's evaluation, but the
+    // compileWorklist continues to completion regardless.
+    const worklist = await Promise.race([
+      cancel.promise,
+      CL.compileWorklistKnownModules(finder, locator, compileContext, currentModules as any),
+    ]);
+
     const compiled = CL.compileProgramWith(worklist, currentModules, currentCompileOptions);
+    // It's important to guard synchronously here so we don't even *launch* a
+    // run below if we cancelled during compile
+    if (cancel.isCancelled()) { throw new Cancelled(); }
     for (const [k, v] of compiled.modules) {
       currentModules.set(k, v);
     }
+    // At this point, we trust runProgramWith to run synchronously right up
+    // until a Pyret stack is installed. breakAll() (e.g. stop button) is the
+    // stop mechanism from here on, not the `cancel`
     const result = await runProgramWith(executor, worklist, compiled, currentRealm, currentCompileOptions);
     if (result.$name === 'right') {
       if (executor.isSuccessResult(result.v)) {
@@ -151,7 +208,11 @@ export function makeRepl<A2, Realm = any, Result = any>(
     return result;
   }
 
-  function restartInteractions(defsLocator: CL.Locator, options: CS.CompileOptions): Promise<Either<any[], Result>> {
+  function restartInteractions(
+    defsLocator: CL.Locator,
+    options: CS.CompileOptions,
+    cancel: Cancellation = NEVER_CANCELLED
+  ): Promise<Either<any[], Result>> {
     currentInteraction = 0;
     currentCompileOptions = options;
     currentRealm = realm;
@@ -159,7 +220,7 @@ export function makeRepl<A2, Realm = any, Result = any>(
     currentModules = new Map(modules); // Make a copy
     currentFinder = makeFinder();
     globals = defsLocator.getGlobals();
-    return runInteraction(defsLocator);
+    return runInteraction(defsLocator, cancel);
   }
 
   function makeInteractionLocator(getInteractions: () => string): CL.Locator {

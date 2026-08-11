@@ -483,25 +483,23 @@
       return {
         run: function(realm, programJsSource, _options) {
           return new Promise(function(resolve, reject) {
-            setTimeout(function() {
-              runtime.runThunk(function() {
-                return runProgramPy.app(
-                  pyRuntime,
-                  realm,
-                  programJsSource,
-                  runtime.makeObject({ "checks": "main" }),
-                  runtime.ffi.makeList([]));
-              }, function(result) {
-                if(runtime.isSuccessResult(result)) {
-                  resolve(result.result);
-                }
-                else {
-                  // An error escaping run-program itself (not the
-                  // program): surface the whole FailureResult.
-                  reject(result);
-                }
-              });
-            }, 0);
+            runtime.runThunk(function() {
+              return runProgramPy.app(
+                pyRuntime,
+                realm,
+                programJsSource,
+                runtime.makeObject({ "checks": "main" }),
+                runtime.ffi.makeList([]));
+            }, function(result) {
+              if(runtime.isSuccessResult(result)) {
+                resolve(result.result);
+              }
+              else {
+                // An error escaping run-program itself (not the
+                // program): surface the whole FailureResult.
+                reject(result);
+              }
+            });
           });
         },
         isSuccessResult: function(moduleResult) {
@@ -553,12 +551,25 @@
       });
     }
 
+    /*
+      Report a run that was stopped before it ever became a Pyret computation.
+      (This happens for stops during the TS compiler's compile)
+    */
+    function resolveWithUserBreak(deferred) {
+      runtime.runThunk(function() {
+        return runtime.raise(runtime.ffi.userBreak);
+      }, function(result) {
+        deferred.resolve(result);
+      });
+    }
+
     return runtime.makeJSModuleReturn({
       makeBuiltinSupport: makeBuiltinSupport,
       makeFinderFactory: makeFinderFactory,
       makeExecutor: makeExecutor,
       resolveWithEither: resolveWithEither,
       resolveWithError: resolveWithError,
+      resolveWithUserBreak: resolveWithUserBreak,
       bridgeCompileErrors: bridgeCompileErrors,
       tsCompiler: tsCompiler
     });
