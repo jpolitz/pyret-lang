@@ -96,11 +96,6 @@ jobs:
         # Wait a bit more for everything to be ready
         sleep 3
         
-        # Run tests based on event type
-        if [ "${{ github.event_name }}" = "pull_request" ]; then
-          echo "Running PR tests (excluding modules)"
-          npm run mocha -- --grep modules --invert
-        else
-          echo "Running all tests"
-          npm run mocha
-        fi
+        # The mocha script runs only the suites browser-test does not already
+        # cover -- see code.pyret.org/test/README.md.
+        npm run mocha
