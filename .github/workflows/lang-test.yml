@@ -29,6 +29,11 @@ jobs:
     - name: run tests
       run: make all-pyret-test
 
+    # The js-numbers unit suite; ran in the pre-monorepo lang CI but was
+    # dropped when the workflow was ported. Cheap: needs only phaseA.
+    - name: run jsnums tests
+      run: make jsnums-test
+
   ts-suite:
     name: Pyret test suite, compiled by the TS compiler
 
