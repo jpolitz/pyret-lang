@@ -49,8 +49,7 @@ OVSX_FAITHFUL=1 node run.js --env=vscode-ovsx  # correct MIME/no cap: plumbing c
 
 Env vars: `OVSX_FAITHFUL=1` (correct serving), `OVSX_ASSET_ROOT=<dir>` (override
 the served build; defaults to `vscode/dist/web/build/web`), `OVSX_CAP_MB=<n>`
-(hostile size cap, default 15). A standalone one-shot check that skips the full
-spec suite lives in `smoke-ovsx.js`.
+(hostile size cap, default 15).
 
 ### `embed-static` — pyret-embed driving the built `editor.embed.html` artifact
 
@@ -78,7 +77,7 @@ flavor knob: cpo appends `?compiler=ts` to `/editor`, embed forwards it through
 the host page to the iframe URL (as the embed library's `compiler` config
 option does), and vscode opens the fixture workspace whose settings set
 `pyret-parley.compiler: "ts"`. The suites and assertions are identical in both
-configurations; `run-all.sh` runs the full env × compiler matrix.
+configurations; `make matrix` runs the full env × compiler matrix.
 
 It is **strictly additive**: nothing under `code.pyret.org/` or `vscode/` is
 modified; the upstream test files are read as-is.
@@ -165,7 +164,15 @@ shared/
   playwright-page.js    `page` adapter over a Playwright frame
   find-frame.js         locate the editor frame (the one with #runButton)
   browser.js            launch Chromium (system Chrome or Playwright's bundled one)
-vscode/fixture-workspace/test.arr   the .arr the custom editor opens
+  resource-scope.js     keeps a failing env setup() from leaking servers/browsers
+tests/
+  helpers.js            shared vocabulary for the run/stop state-machine tests
+  rapid-rerun.js        run/stop: rapid rerun keeps a consistent run state
+  stop-during-load.js   run/stop: Stop during program load
+  effective-ids.js      run/stop: effective-ids invariants across reruns
+  big-programs.js       generated large-program stress specs (see above)
+vscode/fixture-workspace/     the workspace the custom editor opens (algebra-2/test.arr)
+vscode/fixture-workspace-ts/  same, with pyret-parley.compiler: "ts" in its settings
 results/                captured run logs
 ```
 
@@ -201,8 +208,9 @@ node run.js --env=vscode
 #   cd embed && npm ci --ignore-scripts && npx webpack):
 node run.js --env=embed-static
 
-# everything (starts the CPO server if needed):
-./run-all.sh
+# everything (prereqs + CPO server handled for you):
+make all-envs            # every env, one compiler flavor
+make matrix              # every env x both compiler flavors, logs in results/
 ```
 
 ### Filtering (local dev)
@@ -224,7 +232,7 @@ Other flags: `--suites=check-blocks,errors,...` (default `all`),
 
 ## Results
 
-Captured run logs land in `results/` (`run-all.sh` writes one per
+Captured run logs land in `results/` (`make matrix` writes one per
 env x compiler cell). Current state of the matrix: **236 passing,
 0 failing** in all six configurations (cpo / embed / vscode, each on
 both the stock and the ts compiler), plus the 3 generated
