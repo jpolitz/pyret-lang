@@ -14,17 +14,9 @@ jobs:
         with:
           node-version: 24
 
-      - name: Build pyret-lang
-        working-directory: ./lang
-        run: |
-          npm ci
-          make phaseA libA
-
-      - name: Stage the build that pyret.js loads
+      - name: Build pyret-lang and stage the build that pyret.js loads
         working-directory: ./npm
-        run: |
-          mkdir -p pyret-lang/build
-          cp -r ../lang/build/phaseA pyret-lang/build/
+        run: npm run build
 
       - name: Test the CLI against that build
         working-directory: ./npm

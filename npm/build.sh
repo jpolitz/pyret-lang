@@ -1,12 +1,10 @@
 #!/bin/bash
 set -e
 
+cd "$(dirname "$0")"
+
+(cd ../lang && npm ci && make phaseA libA)
+
 rm -rf pyret-lang
-git clone --single-branch -b horizon https://github.com/brownplt/pyret-lang.git
-
-pushd pyret-lang
-npm install
-make phaseA libA
-touch .npmignore
-popd
-
+mkdir -p pyret-lang/build
+cp -r ../lang/build/phaseA pyret-lang/build/
