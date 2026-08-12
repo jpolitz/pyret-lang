@@ -650,23 +650,12 @@ function start(config, onServerReady) {
     });
   });
 
-  app.get(/\/ide(\/.*)?$/, function(req, res) {
-    res.render(
-      path.resolve(__dirname, "web", "ide.html"),
-      {ASSET_BASE_URL: process.env.ASSET_BASE_URL || ''}
-    );
-  });
-
   app.get("/neweditor", function(req, res) {
     res.sendfile("build/web/editor.html");
   });
 
   app.get("/source-map.js", function(req, res) {
     res.sendfile("build/web/js/source-map.js");
-  });
-
-  app.get("/share", function(req, res) {
-
   });
 
   // Server-side proxy for #shareurl loads from hosts that some school networks

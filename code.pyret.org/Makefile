@@ -87,17 +87,8 @@ build/web/views/%.html: src/web/%.html
 # this; every incremental build served a stale webview).
 SELFCONTAINED = build/web/views/editor.selfcontained.html
 
-OUT_CSS := $(patsubst src/web/%.template.css,build/web/%.css,$(wildcard src/web/css/*.template.css))
-
-build/web/css/%.css: src/web/css/%.template.css
-	node make-template.js $< > $@
-
 COPY_CSS := $(patsubst src/web/%.css,build/web/%.css,$(wildcard src/web/css/*.css))
 build/web/css/%.css: src/web/css/%.css
-	cp $< $@
-
-COPY_LIB_CSS := $(patsubst lib/css/%.css,build/web/css/%.css,$(wildcard lib/css/*.css))
-build/web/css/%.css: lib/css/%.css
 	cp $< $@
 
 COPY_LIB_CSS := $(patsubst lib/css/%.css,build/web/css/%.css,$(wildcard lib/css/*.css))
@@ -337,12 +328,6 @@ build/web/js/editor-misc.min.js: $(EDITOR_MISC_JS)
 # COPY_PNG / COPY_GIF rules above, so the web build needs nothing from ../lang.
 MISC_IMG = build/web/img/pyret-icon.png build/web/img/pyret-logo.png build/web/img/pyret-spin.gif build/web/img/up-arrow.png build/web/img/down-arrow.png
 
-COPY_ARR := $(patsubst ./pyret/src/arr/trove/%.arr,build/web/arr/%.arr,$(wildcard ./pyret/src/arr/trove/*.arr))
-COPY_ARR :=
-
-# build/web/arr/%: pyret/src/arr/trove/%
-# 	cp $< $@
-
 
 WEB = build/web
 WEBV = build/web/views
@@ -353,7 +338,6 @@ WEBTHEMES = build/web/css/themes
 WEBIMAGES = build/web/css/images
 WEBFONTS = $(WEBCSS)/fonts
 WEBIMG = build/web/img
-WEBARR = build/web/arr
 
 $(WEBV):
 	@$(call MKDIR,$(WEBV))
@@ -382,22 +366,19 @@ $(WEBFONTS):
 $(WEBIMG):
 	@$(call MKDIR,$(WEBIMG))
 
-$(WEBARR):
-	@$(call MKDIR,$(WEBARR))
-
 # The self-contained template's rule (see the SELFCONTAINED comment near the
 # top for why it must sit below the COPY_*/MISC_* assignments it depends on).
 # beforePyret.js is spelled out because no COPY_* var contains it (it has its
 # own webpack rule) -- without it the inlined copy in the template goes stale.
 $(SELFCONTAINED): build/web/views/editor.html src/scripts/inline-selfcontained.js \
-    $(COPY_JS) $(COPY_LIB_JS) $(COPY_NEW_JS) $(MISC_JS) build/web/js/editor-misc.min.js \
+    $(COPY_JS) $(COPY_LIB_JS) $(MISC_JS) build/web/js/editor-misc.min.js \
     build/web/js/beforePyret.js \
-    $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(OUT_CSS) $(MISC_CSS) $(COPY_NEW_CSS)
+    $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(MISC_CSS)
 	node src/scripts/inline-selfcontained.js build/web/views/editor.html build/web $@
 
-web-local: $(WEB) $(WEBV) $(WEBJS) $(WEBJSGOOG) $(WEBCSS) $(WEBTHEMES) $(WEBFONTS) $(WEBIMG) $(WEBIMAGES) $(WEBARR) $(OUT_HTML) $(COPY_HTML) $(OUT_CSS) $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(COPY_FONTS) $(COPY_JS) $(COPY_LIB_JS) $(COPY_LIB_IMAGES) $(COPY_ARR) $(COPY_GIF) $(COPY_SVG) $(COPY_PNG) $(MISC_JS) $(MISC_CSS) $(MISC_IMG) $(COPY_NEW_CSS) $(COPY_NEW_JS) $(COPY_GOOGLE_JS) $(CPOMAIN) $(CPOGZ) build/web/js/editor-misc.min.js build/web/js/snap build/web/js/transpile.xml build/web/editor.html build/web/editor.embed.html $(SELFCONTAINED) 
+web-local: $(WEB) $(WEBV) $(WEBJS) $(WEBJSGOOG) $(WEBCSS) $(WEBTHEMES) $(WEBFONTS) $(WEBIMG) $(WEBIMAGES) $(OUT_HTML) $(COPY_HTML) $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(COPY_FONTS) $(COPY_JS) $(COPY_LIB_JS) $(COPY_LIB_IMAGES) $(COPY_GIF) $(COPY_SVG) $(COPY_PNG) $(MISC_JS) $(MISC_CSS) $(MISC_IMG) $(COPY_GOOGLE_JS) $(CPOMAIN) $(CPOGZ) build/web/js/editor-misc.min.js build/web/js/snap build/web/js/transpile.xml build/web/editor.html build/web/editor.embed.html $(SELFCONTAINED) 
 
-web: $(WEB) $(WEBV) $(WEBJS) $(WEBJSGOOG) $(WEBCSS) $(WEBTHEMES) $(WEBFONTS) $(WEBIMG) $(WEBIMAGES) $(WEBARR) $(OUT_HTML) $(COPY_HTML) $(OUT_CSS) $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(COPY_FONTS) $(COPY_JS) $(COPY_LIB_JS) $(COPY_LIB_IMAGES) $(COPY_ARR) $(COPY_GIF) $(COPY_SVG) $(COPY_PNG) $(MISC_JS) $(MISC_CSS) $(MISC_IMG) $(COPY_NEW_CSS) $(COPY_NEW_JS) $(COPY_GOOGLE_JS) build/web/js/editor-misc.min.js build/web/js/snap build/web/js/transpile.xml build/web/editor.html build/web/editor.embed.html $(SELFCONTAINED)
+web: $(WEB) $(WEBV) $(WEBJS) $(WEBJSGOOG) $(WEBCSS) $(WEBTHEMES) $(WEBFONTS) $(WEBIMG) $(WEBIMAGES) $(OUT_HTML) $(COPY_HTML) $(COPY_CSS) $(COPY_LIB_CSS) $(COPY_THEMES) $(COPY_FONTS) $(COPY_JS) $(COPY_LIB_JS) $(COPY_LIB_IMAGES) $(COPY_GIF) $(COPY_SVG) $(COPY_PNG) $(MISC_JS) $(MISC_CSS) $(MISC_IMG) $(COPY_GOOGLE_JS) build/web/js/editor-misc.min.js build/web/js/snap build/web/js/transpile.xml build/web/editor.html build/web/editor.embed.html $(SELFCONTAINED)
 
 link-pyret:
 	ln -s $(PYRET) pyret
@@ -430,7 +411,6 @@ $(BUNDLED_DEPS): src/scripts/npm-dependencies.js
 
 $(CPOMAIN): $(BUNDLED_DEPS) $(TROVE_JS) $(TROVE_ARR) $(WEBJS) src/web/js/*.js src/web/arr/*.arr cpo-standalone.js cpo-config.json src/web/arr/cpo-main.arr $(PHASEA)
 	mkdir -p compiled/;
-	#cp pyret/build/phaseA/compiled/*.js ./compiled/
 	node pyret/build/phaseA/pyret.jarr \
     --builtin-js-dir src/web/js/trove/ \
     --builtin-js-dir pyret/src/js/trove/ \
