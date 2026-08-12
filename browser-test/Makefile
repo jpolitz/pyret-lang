@@ -49,7 +49,7 @@ SERVER_ENV := BASE_URL=$(BASE_URL) PORT=$(PORT) \
   URL_FILE_MODE=all-remote IMAGE_PROXY_BYPASS=true \
   SHARED_FETCH_SERVER=https://code.pyret.org CURRENT_PYRET_RELEASE=
 
-.PHONY: help cpo embed embed-static vscode vscode-ovsx all-envs \
+.PHONY: help cpo embed embed-static vscode vscode-ovsx all-envs matrix \
         cpo-build embed-build vscode-build deps server stop-server clean-stamps
 
 help:
@@ -150,6 +150,18 @@ all-envs:
 	@rc=0; for e in cpo embed embed-static vscode vscode-ovsx; do \
 	  echo "=== $$e ==="; $(MAKE) --no-print-directory $$e || rc=1; done; \
 	echo "done (rc=$$rc)"; exit $$rc
+
+# The full env x compiler matrix (the same cells CI runs as separate jobs),
+# one captured log per cell under results/. Narrow with e.g.
+#   make matrix PYRET_COMPILERS=pyret
+PYRET_COMPILERS ?= pyret ts
+
+matrix: | results
+	@bash -c 'set -o pipefail; rc=0; \
+	for c in $(PYRET_COMPILERS); do for e in cpo embed embed-static vscode vscode-ovsx; do \
+	  echo "=== $$e ($$c compiler) ==="; \
+	  PYRET_COMPILER=$$c $(MAKE) --no-print-directory $$e 2>&1 | tee $(HERE)/results/$$e-$$c.log || rc=1; \
+	done; done; echo "done (rc=$$rc)"; exit $$rc'
 
 clean-stamps:
 	rm -f $(HERE)/.chromium.stamp
