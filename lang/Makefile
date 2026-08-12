@@ -241,7 +241,7 @@ parse-test: tests/parse/parse.js build/phaseA/js/pyret-tokenizer.js build/phaseA
 	cd tests/parse/ && $(NODE) parse.js
 
 TEST_FILES := $(wildcard tests/pyret/tests/*.arr)
-TYPE_TEST_FILES := $(wildcard tests/type-check/bad/*.arr) $(wildcard tests/type-check/good/*.arr) $(wildcard tests/type-check/should/*.arr) $(wildcard tests/type-check/should-not/*.arr)
+TYPE_TEST_FILES := $(wildcard tests/type-check/bad/*.arr) $(wildcard tests/type-check/good/*.arr)
 REG_TEST_FILES := $(wildcard tests/pyret/regression/*.arr)
 MAIN_TEST_FILES := tests/pyret/main2.arr tests/pyret/compiler-tests.arr tests/type-check/main.arr tests/pyret/regression.arr tests/lib-test/lib-test-main.arr tests/all.arr
 

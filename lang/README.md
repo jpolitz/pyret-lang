@@ -1,7 +1,5 @@
 
-![Yarr](https://raw.github.com/brownplt/pyret-lang/master/img/pyret-banner.png)
-
-[![Build Status](https://api.travis-ci.com/brownplt/pyret-lang.svg?branch=horizon)](https://travis-ci.com/github/brownplt/pyret-lang)
+![Yarr](img/pyret-banner.png)
 
 A scripting language.
 
