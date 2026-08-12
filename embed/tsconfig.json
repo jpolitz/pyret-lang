@@ -10,5 +10,5 @@
         "esModuleInterop": true,
         "skipLibCheck": true
     },
-    "include": ["src/pyret.ts", "src/inmem-rpc.ts"]
+    "include": ["src/pyret.ts", "src/default-rpcs.ts"]
 }

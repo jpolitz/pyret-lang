@@ -76,9 +76,9 @@ declare function makeEmbed(id: string, container: HTMLElement, src?: string): Pr
 To see the examples in this repository:
 
 ```
-$ git clone ...
 $ npm install
+$ npm run build
 $ python3 -m http.server # or your favorite static server
 ```
 
-Then open [localhost:8000/examples/basic.html](http://localhost:8000/src/basic.html) in browser.
+Then open [localhost:8000/src/basic.html](http://localhost:8000/src/basic.html) in a browser.

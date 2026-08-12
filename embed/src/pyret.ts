@@ -1,4 +1,4 @@
-const CPO = "https://pyret-horizon.herokuapp.com/editor";
+const CPO = "https://code.pyret.org/editor";
 
 export type State = {
   definitionsAtLastRun: string,

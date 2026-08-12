@@ -8,10 +8,11 @@
     "types"
   ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc; cd node_modules/code.pyret.org; make link-pyret; npm run build; cd ../..; npm run copy-pyret",
-    "build:ts": "npm run build; cd node_modules/code.pyret.org; make web-ts; cd ../..; npm run copy-pyret",
-    "copy-pyret": "cp -r node_modules/code.pyret.org/build dist/"
+    "build": "webpack",
+    "types": "tsc",
+    "build:full": "npm run build && npm run types && cd ../code.pyret.org && make link-pyret && npm run build && cd ../embed && npm run copy-pyret",
+    "build:ts": "npm run build:full && cd ../code.pyret.org && make web-ts && cd ../embed && npm run copy-pyret",
+    "copy-pyret": "cp -r ../code.pyret.org/build dist/"
   },
   "author": "",
   "license": "ISC",
@@ -26,15 +27,13 @@
   "dependencies": {
     "@zenfs/core": "^2.2.3",
     "buffer": "^6.0.3",
-    "mustache": "^4.2.0",
     "path-browserify": "^1.0.1",
-    "process": "^0.11.10",
-    "ts-loader": "^9.5.2",
-    "typescript": "^5.8.3",
-    "webpack": "^5.99.9"
+    "process": "^0.11.10"
   },
   "devDependencies": {
-    "code.pyret.org": "file:../code.pyret.org",
+    "ts-loader": "^9.5.2",
+    "typescript": "^5.8.3",
+    "webpack": "^5.99.9",
     "webpack-cli": "^6.0.1"
   }
 }
