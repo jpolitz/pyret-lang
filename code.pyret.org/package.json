@@ -95,7 +95,7 @@
     "selenium-webdriver": "^3.6.0",
     "webpack-cli": "^5.1.4"
   },
-  "comment-overrides": "Security overrides for nested/transitive deps that have no in-range safe version. Each clears one or more critical/high advisories without a risky major upgrade of the parent. Parents intentionally kept at their current major to avoid runtime breakage: heroku@7 (dev CLI used by npm scripts), googleapis@46 (callback-style OAuth in src/google-auth.js), react@15/react-dom@15 (dashboard), request@2 (SSRF proxy in src/server.js), selenium-webdriver@3 (test harness API). See SECURITY-AUDIT-REPORT.md.",
+  "comment-overrides": "Security overrides for nested/transitive deps that have no in-range safe version. Each clears one or more critical/high advisories without a risky major upgrade of the parent. Parents intentionally kept at their current major to avoid runtime breakage: heroku@7 (dev CLI used by npm scripts), googleapis@46 (callback-style OAuth in src/google-auth.js), react@15/react-dom@15 (dashboard), request@2 (SSRF proxy in src/server.js), selenium-webdriver@3 (test harness API).",
   "overrides": {
     "sha.js": "^2.4.12",
     "shell-quote": "^1.8.4",
