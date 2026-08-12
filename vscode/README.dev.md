@@ -1,8 +1,9 @@
 Borrows heavily from https://github.com/microsoft/vscode-extension-samples/tree/main/custom-editor-sample
 
-To run, first you must symlink `build` to a the `build/` directory of
-`code.pyret.org`. You can get one by cloning `code.pyret.org` elsewhere and
-symlinking to it.
+The extension serves editor assets out of `build`, a committed symlink to
+`../code.pyret.org/build` (the sibling directory in this monorepo). It
+dangles until you build code.pyret.org once -- see its README, or the steps
+in `.github/workflows/browser-test.yml`.
 
 Then:
 
