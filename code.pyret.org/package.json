@@ -77,7 +77,7 @@
     "lint": "eslint src",
     "build": "heroku local:run make web-local",
     "heroku-postbuild": "bash src/scripts/fetch-anchor.sh",
-    "mocha": "heroku local:run mocha",
+    "mocha": "heroku local:run mocha test/embed.js test/image-equality.js test/number.js test/pyret.js test/shareUrls.js test/static-pages.js test/world.js",
     "start": "heroku local:run supervisor --poll-interval 700 --watch src/run.js,src/server.js src/run.js"
   },
   "repository": {
