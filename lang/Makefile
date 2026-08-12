@@ -57,10 +57,10 @@ endif
 phaseA: $(PHASEA)/pyret.jarr
 
 .PHONY : phaseA-deps
-phaseA-deps: $(PYRET_COMPA) $(PHASEA_ALL_DEPS) $(COMPILER_FILES) $(patsubst src/%,$(PHASEA)/%,$(PARSERS))
+phaseA-deps: $(PYRET_COMP0) $(PHASEA_ALL_DEPS) $(COMPILER_FILES) $(patsubst src/%,$(PHASEA)/%,$(PARSERS))
 
 
-$(PHASEA)/pyret.jarr: $(PYRET_COMPA) $(PHASEA_ALL_DEPS) $(COMPILER_FILES) $(patsubst src/%,$(PHASEA)/%,$(PARSERS))
+$(PHASEA)/pyret.jarr: $(PYRET_COMP0) $(PHASEA_ALL_DEPS) $(COMPILER_FILES) $(patsubst src/%,$(PHASEA)/%,$(PARSERS))
 	$(NODE) $(PYRET_COMP0) --outfile build/phaseA/pyret.jarr \
                       --build-runnable src/arr/compiler/pyret.arr \
                       --builtin-js-dir src/js/trove/ \
@@ -312,7 +312,6 @@ clean:
 	$(call RMDIR,$(PHASEB))
 	$(call RMDIR,$(PHASEC))
 	$(call RMDIR,build/show-comp/compiled)
-	$(call RMDIR,$(RELEASE_DIR))
 	$(call RM,$(BUNDLED_DEPS))
 
 .PHONY : test-clean
@@ -325,7 +324,7 @@ test-clean:
 	-git clean -fdX tests/scratch
 
 # Written this way because cmd.exe complains about && in command lines
-new-bootstrap: no-diff-standalone $(PHASE0BUILD)
+new-bootstrap: no-diff-standalone
 	cp $(PHASEC)/pyret.jarr $(PYRET_COMP0)
 	cp -r $(PHASEC)/js $(PHASE0)/
 no-diff-standalone: phaseB phaseC

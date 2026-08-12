@@ -43,7 +43,7 @@
   },
   "scripts": {
     "install": "make phaseA-deps",
-    "test": "make test-all"
+    "test": "make test"
   },
   "repository": {
     "type": "git",
