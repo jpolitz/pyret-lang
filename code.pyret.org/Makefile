@@ -41,26 +41,7 @@ CPOGZ=build/web/js/cpo-main.jarr.gz.js
 PHASEA=pyret/build/phaseA/pyret.jarr
 COMMITID=$(shell git rev-parse --short HEAD)
 
-.PHONY : test_node_module
-test_node_module:
-	@echo $(call NODE_MODULE,codemirror)
-	@echo $(CM)
-
-
 BUNDLED_DEPS=build/web/js/bundled-npm-deps.js
-
-.PHONY : post-install
-post-install: compress-pyret
-
-install-link: link-pyret
-
-.PHONY : selenium-test-local
-selenium-test-local:
-	TEST_LOC="local" node test/test.js test/browser
-
-.PHONY : selenium-test-sauce
-selenium-test-sauce:
-	TEST_LOC="sauce" node test/test.js test/browser/pyret
 
 build/web/editor.embed.html: src/web/editor.html .env.embed
 	node make-template.js $< .env.embed > $@
