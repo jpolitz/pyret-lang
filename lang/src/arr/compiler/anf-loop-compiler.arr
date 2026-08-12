@@ -1903,14 +1903,21 @@ compiler-visitor = {
         end
 
       refl-fields-id = js-id-of(compiler-name(string-append(vname, "_getfields")))
+      refmask-id = const-id("refmask")
+      # refmask says which fields the caller wants dereferenced: `cases` passes
+      # the fields its branch bound with `ref`, and _match passes the mutable
+      # ones.  derefField also raises if that disagrees with the field itself.
       refl-fields =
         cases(N.AVariant) v:
           | a-variant(_, _, _, members, _) =>
-            j-fun(J.next-j-fun-id(), "singleton_variant",
-              [clist: const-id("f")], j-block1(j-return(j-app(j-id(f-id),
-                    CL.map_list(lam(m):
-                        get-dict-field(THIS, j-str(m.bind.id.toname()))
-                      end, members)))))
+            j-fun(J.next-j-fun-id(), "variant",
+              [clist: f-id, refmask-id], j-block1(j-return(j-app(j-id(f-id),
+                    for CL.map_list_n(i from 0, m from members):
+                        field = get-dict-field(THIS, j-str(m.bind.id.toname()))
+                        mask = j-bracket(j-id(refmask-id), j-num(i))
+                        rt-method("derefField",
+                          [clist: field, j-bool(N.is-a-mutable(m.member-type)), mask])
+                      end))))
           | a-singleton-variant(_, _, _) =>
             j-fun(J.next-j-fun-id(), "variant",
               [clist: const-id("f")], j-block1(j-return(j-app(j-id(f-id), cl-empty))))
