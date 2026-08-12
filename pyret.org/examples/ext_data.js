@@ -4,7 +4,7 @@ include csv
 
 animals-table =
 load-table: name, species, sex, age, fixed, legs, pounds, weeks
-    source: csv-table-url("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/horizon/tests/pyret/tests/csvs/animals-ds-2024.csv", { infer-content: true })
+    source: csv-table-url("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/drydock/lang/tests/pyret/tests/csvs/animals-ds-2024.csv", { infer-content: true })
 end
 
 fun is-cat(row):

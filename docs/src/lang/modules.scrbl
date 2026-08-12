@@ -170,7 +170,7 @@ using the “Publish” menu from @tt{code.pyret.org}
 }
 
 @form["url" "url(<url>)"]{
-@pyret-block[#:style "good-ex"]{import url("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/horizon/tests/io-tests/tests/library-code.arr") as L}
+@pyret-block[#:style "good-ex"]{import url("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/drydock/lang/tests/io-tests/tests/library-code.arr") as L}
 Look for a Pyret file at the given URL. For loading files from URLs in the
 browser (e.g. on code.pyret.org), the server must support
 @hyperlink["https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS#simple_requests"]{simple
@@ -186,7 +186,7 @@ change the code at the link.
 }
 
 @form["url-file" "url-file(<url>, <rel-path>)"]{
-@pyret-block[#:style "good-ex"]{import url("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/horizon/tests/io-tests/tests/", "library-code.arr") as L}
+@pyret-block[#:style "good-ex"]{import url("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/drydock/lang/tests/io-tests/tests/", "library-code.arr") as L}
 
 If a file is present at the given @tt{<rel-path>}, the import acts just like a
 @tt{file} import with the given @tt{<rel-path>} as the path. If no file is

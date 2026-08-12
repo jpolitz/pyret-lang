@@ -70,7 +70,7 @@ end
 
   @examples{
 include csv
-animals-csv = csv-table-url("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/horizon/tests/io-tests/tests/animals-ds-2024.csv", default-options)
+animals-csv = csv-table-url("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/drydock/lang/tests/io-tests/tests/animals-ds-2024.csv", default-options)
 animals-table = load-table: name, species, sex, age, fixed, legs, weight, weeks
   source: animals-csv
 end

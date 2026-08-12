@@ -9,8 +9,9 @@ Most directories map explicitly to logical components and deployed systems:
 
 - `lang/`: compiler and standard libraries
 - `code.pyret.org/`: server and client files for the code.pyret.org web service
-- `embed/`: static HTML embedding package (https://www.npmjs.com/package/pyret-npm)
-- `npm/`: CLI package (https://www.npmjs.com/package/pyret-embed)
+- `embed/`: static HTML embedding package (https://www.npmjs.com/package/pyret-embed)
+- `npm/`: CLI package (https://www.npmjs.com/package/pyret-npm)
+- `docs/`: Scribble source of the Pyret documentation
 - `codemirror-mode/`: CodeMirror 5 mode for Pyret highlighting and indentation
 - `pyret.org/`: Pollen source of the pyret.org homepage
 - `vscode/`: Visual Studio Code extension (https://marketplace.visualstudio.com/items?itemName=PyretProgrammingLanguage.pyret-parley, https://open-vsx.org/extension/PyretProgrammingLanguage/pyret-parley)

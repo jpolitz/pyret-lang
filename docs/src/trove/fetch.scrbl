@@ -29,7 +29,7 @@ import either as Ei
 
 
 check:
-  animals = F.fetch("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/horizon/tests/io-tests/tests/animals-ds-2024.csv")
+  animals = F.fetch("https://raw.githubusercontent.com/brownplt/pyret-lang/refs/heads/drydock/lang/tests/io-tests/tests/animals-ds-2024.csv")
   animals satisfies Ei.is-left
   string-contains(animals.v, "Name,Species,Sex,Age") is true
   
