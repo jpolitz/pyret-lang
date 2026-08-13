@@ -180,3 +180,49 @@ runtime indirection at all. Direct recovers ~65% of the stock->TS speedup and
 lines of parallel implementation kept in sync by parity harnesses. Direct
 still has obvious headroom (getField/method-app inlining, cases field-slot
 dispatch); TS's numbers are the ceiling for "no Pyret-ness at all".
+
+## Async I/O during the module chase (analysis, 2026-08-13 night)
+
+What happens today: any `url(...)` / `url-file(...)` import reaching the
+finder hits fetch.js's `pauseStack(async ...)`. An async callback can never
+resume synchronously, so direct mode raises its clean stack-capture error
+BEFORE any network I/O starts — deterministic failure, no hang, no partial
+state. `file://`, `builtin`, and `npm` chases are fully synchronous and work;
+their trove-direct overrides use genuinely-sync APIs (fs.readFileSync,
+resolve.sync), which is legitimate.
+
+What is NOT legitimate: faking sync I/O by shelling out to a child node
+process (spawnSync/execFileSync). That pattern was tried for url locators in
+the TS port and removed in commit d27c1956 ("url locators: fetch in the
+async finder, drop the child-process bridge"); a direct-mode reprise for
+fetch/csv was added and reverted the same day (a515628ae). Don't bring it
+back.
+
+The sanctioned architecture (from d27c1956): do the async I/O at locator
+FINDING/CONSTRUCTION time in the host driver — cli-module-loader's driver on
+the CLI, the already-callback-ified finder in CPO — and hand the compiler
+backend locators whose content is all-sync. In the TS port the host is
+TypeScript and can await. Direct mode has an extra wrinkle: the CLI driver
+(pyret.arr) is itself Pyret and cannot await either. That is exactly where
+the goal's sanctioned freedom ("add async functions as a surface-level Pyret
+feature") becomes attractive: direct mode can compile surface async/await to
+native JS async/await nearly 1:1, while stock mode implements the same
+surface via pauseStack. Left as follow-on work.
+
+Test-status inventory under this analysis:
+- Passing, byte-identical to stock: 28-program TS parity corpus (incl. all
+  static-error programs), 15 language-suite files (incl. test-equality's
+  6,168 tests), and the full-compiler bootstrap (33MB output cmp-equal).
+- io-tests: 10/13 (direct-work/io-direct.test.js). The 3 failures are
+  exactly the url/url-file import tests, failing with the designed
+  stack-capture error; they pass once the finder goes async per d27c1956.
+- main2 (12,994 tests): does not complete. The blockers surface in
+  sequence and are all in the async-at-module-load class — csv parsing
+  (fast-csv streams), then image loading (imageFile's pauseStack) — plus
+  the by-design gap that .arr annotation checks are skipped (contracts /
+  annotation-error tests depend on them).
+
+Operational note: --stack-size=8192 on the default 8MB thread stack
+SEGFAULTS V8 under deep recursion (guard page overrun beats the RangeError
+check). Use `ulimit -s 131072` + `--stack-size=100000` to get clean
+RangeErrors instead.
