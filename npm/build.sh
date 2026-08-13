@@ -1,18 +1,20 @@
 #!/bin/bash
 set -e
 
-rm -rf pyret-lang
-git clone --single-branch -b horizon https://github.com/brownplt/pyret-lang.git
+cd "$(dirname "$0")"
 
-pushd pyret-lang
-npm install
-make phaseA libA
-# Optionally also build the TypeScript port of the compiler so the published
-# package supports `pyret --backend ts` (see pyret.js). Opt-in because it is
+(cd ../lang && npm ci && make phaseA libA)
+
+# Optionally also build the TypeScript port of the compiler so the packaged
+# CLI supports `pyret --backend ts` (see pyret.js). Opt-in because it is
 # strictly additive to the stock backend.
 if [ "${PYRET_NPM_TS:-}" = "1" ]; then
-  make ts-compiler ts-libA
+  (cd ../lang && make ts-compiler ts-libA)
 fi
-touch .npmignore
-popd
 
+rm -rf pyret-lang
+mkdir -p pyret-lang/build
+cp -r ../lang/build/phaseA pyret-lang/build/
+if [ "${PYRET_NPM_TS:-}" = "1" ]; then
+  cp -r ../lang/build/ts-compiler pyret-lang/build/
+fi
