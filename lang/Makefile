@@ -83,6 +83,30 @@ $(PHASEA)/base.jarr: $(PHASEA)/pyret.jarr
 .PHONY : libA
 libA : $(PHASEA)/base.jarr
 
+# The direct-mode compiler: the compiler compiled with -direct, running on
+# runtime-direct.js instead of the stock stack-managed runtime.  Run it with
+# node --stack-size=8192 (deep ANF recursion uses the JS stack directly).
+PHASEB_DIRECT = build/phaseB-direct
+.PHONY : phaseB-direct
+phaseB-direct: $(PHASEB_DIRECT)/pyret.jarr
+
+$(PHASEB_DIRECT)/pyret.jarr: $(PHASEA)/pyret.jarr src/js/base/runtime-direct.js src/js/base/handalone-direct.js $(wildcard src/js/trove-direct/*.js) $(COMPILER_FILES)
+	mkdir -p $(PHASEB_DIRECT)
+	rm -rf $(PHASEB_DIRECT)/compiled
+	$(NODE) $(PHASEA)/pyret.jarr --outfile $(PHASEB_DIRECT)/pyret.jarr \
+                      --build-runnable src/arr/compiler/pyret.arr \
+                      --builtin-js-dir src/js/trove-direct \
+                      --builtin-js-dir src/js/trove/ \
+                      -allow-builtin-overrides \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir $(PHASEB_DIRECT)/compiled/ \
+                      -direct -no-check-mode $(EF) \
+                      --require-config src/scripts/standalone-configDirect.json
+	cp -r $(PHASEA)/js $(PHASEB_DIRECT)/
+	cp $(PHASEA)/bundled-node-deps.js $(PHASEB_DIRECT)/ 2>/dev/null || true
+	cp $(PHASEA)/bundled-node-compile-deps.js $(PHASEB_DIRECT)/ 2>/dev/null || true
+	cp src/scripts/standalone-configA.json $(PHASEB_DIRECT)/config.json
+
 .PHONY : phaseB
 phaseB: $(PHASEB)/pyret.jarr
 

@@ -112,3 +112,14 @@ handalone-direct.js.
 
 - phaseA compile of hello.arr: ~15.5s wall; hello.jarr 9.2MB; pyret.jarr 29.5MB.
 - TS compiler: ~1.2-1.5MB node output (no bundle); browser bundle ~3MB raw.
+
+## Results (2026-08-13)
+
+- Direct-built compiler (build/phaseB-direct/pyret.jarr, `make phaseB-direct`):
+  12.4MB vs stock 29.5MB (2.4x smaller).
+- Full-compiler compile (82 modules, fresh cache, stock-mode output):
+  direct 24.6s wall / 29.0s user vs stock 64.6s wall / 81.3s user (2.6x faster).
+- Output of direct-built compiler is BYTE-IDENTICAL to stock compiler output
+  (hello worklist and the full 33MB compiler jarr both cmp-equal).
+- 28/28 TS-port parity programs pass (static errors byte-for-byte too).
+- Run the direct-built compiler with node --stack-size=8192.
