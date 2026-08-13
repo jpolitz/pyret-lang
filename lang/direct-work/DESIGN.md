@@ -152,3 +152,31 @@ handalone-direct.js.
   compile the same source).
 - fetch.js (url imports) and load-lib run paths (--run/repl) still pauseStack.
 - Tables/reactors/spies unimplemented in the direct runtime.
+
+## Head-to-head: stock vs direct vs TS port (2026-08-13, same machine)
+
+All three compile the same workloads with identical flags and fresh caches,
+and all three produce BYTE-IDENTICAL stock-mode output (cmp-verified).
+
+Full compiler (pyret.arr, 82 modules):
+  stock 64.6s | direct-built 24.6s (2.6x) | TS 16.2s (4.0x)
+hello.arr (~40-module worklist, fresh cache):
+  stock 14.9s | direct-built 5.7s (2.6x) | TS 3.9s (3.8x)
+Warm-cache recompile (startup + link + cache check):
+  stock 1.49s | direct-built 0.73s | TS 0.36s
+Compiler artifact:
+  stock jarr 29.9MB | direct jarr 12.4MB | TS dir 8.1MB total, of which the
+  port's own compiled code is 1.7MB (rest: parser+support 2.4MB, deps
+  bundles 2.5MB, sourcemaps)
+Generated code for the same 82 modules (compiled caches):
+  stock codegen 36MB -> direct codegen 12MB (3x); TS has none (it IS JS)
+Also: direct CODEGEN is cheaper to run than the splitting codegen even on
+the stock host (hello via phaseA: 14.9s stock codegen vs 9.0s direct codegen).
+
+Reading: TS remains ~1.5-1.6x faster than direct and smaller — it has no
+runtime indirection at all. Direct recovers ~65% of the stock->TS speedup and
+~2.4x of the size win while STAYING SELF-HOSTED: one compiler codebase
+(.arr sources, ~700-line codegen + ~2.5k-line runtime) vs the TS port's 38k
+lines of parallel implementation kept in sync by parity harnesses. Direct
+still has obvious headroom (getField/method-app inlining, cases field-slot
+dispatch); TS's numbers are the ceiling for "no Pyret-ness at all".
