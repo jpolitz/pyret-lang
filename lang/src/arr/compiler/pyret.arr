@@ -67,6 +67,8 @@ fun main(args :: List<String>) -> Number block:
     C.flag(C.once, "Run checks all modules (not just the main module)"),
     "no-check-mode",
     C.flag(C.once, "Skip checks"),
+    "direct",
+    C.flag(C.once, "Use the direct (plain JavaScript) code generator and runtime"),
     "no-spies",
     C.flag(C.once, "Disable printing of all `spy` statements"),
     "allow-shadow",
@@ -115,8 +117,20 @@ fun main(args :: List<String>) -> Number block:
       inline-case-body-limit = r.get-value("inline-case-body-limit")
       type-check = r.has-key("type-check")
       tail-calls = not(r.has-key("improper-tail-calls"))
-      compiled-dir = r.get-value("compiled-dir")
-      standalone-file = r.get-value("standalone-file")
+      direct = r.has-key("direct")
+      compiled-dir-raw = r.get-value("compiled-dir")
+      # Never share a compiled-module cache between the two codegen modes
+      compiled-dir = if direct and (compiled-dir-raw == "compiled"):
+        "compiled-direct"
+      else:
+        compiled-dir-raw
+      end
+      standalone-file-raw = r.get-value("standalone-file")
+      standalone-file = if direct and (standalone-file-raw == "src/js/base/handalone.js"):
+        "src/js/base/handalone-direct.js"
+      else:
+        standalone-file-raw
+      end
       add-profiling = r.has-key("profile")
       display-progress = not(r.has-key("no-display-progress"))
       html-file = if r.has-key("html-file"):
@@ -180,6 +194,7 @@ fun main(args :: List<String>) -> Number block:
           compile-opts.{
             this-pyret-dir: this-pyret-dir,
             standalone-file: standalone-file,
+            direct-codegen: direct,
             checks : checks,
             checks-format: checks-format,
             type-check : type-check,

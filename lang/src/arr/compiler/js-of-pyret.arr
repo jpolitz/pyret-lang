@@ -7,6 +7,7 @@ import pprint as PP
 
 import file("anf.arr") as N
 import file("anf-loop-compiler.arr") as AL
+import file("direct-codegen.arr") as DC
 import file("ast-util.arr") as AU
 import file("compile-structs.arr") as C
 import file("concat-lists.arr") as CL
@@ -80,10 +81,17 @@ end
 fun trace-make-compiled-pyret(add-phase, program-ast, env, post-env, provides, options)
   -> { C.Provides; C.CompileResult<CompiledCodePrinter> } block:
   anfed = add-phase("ANFed", N.anf-program(program-ast))
-  flatness-env = add-phase("Build flatness env", FL.make-prog-flatness-env(anfed, post-env, env))
-  flat-provides = add-phase("Get flat-provides", FL.get-flat-provides(provides, env, post-env, flatness-env, anfed))
-  compiled = anfed.visit(AL.splitting-compiler(env, add-phase, flatness-env, flat-provides, post-env, options))
-  {flat-provides; add-phase("Generated JS", C.ok(ccp-dict(compiled)))}
+  if options.direct-codegen block:
+    flatness-env = add-phase("Build flatness env", FL.make-prog-flatness-env(anfed, post-env, env))
+    flat-provides = add-phase("Get flat-provides", FL.get-flat-provides(provides, env, post-env, flatness-env, anfed))
+    compiled = DC.compile-program(anfed, env, post-env, flat-provides, options)
+    {flat-provides; add-phase("Generated JS (direct)", C.ok(ccp-dict(compiled)))}
+  else:
+    flatness-env = add-phase("Build flatness env", FL.make-prog-flatness-env(anfed, post-env, env))
+    flat-provides = add-phase("Get flat-provides", FL.get-flat-provides(provides, env, post-env, flatness-env, anfed))
+    compiled = anfed.visit(AL.splitting-compiler(env, add-phase, flatness-env, flat-provides, post-env, options))
+    {flat-provides; add-phase("Generated JS", C.ok(ccp-dict(compiled)))}
+  end
 end
 
 fun println(s) block:

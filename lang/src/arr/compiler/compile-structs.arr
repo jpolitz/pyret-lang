@@ -2955,6 +2955,7 @@ default-compile-options = {
   ignore-unbound: false,
   proper-tail-calls: true,
   inline-case-body-limit: 5,
+  direct-codegen: false,
   module-eval: true,
   user-annotations: true,
   runtime-annotations: true,
