@@ -72,6 +72,18 @@ define("pyret-base/js/runtime-direct",
       e.$isInternal = true;
       throw e;
     }
+    function checkArgAnn(v, ann) {
+      if (ann === null || ann === undefined || ann.name === "Any") { return; }
+      var pred = ann.pred;
+      if (typeof pred !== "function") { return; }
+      if (!pred(v)) {
+        // Numeric refinements report "Number" first for non-numbers
+        if (ann.name !== "Number" && ann.name.lastIndexOf("Num", 0) === 0 && !isNumber(v)) {
+          typeMismatch(v, "Number");
+        }
+        typeMismatch(v, ann.name);
+      }
+    }
     function checkNumAnn(v, pred, name) {
       if (!isNumber(v)) { typeMismatch(v, "Number"); }
       if (!pred(v)) { typeMismatch(v, name); }
@@ -441,7 +453,7 @@ define("pyret-base/js/runtime-direct",
       return res;
     }
     function makeBranderAnn(brander, name) {
-      return { $ann: true, name: name, brander: brander };
+      return { $ann: true, name: name, brander: brander, pred: brander.test };
     }
 
     // Generic _match method installed on every data prototype
@@ -1062,14 +1074,24 @@ define("pyret-base/js/runtime-direct",
       arr[i] = v;
       return arr;
     }
+    function checkArraySize(name, size) {
+      if (!(isNumber(size) && jsnums.isInteger(size))) { typeMismatch(size, "NumInteger"); }
+      if (!jsnums.isNonNegative(size)) { typeMismatch(size, "NumNonNegative"); }
+      if (jsnums.greaterThan(size, 4294967295, NumberErrbacks)) {
+        interr(name + ": cannot create array larger than 4294967295");
+      }
+    }
     function rawArrayOf(v, n) {
       if (arguments.length !== 2) { ae("raw-array-of", 2, arguments); }
+      checkNumber(n);
+      checkArraySize("raw-array-of", n);
       var len = jsnums.toFixnum(n, NumberErrbacks);
       var arr = new Array(len);
       for (var i = 0; i < len; i++) { arr[i] = v; }
       return arr;
     }
     function makeArrayN(n) {
+      checkArraySize("array", n);
       return new Array(jsnums.toFixnum(n, NumberErrbacks));
     }
     function rawArrayLength(arr) {
@@ -1079,6 +1101,8 @@ define("pyret-base/js/runtime-direct",
     }
     function rawArrayBuild(f, n) {
       if (arguments.length !== 2) { ae("raw-array-build", 2, arguments); }
+      checkFunction(f); checkNumber(n);
+      checkArraySize("raw-array-build", n);
       var len = jsnums.toFixnum(n, NumberErrbacks);
       var arr = new Array(len);
       for (var i = 0; i < len; i++) { arr[i] = f(i); }
@@ -1086,6 +1110,8 @@ define("pyret-base/js/runtime-direct",
     }
     function rawArrayBuildOpt(f, n) {
       if (arguments.length !== 2) { ae("raw-array-build-opt", 2, arguments); }
+      checkFunction(f); checkNumber(n);
+      checkArraySize("raw-array-build-opt", n);
       var len = jsnums.toFixnum(n, NumberErrbacks);
       var arr = [];
       for (var i = 0; i < len; i++) {
@@ -2212,14 +2238,24 @@ define("pyret-base/js/runtime-direct",
       hasParam: hasParam,
       getParamOrSetDefault: getParamOrSetDefault,
 
-      // Annotation machinery: all no-ops in direct mode (annotations are
-      // never checked), but the names must exist for shim'd js modules and
-      // post-load-hooks.
+      // Compiled-code annotation checks (.arr annotations) are skipped in
+      // direct mode, but the EXPLICIT argument contracts that builtin js
+      // modules request via checkArgsInternalN are enforced.
       "_checkAnn": function() { return true; },
-      checkArgsInternal1: function() {},
-      checkArgsInternal2: function() {},
-      checkArgsInternal3: function() {},
-      checkArgsInternalInline: function() {},
+      checkArgsInternal1: function(moduleName, funName, a1, ann1) {
+        checkArgAnn(a1, ann1);
+      },
+      checkArgsInternal2: function(moduleName, funName, a1, ann1, a2, ann2) {
+        checkArgAnn(a1, ann1); checkArgAnn(a2, ann2);
+      },
+      checkArgsInternal3: function(moduleName, funName, a1, ann1, a2, ann2, a3, ann3) {
+        checkArgAnn(a1, ann1); checkArgAnn(a2, ann2); checkArgAnn(a3, ann3);
+      },
+      checkArgsInternalInline: function(moduleName, funName) {
+        for (var i = 2; i + 1 < arguments.length; i += 2) {
+          checkArgAnn(arguments[i], arguments[i + 1]);
+        }
+      },
       makePrimAnn: function(name, pred) {
         thisRuntime[name] = { $ann: true, name: name, pred: pred };
       },
@@ -2303,12 +2339,32 @@ define("pyret-base/js/runtime-direct",
       "$outsideWorld": theOutsideWorld
     };
 
-    // Primitive annotation stubs (referenced by js modules through
-    // checkArgsInternal*, which is a no-op, so only existence matters)
-    ["Number", "String", "Boolean", "Function", "Object", "Method", "Nothing",
-     "RawArray", "List", "NumInteger", "NumRational", "NumPositive",
-     "NumNegative", "NumNonPositive", "NumNonNegative", "NumNatural",
-     "Roughnum", "Exactnum", "Tuple", "EqualityResult"].forEach(function(n) {
+    // Primitive annotations with real predicates, enforced by
+    // checkArgsInternal* (js-module argument contracts)
+    var primAnnPreds = {
+      "Number": isNumber,
+      "String": isString,
+      "Boolean": isBoolean,
+      "Function": function(v) { return typeof v === "function"; },
+      "Object": isObject,
+      "Method": isMethod,
+      "Nothing": isNothing,
+      "RawArray": isRawArray,
+      "Tuple": isPTuple,
+      "Exactnum": function(v) { return isNumber(v) && jsnums.isRational(v); },
+      "Roughnum": function(v) { return isNumber(v) && jsnums.isRoughnum(v); },
+      "NumInteger": function(v) { return isNumber(v) && jsnums.isInteger(v); },
+      "NumRational": function(v) { return isNumber(v) && jsnums.isRational(v); },
+      "NumPositive": function(v) { return isNumber(v) && jsnums.isPositive(v); },
+      "NumNegative": function(v) { return isNumber(v) && jsnums.isNegative(v); },
+      "NumNonPositive": function(v) { return isNumber(v) && jsnums.isNonPositive(v); },
+      "NumNonNegative": function(v) { return isNumber(v) && jsnums.isNonNegative(v); },
+      "NumNatural": function(v) { return isNumber(v) && jsnums.isInteger(v) && jsnums.isNonNegative(v); }
+    };
+    Object.keys(primAnnPreds).forEach(function(n) {
+      thisRuntime[n] = { $ann: true, name: n, pred: primAnnPreds[n] };
+    });
+    ["List", "EqualityResult"].forEach(function(n) {
       if (!(n in thisRuntime)) { thisRuntime[n] = { $ann: true, name: n }; }
     });
 
