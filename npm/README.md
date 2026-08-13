@@ -1,9 +1,8 @@
 NPM package for a command line interface of the Pyret programming language.
 
-When installing this package, the latest implementation for the Pyret compiler is
-cloned and built from the horizon branch. If any changes to the language
-are made, the package will clone and build from this newer version, allowing for
-any development for the CLI to be contained within this branch.
+The package ships a prebuilt compiler. `build.sh` builds `lang/` from this
+repository and stages `build/phaseA` into `pyret-lang/`, which is where
+`pyret.js` loads it from.
 
 After installing the package, you can run
 

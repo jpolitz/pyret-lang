@@ -1,6 +1,6 @@
 name: Test pyret-npm CLI
 
-on: 
+on:
   workflow_dispatch:
   push:
 
@@ -8,14 +8,18 @@ jobs:
   build-test-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: ./npm
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-      - run: npm ci
-      - run: npm run build
-      - run: npm test
+
+      - name: Build pyret-lang and stage the build that pyret.js loads
+        working-directory: ./npm
+        run: npm run build
+
+      - name: Test the CLI against that build
+        working-directory: ./npm
+        run: |
+          npm ci
+          npm test
