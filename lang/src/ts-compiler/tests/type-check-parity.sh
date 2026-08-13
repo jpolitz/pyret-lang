@@ -86,7 +86,8 @@ for prog in "${programs[@]}"; do
   # Existential-variable labels (?-N) are numbered by solve-loop iteration
   # order, which differs between the compilers (Pyret list-set vs TS Map) and
   # was deliberately left divergent -- see the "Solve-loop iteration order"
-  # entry in port-review-nonmechanical.md: gensym order in messages only,
+  # entry in port-review-nonmechanical.md (a port-era review note; it lives in
+  # the ts-port-archive tag, not in this tree): gensym order in messages only,
   # nothing type-checks differently. Canonicalize by order of first
   # appearance in each output; this still fails if the two outputs use
   # DIFFERENT equality patterns among their labels (e.g. `?-1 ... ?-1` in one
