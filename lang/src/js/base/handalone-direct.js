@@ -70,7 +70,7 @@ requirejs(["pyret-base/js/runtime-direct", "pyret-base/js/post-load-hooks", "pro
   }
 
   function renderErrorAndExit(e) {
-    var errVal = e.val;
+    var errVal = e.exn;
     process.stderr.write("The run ended in error:\n");
     try {
       var rendererrorMod = runtime.modules["builtin://render-error-display"];
@@ -115,9 +115,9 @@ requirejs(["pyret-base/js/runtime-direct", "pyret-base/js/post-load-hooks", "pro
     renderChecksAndExit(runtime.modules[main]);
   } catch(e) {
     if (runtime.isPyretException(e)) {
-      if (isExitValue(e.val)) {
-        var exitCode = runtime.jsnums.toFixnum(runtime.getField(e.val, "code"), runtime.NumberErrbacks);
-        if (e.val.$name === "exit") {
+      if (isExitValue(e.exn)) {
+        var exitCode = runtime.jsnums.toFixnum(runtime.getField(e.exn, "code"), runtime.NumberErrbacks);
+        if (e.exn.$name === "exit") {
           process.stdout.write("Exited with code " + String(exitCode) + "\n");
         }
         process.stdout.write("", function() { process.exit(exitCode); });

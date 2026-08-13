@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Pyret direct-mode compiler — in-browser demo</title>
+<style>
+  body { font-family: monospace; margin: 2em; }
+  pre { background: #f4f4f4; padding: 1em; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Pyret direct-mode compiler — in-browser demo</h1>
+<p>The compiler below was compiled with <code>-direct</code> (plain-JS codegen,
+no stack management) and is running in this page. It compiles in-memory
+programs in normal (stock) mode and renders static errors.</p>
+<pre id="out">loading…</pre>
+<script>
+  var outEl = document.getElementById("out");
+  var buf = "";
+  function log(s) { buf += s; outEl.textContent = buf; }
+  window.addEventListener("error", function(ev) {
+    log("\n[page error] " + ev.message + "\n");
+  });
+  // Browser shims for the standalone's node touchpoints
+  window.process = {
+    argv: ["browser", "driver"],
+    env: {},
+    stdout: { write: function(s, cb) { log(s); if (cb) { cb(); } return true; } },
+    stderr: { write: function(s, cb) { log(s); if (cb) { cb(); } return true; } },
+    stdin: {},
+    exit: function(code) { log("\n[exit " + (code || 0) + "]\n"); }
+  };
+  window.nodeRequire = function() { return {}; };
+  window.require = function(name) {
+    if (name === "util") { return { format: function(s) { return String(s); } }; }
+    return {};
+  };
+  window.require.resolve = function(name) { throw new Error("not a node module: " + name); };
+</script>
+<script>
+  log("");  // clear "loading…"
+</script>
+<script src="driver.jarr"></script>
+</body>
+</html>

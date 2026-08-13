@@ -35,7 +35,9 @@ define("pyret-base/js/runtime-direct",
     // Exceptions
 
     function PyretException(val) {
-      this.val = val;
+      // Field is named .exn to match the stock runtime's PyretFailException
+      // (shim'd js modules read e.exn)
+      this.exn = val;
       this.pyretStack = [];
       var e = new Error();
       this.stack = e.stack;
@@ -44,13 +46,16 @@ define("pyret-base/js/runtime-direct",
     PyretException.prototype.name = "PyretException";
     Object.defineProperty(PyretException.prototype, "message", {
       get: function() {
-        try { return toReprJS(this.val, "tostring"); }
-        catch(e) { return String(this.val); }
+        try { return toReprJS(this.exn, "tostring"); }
+        catch(e) { return String(this.exn); }
       },
       configurable: true
     });
 
     function raise(val) {
+      if (val === undefined && typeof process !== "undefined" && process.env.DIRECT_DEBUG) {
+        console.error("raise(undefined) at:", new Error().stack);
+      }
       throw new PyretException(val);
     }
     function isPyretException(e) { return e instanceof PyretException; }
@@ -983,8 +988,8 @@ define("pyret-base/js/runtime-direct",
     }
     function exnUnwrap(v) {
       if (arguments.length !== 1) { ae("exn-unwrap", 1, arguments); }
-      if (v instanceof Opaque && v.val instanceof PyretException) { return v.val.val; }
-      if (v instanceof PyretException) { return v.val; }
+      if (v instanceof Opaque && v.val instanceof PyretException) { return v.val.exn; }
+      if (v instanceof PyretException) { return v.exn; }
       return v;
     }
 
