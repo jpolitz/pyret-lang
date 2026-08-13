@@ -123,3 +123,32 @@ handalone-direct.js.
   (hello worklist and the full 33MB compiler jarr both cmp-equal).
 - 28/28 TS-port parity programs pass (static errors byte-for-byte too).
 - Run the direct-built compiler with node --stack-size=8192.
+
+## Results, continued (2026-08-13 late)
+
+- Suite-file parity: test-strings, -numbers, -rounding, -letrec, -cases,
+  -binops, -constructors, -refs, -output, -equality (6168 tests), -lists,
+  -sets, -string-dict, -json all byte-identical vs stock. Runtime errors are
+  real error.arr values (raised through the loaded ffi module).
+- checkArgsInternal* (js-module arg contracts) ARE enforced; .arr-level
+  annotations remain unchecked (the direct-mode design decision; equivalent
+  divergence class to stock's -no-runtime-annotations).
+- In-browser: direct-work/browser-demo/ — the direct-built compiler loads in
+  Chromium (verified headless via browser-test/browser-run-direct.js),
+  compiles in-memory programs to stock JS in-page, and renders static errors
+  (parse / wf / unbound) with CLI-identical text. Small-program compiles fit
+  the default browser stack; compiling large modules in-browser needs the
+  iterative-ANF rewrite (future work, same as the TS port needed).
+
+## Known deviations / future work
+
+- .arr annotation checks skipped (ann-failure programs error differently or
+  not at all). Option: flat-ann checking behind a flag.
+- Arity/field errors carry a dummy srcloc ("direct-mode") — variant and
+  message text match, locations don't.
+- Deep non-tail recursion needs node --stack-size=8192 (self-TCO covers
+  self-recursive tail loops). Browser-scale compiles need iterative rewrites
+  of the ANF spine (benefits both backends; preserves convergence since both
+  compile the same source).
+- fetch.js (url imports) and load-lib run paths (--run/repl) still pauseStack.
+- Tables/reactors/spies unimplemented in the direct runtime.
