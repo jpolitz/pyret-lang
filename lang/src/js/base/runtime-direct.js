@@ -628,27 +628,35 @@ define("pyret-base/js/runtime-direct",
       catch(e) { return "<value>"; }
     }
 
+    // Identical escaping to the stock runtime's replaceUnprintableStringChars
+    // (load-bearing: js-ast.arr serializes string literals via torepr, so the
+    // self-compiled compiler's output bytes depend on this)
     function quoteString(s) {
-      var res = "\"";
-      for (var i = 0; i < s.length; i++) {
-        var c = s.charAt(i);
-        var cc = s.charCodeAt(i);
-        switch (c) {
-          case "\"": res += "\\\""; break;
-          case "\\": res += "\\\\"; break;
-          case "\n": res += "\\n"; break;
-          case "\t": res += "\\t"; break;
-          case "\r": res += "\\r"; break;
-          default:
-            if (cc < 32) {
-              var hex = cc.toString(16);
-              res += "\\u" + ("0000" + hex).substr(-4);
-            } else {
-              res += c;
+      var ret = ['"'], i;
+      for (i = 0; i < s.length; i++) {
+        var val = s.charCodeAt(i);
+        switch(val) {
+        case 9: ret.push('\\t'); break;
+        case 10: ret.push('\\n'); break;
+        case 13: ret.push('\\r'); break;
+        case 34: ret.push('\\"'); break;
+        case 92: ret.push('\\\\'); break;
+        default:
+          if (val >= 32 && val <= 126) {
+            ret.push( s.charAt(i) );
+          }
+          else {
+            var numStr = val.toString(16).toUpperCase();
+            while (numStr.length < 4) {
+              numStr = '0' + numStr;
             }
+            ret.push('\\u' + numStr);
+          }
+          break;
         }
       }
-      return res + "\"";
+      ret.push('"');
+      return ret.join('');
     }
 
     function toReprJS(val, method) {
@@ -1882,6 +1890,19 @@ define("pyret-base/js/runtime-direct",
         };
       },
       pauseStack: pauseStack,
+      "await": function(p) {
+        if (p !== null && typeof p === "object" && p.$syncThen === true) {
+          if (p.isError) {
+            if (p.value instanceof PyretException) { throw p.value; }
+            interr("error in filesystem operation: " + String(p.value && p.value.message || p.value));
+          }
+          return p.value;
+        }
+        if (p !== null && typeof p === "object" && typeof p.then === "function") {
+          interr("await on an asynchronous value requires capturing the stack, which direct mode does not support");
+        }
+        return p;
+      },
       runThunk: runThunk,
       run: function(program, namespace_, options, onDone) {
         runThunk(function() { return program(thisRuntime, namespace_); }, onDone);
@@ -1964,6 +1985,31 @@ define("pyret-base/js/runtime-direct",
         for (var i = 0; i < a.length; i++) { f(a[i]); }
         return NOTHING;
       },
+
+      // odds and ends used by individual js trove modules
+      checkOpaque: function(v) {
+        if (!(v instanceof Opaque)) { interr("expected an internal value, got " + safeRepr(v)); }
+        return v;
+      },
+      EXN_STACKHEIGHT: 0,
+      GAS: 1e9,
+      RUNGAS: 1e9,
+      makeActivationRecord: function() { interr("makeActivationRecord is not supported in direct mode"); },
+      makeCont: function() { interr("makeCont is not supported in direct mode"); },
+      ReprMethods: {
+        "$cli": {},
+        "_torepr": {},
+        "_tostring": {},
+        createNewRenderer: function() { return {}; }
+      },
+      makeList: arrayToList,
+      makeMessageException: makeMessageException,
+      makeArray: function(arr) { return arr; },
+      printPyretStack: function(stack, noIndent) { return "  (no stack in direct mode)"; },
+      string_append: function(a, b) { return checkString(a) + checkString(b); },
+      stdout: function(s) { stdout(s); },
+      stderr: function(s) { stderr(s); },
+      stdin: theOutsideWorld.stdin,
 
       // introspection for handalone
       "$PyretException": PyretException,
