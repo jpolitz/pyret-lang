@@ -200,7 +200,7 @@ end
 
 fun arity-stmt(name :: String, n :: Number) -> J.JStmt:
   j-if1(j-binop(j-dot(ARGUMENTS, "length"), j-neq, j-num(n)),
-    j-block1(j-expr(rt("ae", [clist: j-str(name), j-num(n), j-dot(ARGUMENTS, "length")]))))
+    j-block1(j-expr(rt("ae", [clist: j-str(name), j-num(n), ARGUMENTS]))))
 end
 
 fun compile-ann(ctx, ann :: A.Ann) -> J.JExpr:

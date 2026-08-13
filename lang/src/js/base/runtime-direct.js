@@ -21,8 +21,8 @@
 // the stack in normal mode must error in direct mode).
 
 define("pyret-base/js/runtime-direct",
-  ["pyret-base/js/js-numbers", "pyret-base/js/codePoint"],
-  function(jsnums, codePoint) {
+  ["pyret-base/js/js-numbers", "pyret-base/js/codePoint", "seedrandom"],
+  function(jsnums, codePoint, seedrandom) {
 
   function makeRuntime(theOutsideWorld) {
     var stdout = theOutsideWorld.stdout;
@@ -55,13 +55,32 @@ define("pyret-base/js/runtime-direct",
     }
     function isPyretException(e) { return e instanceof PyretException; }
 
-    // Internal (non-user) errors.  These correspond to the runtime errors the
-    // stock runtime raises as error.arr values; in direct mode a descriptive
-    // message value is enough (erroring programs only need to error).
+    // Internal (non-user) errors.  Once the real ffi module (builtin://ffi)
+    // is installed by its post-load hook, errors are raised as genuine
+    // error.arr data values — matching stock behavior for `raises` tests and
+    // error rendering.  Before that (early linking), fall back to strings.
+    var DUMMY_LOC = ["direct-mode"];
+    function realFfi(name) {
+      var f = thisRuntime.ffi;
+      if (f && f.$isDirectStub !== true && typeof f[name] === "function") { return f[name]; }
+      return null;
+    }
     function interr(msg) {
+      var t = realFfi("throwMessageException");
+      if (t) { t(msg); }
       var e = new PyretException("Error: " + msg);
       e.$isInternal = true;
       throw e;
+    }
+    function checkNumAnn(v, pred, name) {
+      if (!isNumber(v)) { typeMismatch(v, "Number"); }
+      if (!pred(v)) { typeMismatch(v, name); }
+      return v;
+    }
+    function typeMismatch(val, typeName) {
+      var t = realFfi("throwTypeMismatch");
+      if (t) { t(val, typeName); }
+      interr("expected " + typeName + ", got " + safeRepr(val));
     }
 
     function ffiError(name /*, args */) {
@@ -129,39 +148,39 @@ define("pyret-base/js/runtime-direct",
     };
 
     function checkNumber(v) {
-      if (!isNumber(v)) { interr("expected a Number, got " + safeRepr(v)); }
+      if (!isNumber(v)) { typeMismatch(v, "Number"); }
       return v;
     }
     function checkString(v) {
-      if (typeof v !== "string") { interr("expected a String, got " + safeRepr(v)); }
+      if (typeof v !== "string") { typeMismatch(v, "String"); }
       return v;
     }
     function checkBoolean(v) {
-      if (v !== true && v !== false) { interr("expected a Boolean, got " + safeRepr(v)); }
+      if (v !== true && v !== false) { typeMismatch(v, "Boolean"); }
       return v;
     }
     function checkFunction(v) {
-      if (typeof v !== "function" || v.$m === true) { interr("expected a Function, got " + safeRepr(v)); }
+      if (typeof v !== "function" || v.$m === true) { typeMismatch(v, "Function"); }
       return v;
     }
     function checkArray(v) {
-      if (!isRawArray(v)) { interr("expected a RawArray, got " + safeRepr(v)); }
+      if (!isRawArray(v)) { typeMismatch(v, "RawArray"); }
       return v;
     }
     function checkTuple(v) {
-      if (!isPTuple(v)) { interr("expected a Tuple, got " + safeRepr(v)); }
+      if (!isPTuple(v)) { typeMismatch(v, "Tuple"); }
       return v;
     }
     function checkNothing(v) {
-      if (v !== NOTHING) { interr("expected Nothing, got " + safeRepr(v)); }
+      if (v !== NOTHING) { typeMismatch(v, "Nothing"); }
       return v;
     }
     function checkObject(v) {
-      if (!isObject(v)) { interr("expected an Object, got " + safeRepr(v)); }
+      if (!isObject(v)) { typeMismatch(v, "Object"); }
       return v;
     }
     function checkMethod(v) {
-      if (!isMethod(v)) { interr("expected a Method, got " + safeRepr(v)); }
+      if (!isMethod(v)) { typeMismatch(v, "Method"); }
       return v;
     }
     function checkPyretVal(v) { return v; }
@@ -198,6 +217,13 @@ define("pyret-base/js/runtime-direct",
     // Field access (generated-code hot path)
 
     function fieldNotFound(obj, field) {
+      if (obj === null || typeof obj !== "object") {
+        var tl = realFfi("throwLookupNonObject");
+        if (tl) { tl(makeSrcloc(DUMMY_LOC), obj, field); }
+      } else {
+        var t = realFfi("throwFieldNotFound");
+        if (t) { t(makeSrcloc(DUMMY_LOC), obj, field); }
+      }
       interr("field " + field + " not found on " + safeRepr(obj));
     }
 
@@ -233,13 +259,13 @@ define("pyret-base/js/runtime-direct",
       fieldNotFound(obj, field);
     }
 
-    // a-get-bang
+    // a-get-bang: derefs ref fields, returns non-ref fields as-is (stock
+    // getFieldRef semantics)
     function gb(obj, field) {
       var r = gc(obj, field);
-      if (r === null || r === undefined || r.$ref !== true) {
-        interr("field " + field + " is not a ref field");
-      }
-      return r.v;
+      if (r !== null && r !== undefined && r.$ref === true) { return r.v; }
+      if (typeof r === "function" && r.$m === true) { return bindMeth(obj, r); }
+      return r;
     }
 
     //////////////////////////////////////////////////////////////////////
@@ -281,13 +307,23 @@ define("pyret-base/js/runtime-direct",
 
     function ext(obj, fields) {
       if (obj === null || typeof obj !== "object") {
+        var t = realFfi("throwExtendNonObject");
+        if (t) { t(makeSrcloc(DUMMY_LOC), obj); }
         interr("cannot extend " + safeRepr(obj));
       }
       var res = Object.create(Object.getPrototypeOf(obj));
       var keys = Object.keys(obj);
       for (var i = 0; i < keys.length; i++) { res[keys[i]] = obj[keys[i]]; }
       var fkeys = Object.keys(fields);
-      for (var j = 0; j < fkeys.length; j++) { res[fkeys[j]] = fields[fkeys[j]]; }
+      for (var j = 0; j < fkeys.length; j++) {
+        var k = fkeys[j];
+        // Overriding an existing ref field via extension is an error (stock
+        // extendWith)
+        if ((k in obj) && isRef(obj[k])) {
+          interr("Cannot update ref field " + k);
+        }
+        res[k] = fields[k];
+      }
       return res;
     }
 
@@ -296,14 +332,28 @@ define("pyret-base/js/runtime-direct",
         interr("cannot update " + safeRepr(obj));
       }
       var fkeys = Object.keys(fields);
+      // Validate everything before mutating anything (updates are atomic)
       for (var i = 0; i < fkeys.length; i++) {
         var k = fkeys[i];
         var r = obj[k];
+        if (r === undefined && !(k in obj)) {
+          var tn = realFfi("throwUpdateNonExistentField");
+          if (tn) { tn(makeSrcloc(DUMMY_LOC), obj, makeSrcloc(DUMMY_LOC), k, makeSrcloc(DUMMY_LOC)); }
+          interr("update of non-existent field " + k);
+        }
         if (r === null || r === undefined || r.$ref !== true) {
+          var t = realFfi("throwUpdateNonRef");
+          if (t) { t(makeSrcloc(DUMMY_LOC), obj, makeSrcloc(DUMMY_LOC), k, makeSrcloc(DUMMY_LOC)); }
           interr("update of non-ref field " + k);
         }
-        if (r.frozen) { interr("update of frozen ref field " + k); }
-        r.v = fields[k];
+        if (r.frozen) {
+          var tf = realFfi("throwUpdateFrozenRef");
+          if (tf) { tf(makeSrcloc(DUMMY_LOC), obj, makeSrcloc(DUMMY_LOC), k, makeSrcloc(DUMMY_LOC)); }
+          interr("update of frozen ref field " + k);
+        }
+      }
+      for (var j = 0; j < fkeys.length; j++) {
+        obj[fkeys[j]].v = fields[fkeys[j]];
       }
       return obj;
     }
@@ -320,24 +370,37 @@ define("pyret-base/js/runtime-direct",
     //////////////////////////////////////////////////////////////////////
     // Data support
 
-    // cases field access: normal bind (derefs mutable fields)
+    // cases field access, normal bind: plain binding of a ref field is an
+    // error (mirrors stock derefField(value, fieldIsRef, lookupIsRef=false))
     function cf(v, i) {
       var f = v[v.$fields[i]];
-      return v.$muts[i] ? f.v : f;
+      if (v.$muts[i]) { interr("Cases on ref field needs to use ref"); }
+      return f;
     }
-    // cases field access: ref bind
+    // cases field access, ref bind: dereferences the ref
     function cr(v, i) {
-      if (!v.$muts[i]) { interr("cases ref binding of non-ref field"); }
-      return v[v.$fields[i]];
+      var f = v[v.$fields[i]];
+      if (!v.$muts[i]) { interr("Cannot use ref in cases to access non-ref field"); }
+      return f.v;
     }
     function cerr(v, branchName, wanted) {
+      var t = realFfi("throwCasesArityErrorC");
+      if (t) { t(DUMMY_LOC, wanted, (v.$fields ? v.$fields.length : 0), DUMMY_LOC, DUMMY_LOC); }
       interr("cases branch " + branchName + " expects " + wanted +
         " arguments, but the variant has " + (v.$fields ? v.$fields.length : 0) + " fields");
     }
-    function ae(name, expected, got) {
-      interr("arity mismatch calling " + name + ": expected " + expected + " arguments, got " + got);
+    function ae(name, expected, args) {
+      // args is the caller's `arguments` object (or a plain count)
+      if (typeof args !== "number") {
+        var t = realFfi("throwArityErrorC");
+        if (t) { t([name], expected, Array.prototype.slice.call(args), false); }
+        args = args.length;
+      }
+      interr("arity mismatch calling " + name + ": expected " + expected + " arguments, got " + args);
     }
     function uninit(name) {
+      var t = realFfi("throwUninitializedIdMkLoc");
+      if (t) { t(DUMMY_LOC, name); }
       interr("the identifier " + name + " was used before it was defined");
     }
 
@@ -348,11 +411,11 @@ define("pyret-base/js/runtime-direct",
         __proto__: null,
         _brand: key,
         test: function(v) {
-          if (arguments.length !== 1) { ae("brand-test", 1, arguments.length); }
+          if (arguments.length !== 1) { ae("brand-test", 1, arguments); }
           return hb(v, key);
         },
         brand: function(v) {
-          if (arguments.length !== 1) { ae("brand", 1, arguments.length); }
+          if (arguments.length !== 1) { ae("brand", 1, arguments); }
           return genericBrand(v, key);
         }
       };
@@ -436,14 +499,27 @@ define("pyret-base/js/runtime-direct",
       return lazyModVal("builtin://equality", "Unknown")(reason, v1, v2);
     }
 
-    function numEquals(l, r, tol, rel) {
+    // tolMode: "abs" | "rel" | "smooth" (stock TOL_IS_ABS/REL/SMOOTH)
+    function numEquals(l, r, tol, tolMode) {
       if (tol === undefined) {
         return jsnums.equals(l, r, NumberErrbacks);
-      } else if (rel) {
-        return jsnums.roughlyEqualsRel(l, r, tol, NumberErrbacks);
+      } else if (tolMode === "rel") {
+        return jsnums.roughlyEqualsRel(l, r, tol, false, NumberErrbacks);
+      } else if (tolMode === "smooth") {
+        return jsnums.roughlyEqualsRel(l, r, tol, true, NumberErrbacks);
       } else {
         return jsnums.roughlyEquals(l, r, tol, NumberErrbacks);
       }
+    }
+
+    function sameBrands(lb, rb) {
+      var lkeys = lb === undefined ? [] : Object.keys(lb);
+      var rkeys = rb === undefined ? [] : Object.keys(rb);
+      if (lkeys.length !== rkeys.length) { return false; }
+      for (var i = 0; i < lkeys.length; i++) {
+        if (rb[lkeys[i]] !== true) { return false; }
+      }
+      return true;
     }
 
     // Core structural equality.  now: deref refs / compare array contents.
@@ -465,17 +541,15 @@ define("pyret-base/js/runtime-direct",
         var l = pair[0];
         var r = pair[1];
         if (l === r && typeof l !== "number") {
-          if (typeof l === "function" && tol === undefined) {
-            // Functions are incomparable even to themselves for equal-always/now
-            return eqUnknown("Functions", l, r);
+          if (typeof l === "function") {
+            // Functions/methods are incomparable even to themselves
+            return eqUnknown(l.$m === true ? "Methods" : "Functions", l, r);
           }
-          if (typeof l === "function") { return eqUnknown("Functions", l, r); }
           continue;
         }
         if (isNumber(l) && isNumber(r)) {
-          var lRough = jsnums.isRoughnum(l);
-          var rRough = jsnums.isRoughnum(r);
-          if ((lRough || rRough) && tol === undefined) {
+          if (tol === undefined &&
+              (jsnums.isRoughnum(l) || jsnums.isRoughnum(r))) {
             return eqUnknown("Roughnums", l, r);
           }
           if (!numEquals(l, r, tol, rel)) { return eqNotEqual("Numbers", l, r); }
@@ -487,7 +561,9 @@ define("pyret-base/js/runtime-direct",
           continue;
         }
         if (typeof l === "function" || typeof r === "function") {
-          return eqUnknown("Functions", l, r);
+          if (isMethod(l) && isMethod(r)) { return eqUnknown("Methods", l, r); }
+          if (typeof l === "function" && typeof r === "function") { return eqUnknown("Functions", l, r); }
+          return eqNotEqual("Function", l, r);
         }
         if (l === NOTHING || r === NOTHING) {
           if (l !== r) { return eqNotEqual("Nothing", l, r); }
@@ -531,14 +607,23 @@ define("pyret-base/js/runtime-direct",
         if (seen(l, r)) { continue; }
         seenL.push(l); seenR.push(r);
 
-        // _equals override
+        // Brand sets must agree before any deeper comparison (stock equal3)
+        if (!sameBrands(l.$brands, r.$brands)) {
+          return eqNotEqual("Brands", l, r);
+        }
+
+        // _equals override (only after the brands agree)
         var eqMeth = l["_equals"];
         if (eqMeth !== undefined && typeof eqMeth === "function" && eqMeth.$m === true) {
           var recEq = function(a, b) {
             return equalCore(a, b, now, tol, rel);
           };
           var res = eqMeth.call(l, r, recEq);
-          if (isDataValue(res) && res.$name === "Equal") { continue; }
+          if (!(isDataValue(res) &&
+                (res.$name === "Equal" || res.$name === "NotEqual" || res.$name === "Unknown"))) {
+            typeMismatch(res, "EqualityResult");
+          }
+          if (res.$name === "Equal") { continue; }
           return res;
         }
 
@@ -570,51 +655,60 @@ define("pyret-base/js/runtime-direct",
     function eqResultToBool(res, l, r) {
       if (res.$name === "Equal") { return true; }
       if (res.$name === "NotEqual") { return false; }
+      var t = realFfi("throwEqualityException");
+      if (t) { t(g(res, "reason"), g(res, "value1"), g(res, "value2")); }
       interr("Attempted to compare incomparable values " + safeRepr(l) + " and " + safeRepr(r));
     }
 
     function equalAlways(l, r) {
-      if (arguments.length !== 2) { ae("equal-always", 2, arguments.length); }
-      return eqResultToBool(equalCore(l, r, false, undefined, false), l, r);
+      if (arguments.length !== 2) { ae("equal-always", 2, arguments); }
+      return eqResultToBool(equalCore(l, r, false, undefined, "abs"), l, r);
     }
-    function equalAlways3(l, r) { return equalCore(l, r, false, undefined, false); }
+    function equalAlways3(l, r) { return equalCore(l, r, false, undefined, "abs"); }
     function equalNow(l, r) {
-      if (arguments.length !== 2) { ae("equal-now", 2, arguments.length); }
-      return eqResultToBool(equalCore(l, r, true, undefined, false), l, r);
+      if (arguments.length !== 2) { ae("equal-now", 2, arguments); }
+      return eqResultToBool(equalCore(l, r, true, undefined, "abs"), l, r);
     }
-    function equalNow3(l, r) { return equalCore(l, r, true, undefined, false); }
+    function equalNow3(l, r) { return equalCore(l, r, true, undefined, "abs"); }
 
     function identical(l, r) {
-      if (arguments.length !== 2) { ae("identical", 2, arguments.length); }
+      if (arguments.length !== 2) { ae("identical", 2, arguments); }
       return eqResultToBool(identical3(l, r), l, r);
     }
     function identical3(l, r) {
+      if (isFunction(l) && isFunction(r)) { return eqUnknown("Functions", l, r); }
+      if (isMethod(l) && isMethod(r)) { return eqUnknown("Methods", l, r); }
       if (isNumber(l) && isNumber(r)) {
-        if (jsnums.isRoughnum(l) || jsnums.isRoughnum(r)) { return eqUnknown("Roughnums", l, r); }
+        var lRough = jsnums.isRoughnum(l);
+        var rRough = jsnums.isRoughnum(r);
+        if (lRough && rRough) { return eqUnknown("Roughnums", l, r); }
+        if (lRough || rRough) { return eqNotEqual("Numbers", l, r); }
         return jsnums.equals(l, r, NumberErrbacks) ? eqEqual() : eqNotEqual("Numbers", l, r);
       }
-      if (typeof l === "function" && typeof r === "function") { return eqUnknown("Functions", l, r); }
       return l === r ? eqEqual() : eqNotEqual("Values", l, r);
     }
 
     var ROUGH_TOL = jsnums.fromFixnum(0.000001, NumberErrbacks);
     function roughlyEqualAlways(l, r) {
-      return eqResultToBool(equalCore(l, r, false, ROUGH_TOL, true), l, r);
+      return eqResultToBool(equalCore(l, r, false, ROUGH_TOL, "smooth"), l, r);
     }
-    function roughlyEqualAlways3(l, r) { return equalCore(l, r, false, ROUGH_TOL, true); }
+    function roughlyEqualAlways3(l, r) { return equalCore(l, r, false, ROUGH_TOL, "smooth"); }
     function roughlyEqualNow(l, r) {
-      return eqResultToBool(equalCore(l, r, true, ROUGH_TOL, true), l, r);
+      return eqResultToBool(equalCore(l, r, true, ROUGH_TOL, "smooth"), l, r);
     }
-    function roughlyEqualNow3(l, r) { return equalCore(l, r, true, ROUGH_TOL, true); }
+    function roughlyEqualNow3(l, r) { return equalCore(l, r, true, ROUGH_TOL, "smooth"); }
 
-    function withinFam(now, rel, three) {
+    function withinFam(now, tolMode, three, checkNonNeg) {
       return function(tol) {
-        if (arguments.length !== 1) { ae("within", 1, arguments.length); }
-        checkNumber(tol);
-        if (jsnums.lessThan(tol, 0, NumberErrbacks)) { interr("negative tolerance"); }
+        if (arguments.length !== 1) { ae("within", 1, arguments); }
+        if (checkNonNeg === true) {
+          checkNumAnn(tol, function(v) { return jsnums.greaterThanOrEqual(v, 0, NumberErrbacks); }, "NumNonNegative");
+        } else {
+          checkNumber(tol);
+        }
         return function(l, r) {
-          if (arguments.length !== 2) { ae("within-pred", 2, arguments.length); }
-          var res = equalCore(l, r, now, tol, rel);
+          if (arguments.length !== 2) { ae("within-pred", 2, arguments); }
+          var res = equalCore(l, r, now, tol, tolMode);
           return three ? res : eqResultToBool(res, l, r);
         };
       };
@@ -662,6 +756,24 @@ define("pyret-base/js/runtime-direct",
     function toReprJS(val, method) {
       // method: "torepr" or "tostring" ("tostring" leaves top-level strings raw)
       var seen = [];
+      var cyclicCounters = { object: 1, ref: 1, array: 1 };
+      function findSeen(v) {
+        for (var i = 0; i < seen.length; i++) {
+          if (seen[i].v === v) { return seen[i]; }
+        }
+        return null;
+      }
+      function enter(v, type) {
+        var entry = findSeen(v);
+        if (entry !== null) {
+          if (entry.name === null) {
+            entry.name = "<cyclic-" + entry.type + "-" + (cyclicCounters[entry.type]++) + ">";
+          }
+          return entry;
+        }
+        seen.push({ v: v, name: null, type: type });
+        return null;
+      }
       function help(v, depth, mode) {
         if (typeof v === "string") {
           return (mode === "tostring" && depth === 0) ? v : quoteString(v);
@@ -672,14 +784,20 @@ define("pyret-base/js/runtime-direct",
         if (v === undefined) { return "undefined"; }
         if (v === null) { return "null"; }
         if (typeof v === "function") {
-          return v.$m === true ? "<method " + (v.$name || "") + ">" : "<function>";
+          return v.$m === true ? "<method>" : "<function>";
         }
         if (v instanceof Opaque) { return "<internal value>"; }
         if (isRef(v)) {
-          return "<ref>";
+          // bare refs render as ref(contents)
+          if (v.graphable === true && v.v === undefined) { return "<uninitialized-ref>"; }
+          var rhit = enter(v, "ref");
+          if (rhit !== null) { return rhit.name; }
+          try { return "ref(" + help(v.v, depth + 1, mode) + ")"; }
+          finally { seen.pop(); }
         }
-        if (seen.indexOf(v) !== -1) { return "<cyclic value>"; }
-        seen.push(v);
+        var type = Array.isArray(v) ? "array" : "object";
+        var hit = enter(v, type);
+        if (hit !== null) { return hit.name; }
         try {
           if (isPTuple(v)) {
             var tparts = [];
@@ -704,8 +822,17 @@ define("pyret-base/js/runtime-direct",
             }
             var dparts = [];
             for (var k = 0; k < fields.length; k++) {
-              var fv = v.$muts[k] ? v[fields[k]].v : v[fields[k]];
-              dparts.push(help(fv, depth + 1, mode));
+              var fv = v[fields[k]];
+              if (v.$muts[k]) {
+                // mutable data fields render dereferenced (no ref(...)
+                // wrapper) but still participate in ref cycle detection
+                var mhit = enter(fv, "ref");
+                if (mhit !== null) { dparts.push(mhit.name); continue; }
+                try { dparts.push(help(fv.v, depth + 1, mode)); }
+                finally { seen.pop(); }
+              } else {
+                dparts.push(help(fv, depth + 1, mode));
+              }
             }
             return v.$name + "(" + dparts.join(", ") + ")";
           }
@@ -725,7 +852,9 @@ define("pyret-base/js/runtime-direct",
         // Items/args of skeleton nodes are themselves ValueSkeletons
         switch (sk.$name) {
           case "vs-str": return sk[sk.$fields[0]];
-          case "vs-value": return help(sk[sk.$fields[0]], depth + 1, mode);
+          // depth is preserved: a top-level value's _output -> vs-value(str)
+          // still renders the string raw under tostring
+          case "vs-value": return help(sk[sk.$fields[0]], depth, mode);
           case "vs-collection": {
             var name = sk[sk.$fields[0]];
             var items = listToArray(sk[sk.$fields[1]]);
@@ -765,11 +894,11 @@ define("pyret-base/js/runtime-direct",
     }
 
     function torepr(v) {
-      if (arguments.length !== 1) { ae("torepr", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("torepr", 1, arguments); }
       return toReprJS(v, "torepr");
     }
     function tostring(v) {
-      if (arguments.length !== 1) { ae("tostring", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("tostring", 1, arguments); }
       return toReprJS(v, "tostring");
     }
 
@@ -781,7 +910,7 @@ define("pyret-base/js/runtime-direct",
       var cur = l;
       while (true) {
         if (cur.$name === "empty") { return arr; }
-        if (cur.$name !== "link") { interr("expected a list, got " + safeRepr(l)); }
+        if (cur === null || cur === undefined || cur.$name !== "link") { typeMismatch(l, "List"); }
         arr.push(cur.first);
         cur = cur.rest;
       }
@@ -803,22 +932,22 @@ define("pyret-base/js/runtime-direct",
       return typeof v === "string" ? v : toReprJS(v, "tostring");
     }
     function print(v) {
-      if (arguments.length !== 1) { ae("print", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("print", 1, arguments); }
       stdout(displayToString(v));
       return v;
     }
     function display(v) {
-      if (arguments.length !== 1) { ae("display", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("display", 1, arguments); }
       stdout(displayToString(v));
       return v;
     }
     function printError(v) {
-      if (arguments.length !== 1) { ae("print-error", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("print-error", 1, arguments); }
       stderr(displayToString(v));
       return v;
     }
     function displayError(v) {
-      if (arguments.length !== 1) { ae("display-error", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("display-error", 1, arguments); }
       stderr(displayToString(v));
       return v;
     }
@@ -827,7 +956,7 @@ define("pyret-base/js/runtime-direct",
     // run-task & exceptions to user code
 
     function execThunk(thunk) {
-      if (arguments.length !== 1) { ae("run-task", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("run-task", 1, arguments); }
       try {
         var v = thunk();
         return lazyModVal("builtin://either", "left")(v);
@@ -841,7 +970,7 @@ define("pyret-base/js/runtime-direct",
       }
     }
     function exnUnwrap(v) {
-      if (arguments.length !== 1) { ae("exn-unwrap", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("exn-unwrap", 1, arguments); }
       if (v instanceof Opaque && v.val instanceof PyretException) { return v.val.val; }
       if (v instanceof PyretException) { return v.val; }
       return v;
@@ -851,75 +980,90 @@ define("pyret-base/js/runtime-direct",
     // Binary operators (globals _plus etc.)
 
     function hasMeth(v, name) {
-      return v !== null && typeof v === "object" && typeof v[name] === "function" && v[name].$m === true;
+      return isObject(v) && typeof v[name] === "function" && v[name].$m === true;
     }
-    function numBinop(l, r, f, name) {
+    function binopErr(l, r, opname, opdesc, methodname, numString) {
+      var t = realFfi(numString ? "throwNumStringBinopError" : "throwNumericBinopError");
+      if (t) { t(l, r, opname, opdesc, methodname); }
+      interr("invalid operands " + safeRepr(l) + ", " + safeRepr(r) + " for " + opname);
+    }
+    function numBinop(l, r, f, opname, opdesc, methodname) {
       if (isNumber(l) && isNumber(r)) { return f(l, r, NumberErrbacks); }
-      if (hasMeth(l, name)) { return l[name](r); }
-      interr("invalid operands " + safeRepr(l) + ", " + safeRepr(r) + " for " + name);
+      if (hasMeth(l, methodname)) { return l[methodname](r); }
+      binopErr(l, r, opname, opdesc, methodname, false);
     }
     function _plus(l, r) {
-      if (arguments.length !== 2) { ae("_plus", 2, arguments.length); }
+      if (arguments.length !== 2) { ae("_plus", 2, arguments); }
       if (typeof l === "string" && typeof r === "string") { return l + r; }
       if (isNumber(l) && isNumber(r)) { return jsnums.add(l, r, NumberErrbacks); }
       if (hasMeth(l, "_plus")) { return l["_plus"](r); }
-      interr("invalid operands " + safeRepr(l) + ", " + safeRepr(r) + " for +");
+      binopErr(l, r, "+", "Plus", "_plus", true);
     }
     function _minus(l, r) {
-      if (arguments.length !== 2) { ae("_minus", 2, arguments.length); }
-      return numBinop(l, r, jsnums.subtract, "_minus");
+      if (arguments.length !== 2) { ae("_minus", 2, arguments); }
+      return numBinop(l, r, jsnums.subtract, "-", "Minus", "_minus");
     }
     function _times(l, r) {
-      if (arguments.length !== 2) { ae("_times", 2, arguments.length); }
-      return numBinop(l, r, jsnums.multiply, "_times");
+      if (arguments.length !== 2) { ae("_times", 2, arguments); }
+      return numBinop(l, r, jsnums.multiply, "*", "Times", "_times");
     }
     function _divide(l, r) {
-      if (arguments.length !== 2) { ae("_divide", 2, arguments.length); }
-      return numBinop(l, r, jsnums.divide, "_divide");
+      if (arguments.length !== 2) { ae("_divide", 2, arguments); }
+      return numBinop(l, r, jsnums.divide, "/", "Divide", "_divide");
     }
-    function cmpBinop(l, r, numF, strF, name) {
+    function cmpBinop(l, r, numF, strF, opname, opdesc, methodname) {
       if (isNumber(l) && isNumber(r)) { return numF(l, r, NumberErrbacks); }
       if (typeof l === "string" && typeof r === "string") { return strF(l, r); }
-      if (hasMeth(l, name)) { return l[name](r); }
-      interr("invalid operands " + safeRepr(l) + ", " + safeRepr(r) + " for " + name);
+      if (hasMeth(l, methodname)) { return l[methodname](r); }
+      binopErr(l, r, opname, opdesc, methodname, true);
     }
     function _lessthan(l, r) {
-      if (arguments.length !== 2) { ae("_lessthan", 2, arguments.length); }
-      return cmpBinop(l, r, jsnums.lessThan, function(a, b) { return a < b; }, "_lessthan");
+      if (arguments.length !== 2) { ae("_lessthan", 2, arguments); }
+      return cmpBinop(l, r, jsnums.lessThan, function(a, b) { return a < b; }, "<", "Less-than", "_lessthan");
     }
     function _lessequal(l, r) {
-      if (arguments.length !== 2) { ae("_lessequal", 2, arguments.length); }
-      return cmpBinop(l, r, jsnums.lessThanOrEqual, function(a, b) { return a <= b; }, "_lessequal");
+      if (arguments.length !== 2) { ae("_lessequal", 2, arguments); }
+      return cmpBinop(l, r, jsnums.lessThanOrEqual, function(a, b) { return a <= b; }, "<=", "Less-than-or-equal", "_lessequal");
     }
     function _greaterthan(l, r) {
-      if (arguments.length !== 2) { ae("_greaterthan", 2, arguments.length); }
-      return cmpBinop(l, r, jsnums.greaterThan, function(a, b) { return a > b; }, "_greaterthan");
+      if (arguments.length !== 2) { ae("_greaterthan", 2, arguments); }
+      return cmpBinop(l, r, jsnums.greaterThan, function(a, b) { return a > b; }, ">", "Greater-than", "_greaterthan");
     }
     function _greaterequal(l, r) {
-      if (arguments.length !== 2) { ae("_greaterequal", 2, arguments.length); }
-      return cmpBinop(l, r, jsnums.greaterThanOrEqual, function(a, b) { return a >= b; }, "_greaterequal");
+      if (arguments.length !== 2) { ae("_greaterequal", 2, arguments); }
+      return cmpBinop(l, r, jsnums.greaterThanOrEqual, function(a, b) { return a >= b; }, ">=", "Greater-than-or-equal", "_greaterequal");
     }
 
     //////////////////////////////////////////////////////////////////////
     // Raw arrays
 
+    // Mirrors stock checkArrayIndex: reason order is too-large, negative,
+    // non-integer
+    function checkArrayIndex(methodName, arr, ix) {
+      var reason;
+      if (ix >= arr.length) { reason = "is too large; the array length is " + arr.length; }
+      else if (ix < 0) { reason = "is a negative number."; }
+      else if (!(typeof ix === "number" ? Math.floor(ix) === ix : jsnums.isInteger(ix))) { reason = "is not an integer."; }
+      else { return; }
+      var t = realFfi("throwInvalidArrayIndex");
+      if (t) { t(methodName, arr, ix, reason); }
+      interr(methodName + ": index " + ix + " " + reason);
+    }
     function rawArrayGet(arr, i) {
-      if (arguments.length !== 2) { ae("raw-array-get", 2, arguments.length); }
-      checkArray(arr);
-      var ix = jsnums.toFixnum(i, NumberErrbacks);
-      if (ix < 0 || ix >= arr.length) { interr("raw-array-get index " + ix + " out of bounds " + arr.length); }
-      return arr[ix];
+      if (arguments.length !== 2) { ae("raw-array-get", 2, arguments); }
+      checkArray(arr); checkNumber(i);
+      checkArrayIndex("raw-array-get", arr, i);
+      return arr[i];
     }
     function rawArraySet(arr, i, v) {
-      if (arguments.length !== 3) { ae("raw-array-set", 3, arguments.length); }
-      checkArray(arr);
-      var ix = jsnums.toFixnum(i, NumberErrbacks);
-      if (ix < 0 || ix >= arr.length) { interr("raw-array-set index " + ix + " out of bounds " + arr.length); }
-      arr[ix] = v;
+      if (arguments.length !== 3) { ae("raw-array-set", 3, arguments); }
+      checkArray(arr); checkNumber(i);
+      checkArrayIndex("raw-array-set", arr, i);
+      arr[i] = v;
       return arr;
     }
     function rawArrayOf(v, n) {
-      if (arguments.length !== 2) { ae("raw-array-of", 2, arguments.length); }
+      if (arguments.length !== 2) { ae("raw-array-of", 2, arguments); }
       var len = jsnums.toFixnum(n, NumberErrbacks);
       var arr = new Array(len);
       for (var i = 0; i < len; i++) { arr[i] = v; }
@@ -929,19 +1073,19 @@ define("pyret-base/js/runtime-direct",
       return new Array(jsnums.toFixnum(n, NumberErrbacks));
     }
     function rawArrayLength(arr) {
-      if (arguments.length !== 1) { ae("raw-array-length", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("raw-array-length", 1, arguments); }
       checkArray(arr);
       return arr.length;
     }
     function rawArrayBuild(f, n) {
-      if (arguments.length !== 2) { ae("raw-array-build", 2, arguments.length); }
+      if (arguments.length !== 2) { ae("raw-array-build", 2, arguments); }
       var len = jsnums.toFixnum(n, NumberErrbacks);
       var arr = new Array(len);
       for (var i = 0; i < len; i++) { arr[i] = f(i); }
       return arr;
     }
     function rawArrayBuildOpt(f, n) {
-      if (arguments.length !== 2) { ae("raw-array-build-opt", 2, arguments.length); }
+      if (arguments.length !== 2) { ae("raw-array-build-opt", 2, arguments); }
       var len = jsnums.toFixnum(n, NumberErrbacks);
       var arr = [];
       for (var i = 0; i < len; i++) {
@@ -951,49 +1095,74 @@ define("pyret-base/js/runtime-direct",
       return arr;
     }
     function rawArrayConcat(a, b) {
-      if (arguments.length !== 2) { ae("raw-array-concat", 2, arguments.length); }
+      if (arguments.length !== 2) { ae("raw-array-concat", 2, arguments); }
       checkArray(a); checkArray(b);
       return a.concat(b);
     }
     function rawArrayDuplicate(a) {
-      if (arguments.length !== 1) { ae("raw-array-duplicate", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("raw-array-duplicate", 1, arguments); }
       checkArray(a);
       return a.slice();
     }
     function rawArrayToList(a) {
-      if (arguments.length !== 1) { ae("raw-array-to-list", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("raw-array-to-list", 1, arguments); }
       checkArray(a);
       return arrayToList(a);
     }
     function rawArrayFromList(l) {
-      if (arguments.length !== 1) { ae("raw-array-from-list", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("raw-array-from-list", 1, arguments); }
       return listToArray(l);
     }
     function rawArrayMap(f, a) {
-      if (arguments.length !== 2) { ae("raw-array-map", 2, arguments.length); }
+      if (arguments.length !== 2) { ae("raw-array-map", 2, arguments); }
+      checkFunction(f); checkArray(a);
       var res = new Array(a.length);
       for (var i = 0; i < a.length; i++) { res[i] = f(a[i]); }
       return res;
     }
+    function rawArrayMap1(f1, f, a) {
+      if (arguments.length !== 3) { ae("raw-array-map1", 3, arguments); }
+      checkFunction(f1); checkFunction(f); checkArray(a);
+      var res = new Array(a.length);
+      for (var i = 0; i < a.length; i++) { res[i] = (i === 0 ? f1 : f)(a[i]); }
+      return res;
+    }
     function rawArrayFilter(f, a) {
-      if (arguments.length !== 2) { ae("raw-array-filter", 2, arguments.length); }
+      if (arguments.length !== 2) { ae("raw-array-filter", 2, arguments); }
+      checkFunction(f); checkArray(a);
       var res = [];
-      for (var i = 0; i < a.length; i++) { if (f(a[i]) === true) { res.push(a[i]); } }
+      for (var i = 0; i < a.length; i++) {
+        var keep = f(a[i]);
+        if (keep !== true && keep !== false) {
+          var t = realFfi("throwNonBooleanCondition");
+          if (t) { t(["raw-array-filter"], "Boolean", keep); }
+          interr("expected a Boolean from the filter function, got " + safeRepr(keep));
+        }
+        if (keep === true) { res.push(a[i]); }
+      }
       return res;
     }
     function rawArrayFold(f, init, a, start) {
-      if (arguments.length !== 4) { ae("raw-array-fold", 4, arguments.length); }
+      if (arguments.length !== 4) { ae("raw-array-fold", 4, arguments); }
+      // `start` is an OFFSET added to the reported index; the whole array is
+      // always folded (stock semantics)
       var acc = init;
       var st = jsnums.toFixnum(start, NumberErrbacks);
-      for (var i = st; i < a.length; i++) { acc = f(acc, a[i], i); }
+      for (var i = 0; i < a.length; i++) { acc = f(acc, a[i], i + st); }
       return acc;
     }
-    function rawArrayAndMapi(f, a) {
-      for (var i = 0; i < a.length; i++) { if (f(a[i], i) !== true) { return false; } }
+    function rawArrayAndMapi(f, a, start) {
+      if (arguments.length !== 3) { ae("raw-array-and-mapi", 3, arguments); }
+      for (var i = jsnums.toFixnum(start, NumberErrbacks); i < a.length; i++) {
+        if (f(a[i], i) === false) { return false; }
+      }
       return true;
     }
-    function rawArrayOrMapi(f, a) {
-      for (var i = 0; i < a.length; i++) { if (f(a[i], i) === true) { return true; } }
+    function rawArrayOrMapi(f, a, start) {
+      if (arguments.length !== 3) { ae("raw-array-or-mapi", 3, arguments); }
+      for (var i = jsnums.toFixnum(start, NumberErrbacks); i < a.length; i++) {
+        if (f(a[i], i) === true) { return true; }
+      }
       return false;
     }
     function rawArrayJoinStr(a, sep) {
@@ -1001,19 +1170,22 @@ define("pyret-base/js/runtime-direct",
       for (var i = 0; i < a.length; i++) { parts.push(checkString(a[i])); }
       return parts.join(sep);
     }
+    function numSortComp(asc) {
+      return asc === true ?
+        function(a, b) { return jsnums.lessThan(a, b, NumberErrbacks) ? -1 : (jsnums.roughlyEquals(a, b, 0, NumberErrbacks) ? 0 : 1); } :
+        function(a, b) { return jsnums.greaterThan(a, b, NumberErrbacks) ? -1 : (jsnums.roughlyEquals(a, b, 0, NumberErrbacks) ? 0 : 1); };
+    }
     function rawArraySortNums(arr, asc) {
-      var comp = asc === true ?
-        function(a, b) { return jsnums.lessThan(a, b, NumberErrbacks) ? -1 : (jsnums.equals(a, b, NumberErrbacks) ? 0 : 1); } :
-        function(a, b) { return jsnums.lessThan(a, b, NumberErrbacks) ? 1 : (jsnums.equals(a, b, NumberErrbacks) ? 0 : -1); };
-      arr.sort(comp);
+      checkArray(arr); checkBoolean(asc);
+      arr.sort(numSortComp(asc));
       return arr;
     }
     function rawArraySortBy(arr, key, asc) {
-      var mapped = arr.map(function(v) { return { v: v, k: key(v) }; });
-      var comp = asc === true ?
-        function(a, b) { return jsnums.lessThan(a.k, b.k, NumberErrbacks) ? -1 : (jsnums.equals(a.k, b.k, NumberErrbacks) ? 0 : 1); } :
-        function(a, b) { return jsnums.lessThan(a.k, b.k, NumberErrbacks) ? 1 : (jsnums.equals(a.k, b.k, NumberErrbacks) ? 0 : -1); };
-      mapped.sort(comp);
+      checkArray(arr); checkFunction(key); checkBoolean(asc);
+      var keys = rawArrayMap(key, arr);
+      var mapped = arr.map(function(v, i) { return { v: v, k: keys[i] }; });
+      var comp = numSortComp(asc);
+      mapped.sort(function(a, b) { return comp(a.k, b.k); });
       return mapped.map(function(p) { return p.v; });
     }
     function rawEachLoop(f, start, stop) {
@@ -1048,7 +1220,7 @@ define("pyret-base/js/runtime-direct",
     // Strings
 
     function stringToNumber(s) {
-      if (arguments.length !== 1) { ae("string-to-number", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("string-to-number", 1, arguments); }
       checkString(s);
       var res = jsnums.fromString(s, NumberErrbacks);
       if (res === false || res === undefined) {
@@ -1056,24 +1228,62 @@ define("pyret-base/js/runtime-direct",
       }
       return lazyModVal("builtin://option", "some")(res);
     }
-    function stringExplode(s) {
+    function stringToNumberOrNothing(s) {
+      if (arguments.length !== 1) { ae("string-tonumber", 1, arguments); }
       checkString(s);
-      var arr = [];
-      // by code point, matching stock behavior
-      for (var v of s) { arr.push(v); }
-      return arrayToList(arr);
+      var res = jsnums.fromString(s, NumberErrbacks);
+      if (res === false || res === undefined) { return NOTHING; }
+      return res;
+    }
+    function stringExplode(s) {
+      if (arguments.length !== 1) { ae("string-explode", 1, arguments); }
+      checkString(s);
+      // per UTF-16 code unit, matching stock s.split("")
+      return arrayToList(s.split(""));
+    }
+    function stringToCodePoint(s) {
+      if (arguments.length !== 1) { ae("string-to-code-point", 1, arguments); }
+      checkString(s);
+      if (s.length !== 1) {
+        interr("Expected a string of length exactly one, got " + s);
+      }
+      return s.charCodeAt(0);
+    }
+    function stringFromCodePoint(c) {
+      if (arguments.length !== 1) { ae("string-from-code-point", 1, arguments); }
+      if (!(isNumber(c) && jsnums.isInteger(c) && jsnums.greaterThanOrEqual(c, 0, NumberErrbacks))) {
+        typeMismatch(c, "Natural Number");
+      }
+      var cc = jsnums.toFixnum(c, NumberErrbacks);
+      if (cc > 65535) { interr("Invalid code point: " + cc); }
+      try {
+        var res = String.fromCodePoint(cc);
+        if (typeof res !== "string") { interr("Invalid code point: " + cc); }
+        return res;
+      } catch(e) {
+        interr("Invalid code point: " + cc);
+      }
     }
     function stringToCodePoints(s) {
+      if (arguments.length !== 1) { ae("string-to-code-points", 1, arguments); }
       checkString(s);
       var arr = [];
-      for (var v of s) { arr.push(v.codePointAt(0)); }
+      // per code unit (stock calls string_to_code_point on each unit)
+      for (var i = 0; i < s.length; i++) { arr.push(s.charCodeAt(i)); }
       return arrayToList(arr);
     }
 
-    var gensymCounter = 0;
+    var gensymCounter = Math.floor(Math.random() * 1000);
     function gensym(base) {
       checkString(base);
-      return base + String(++gensymCounter);
+      return base + String(gensymCounter++);
+    }
+
+    var rng = seedrandom("ahoy, world!");
+    function numRandom(max) {
+      if (arguments.length !== 1) { ae("num-random", 1, arguments); }
+      checkNumber(max);
+      return Math.floor(jsnums.toFixnum(max, NumberErrbacks) * rng());
     }
 
     //////////////////////////////////////////////////////////////////////
@@ -1185,6 +1395,7 @@ define("pyret-base/js/runtime-direct",
     }
 
     var ffi = {
+      $isDirectStub: true,
       throwMessageException: throwMessageException,
       makeMessageException: makeMessageException,
       checkArity: checkArity,
@@ -1279,21 +1490,21 @@ define("pyret-base/js/runtime-direct",
     // The global module
 
     function notPyret(b) {
-      if (arguments.length !== 1) { ae("not", 1, arguments.length); }
+      if (arguments.length !== 1) { ae("not", 1, arguments); }
       checkBoolean(b);
       return !b;
     }
 
     function numUnop(f, name) {
       return function(n) {
-        if (arguments.length !== 1) { ae(name, 1, arguments.length); }
+        if (arguments.length !== 1) { ae(name, 1, arguments); }
         checkNumber(n);
         return f(n, NumberErrbacks);
       };
     }
     function numBinop2(f, name) {
       return function(a, b) {
-        if (arguments.length !== 2) { ae(name, 2, arguments.length); }
+        if (arguments.length !== 2) { ae(name, 2, arguments); }
         checkNumber(a); checkNumber(b);
         return f(a, b, NumberErrbacks);
       };
@@ -1301,9 +1512,28 @@ define("pyret-base/js/runtime-direct",
 
     function strUnop(f, name) {
       return function(s) {
-        if (arguments.length !== 1) { ae(name, 1, arguments.length); }
+        if (arguments.length !== 1) { ae(name, 1, arguments); }
         checkString(s);
         return f(s);
+      };
+    }
+
+    function numDigits(base, name) {
+      return function(n, digits) {
+        if (arguments.length !== 2) { ae(name, 2, arguments); }
+        checkNumber(n);
+        checkNumAnn(digits, function(v) { return jsnums.isInteger(v); }, "NumInteger");
+        var tenX = jsnums.expt(10, digits, NumberErrbacks);
+        return jsnums.divide(base(jsnums.multiply(n, tenX, NumberErrbacks), NumberErrbacks), tenX, NumberErrbacks);
+      };
+    }
+    function numPlace(base, name) {
+      return function(n, place) {
+        if (arguments.length !== 2) { ae(name, 2, arguments); }
+        checkNumber(n);
+        checkNumAnn(place, function(v) { return jsnums.isInteger(v); }, "NumInteger");
+        var tenX = jsnums.expt(10, place, NumberErrbacks);
+        return jsnums.multiply(base(jsnums.divide(n, tenX, NumberErrbacks), NumberErrbacks), tenX, NumberErrbacks);
       };
     }
 
@@ -1328,7 +1558,7 @@ define("pyret-base/js/runtime-direct",
       "print-error": printError,
       "display-error": displayError,
       "raise": function(v) {
-        if (arguments.length !== 1) { ae("raise", 1, arguments.length); }
+        if (arguments.length !== 1) { ae("raise", 1, arguments); }
         raise(v);
       },
       "run-task": execThunk,
@@ -1362,7 +1592,7 @@ define("pyret-base/js/runtime-direct",
           return g(obj, "get-value")(key);
         },
         "raw-list-join-str-last": function(lst, sep, lastSep) {
-          if (arguments.length !== 3) { ae("raw-list-join-str-last", 3, arguments.length); }
+          if (arguments.length !== 3) { ae("raw-list-join-str-last", 3, arguments); }
           var arr = listToArray(lst).map(function(v) { return toReprJS(v, "tostring"); });
           if (arr.length <= 1) { return arr.join(sep); }
           var lastElem = arr.pop();
@@ -1378,8 +1608,8 @@ define("pyret-base/js/runtime-direct",
         "as-loader-option": function() { interr("loader options are not supported in direct mode"); },
         "raw-make-row": function(arr) { interr("tables are not supported in direct mode"); },
         "___debug": function() { return NOTHING; },
-        "within-rel3": withinFam(false, true, true),
-        "within3": withinFam(false, true, true),
+        "within-rel3": withinFam(false, "rel", true),
+        "within3": withinFam(false, "smooth", true),
         "raw-array-to-list": rawArrayToList,
         "raw-array-from-list": rawArrayFromList,
         "raw-array-join-str": function(a) { return rawArrayJoinStr(a, ""); },
@@ -1408,7 +1638,7 @@ define("pyret-base/js/runtime-direct",
       "raw-array-and-mapi": rawArrayAndMapi,
       "raw-array-or-mapi": rawArrayOrMapi,
       "raw-array-map": rawArrayMap,
-      "raw-array-map-1": rawArrayMap,
+      "raw-array-map-1": rawArrayMap1,
       "raw-array-fold": rawArrayFold,
       "raw-array-duplicate": rawArrayDuplicate,
       "raw-array-concat": rawArrayConcat,
@@ -1435,18 +1665,18 @@ define("pyret-base/js/runtime-direct",
       "equal-always": equalAlways,
       "equal-now": equalNow,
       "identical": identical,
-      "within": withinFam(false, true, false),
-      "within-abs": withinFam(false, false, false),
-      "within-rel": withinFam(false, true, false),
-      "within-now": withinFam(true, true, false),
-      "within-abs-now": withinFam(true, false, false),
-      "within-rel-now": withinFam(true, true, false),
-      "within3": withinFam(false, true, true),
-      "within-abs3": withinFam(false, false, true),
-      "within-rel3": withinFam(false, true, true),
-      "within-now3": withinFam(true, true, true),
-      "within-abs-now3": withinFam(true, false, true),
-      "within-rel-now3": withinFam(true, true, true),
+      "within": withinFam(false, "smooth", false),
+      "within-abs": withinFam(false, "abs", false),
+      "within-rel": withinFam(false, "rel", false),
+      "within-now": withinFam(true, "smooth", false),
+      "within-abs-now": withinFam(true, "abs", false, true),
+      "within-rel-now": withinFam(true, "rel", false),
+      "within3": withinFam(false, "smooth", true),
+      "within-abs3": withinFam(false, "abs", true, true),
+      "within-rel3": withinFam(false, "rel", true),
+      "within-now3": withinFam(true, "smooth", true),
+      "within-abs-now3": withinFam(true, "abs", true, true),
+      "within-rel-now3": withinFam(true, "rel", true),
 
       "num-is-fixnum": function(n) { checkNumber(n); return typeof n === "number" && Math.floor(n) === n; },
       "num-is-integer": numUnop(jsnums.isInteger, "num-is-integer"),
@@ -1457,10 +1687,10 @@ define("pyret-base/js/runtime-direct",
       "num-is-non-positive": numUnop(jsnums.isNonPositive, "num-is-non-positive"),
       "num-is-non-negative": numUnop(jsnums.isNonNegative, "num-is-non-negative"),
       "string-to-number": stringToNumber,
-      "string-tonumber": stringToNumber,
+      "string-tonumber": stringToNumberOrNothing,
 
       "num-equal": function(a, b) {
-        if (arguments.length !== 2) { ae("num-equal", 2, arguments.length); }
+        if (arguments.length !== 2) { ae("num-equal", 2, arguments); }
         checkNumber(a); checkNumber(b);
         return jsnums.equals(a, b, NumberErrbacks);
       },
@@ -1472,9 +1702,9 @@ define("pyret-base/js/runtime-direct",
         checkNumber(a); checkNumber(b);
         return jsnums.lessThanOrEqual(a, b, NumberErrbacks) ? a : b;
       },
-      "num-within": function(tol) { return withinFam(false, true, false)(tol); },
-      "num-within-abs": function(tol) { return withinFam(false, false, false)(tol); },
-      "num-within-rel": function(tol) { return withinFam(false, true, false)(tol); },
+      "num-within": function(tol) { return withinFam(false, "smooth", false)(tol); },
+      "num-within-abs": function(tol) { return withinFam(false, "abs", false)(tol); },
+      "num-within-rel": function(tol) { return withinFam(false, "rel", false)(tol); },
 
       "num-abs": numUnop(jsnums.abs, "num-abs"),
       "num-acos": numUnop(jsnums.acos, "num-acos"),
@@ -1484,11 +1714,20 @@ define("pyret-base/js/runtime-direct",
       "num-cos": numUnop(jsnums.cos, "num-cos"),
       "num-sin": numUnop(jsnums.sin, "num-sin"),
       "num-tan": numUnop(jsnums.tan, "num-tan"),
-      "num-modulo": numBinop2(jsnums.modulo, "num-modulo"),
+      "num-modulo": function(n, mod) {
+        if (arguments.length !== 2) { ae("num-modulo", 2, arguments); }
+        checkNumAnn(n, function(v) { return jsnums.isInteger(v); }, "NumInteger");
+        checkNumAnn(mod, function(v) { return jsnums.isInteger(v); }, "NumInteger");
+        return jsnums.modulo(n, mod, NumberErrbacks);
+      },
       "num-remainder": numBinop2(jsnums.remainder, "num-remainder"),
       "num-exact": numUnop(jsnums.toExact, "num-exact"),
       "num-exp": numUnop(jsnums.exp, "num-exp"),
-      "num-log": numUnop(jsnums.log, "num-log"),
+      "num-log": function(n) {
+        if (arguments.length !== 1) { ae("num-log", 1, arguments); }
+        checkNumAnn(n, function(v) { return jsnums.greaterThan(v, 0, NumberErrbacks); }, "NumPositive");
+        return jsnums.log(n, NumberErrbacks);
+      },
       "num-truncate": numUnop(function(n, e) {
         return jsnums.isInteger(n) ? n :
           (jsnums.isNegative(n) ? jsnums.ceiling(n, e) : jsnums.floor(n, e));
@@ -1497,85 +1736,128 @@ define("pyret-base/js/runtime-direct",
       "num-ceiling": numUnop(jsnums.ceiling, "num-ceiling"),
       "num-round": numUnop(jsnums.round, "num-round"),
       "num-round-even": numUnop(jsnums.roundEven, "num-round-even"),
+      "num-truncate-digits": numDigits(function(n, e) {
+        return jsnums.isNegative(n) ? jsnums.ceiling(n, e) : jsnums.floor(n, e);
+      }, "num-truncate-digits"),
+      "num-ceiling-digits": numDigits(jsnums.ceiling, "num-ceiling-digits"),
+      "num-floor-digits": numDigits(jsnums.floor, "num-floor-digits"),
+      "num-round-digits": numDigits(jsnums.round, "num-round-digits"),
+      "num-round-even-digits": numDigits(jsnums.roundEven, "num-round-even-digits"),
+      "num-truncate-place": numPlace(function(n, e) {
+        return jsnums.isNegative(n) ? jsnums.ceiling(n, e) : jsnums.floor(n, e);
+      }, "num-truncate-place"),
+      "num-ceiling-place": numPlace(jsnums.ceiling, "num-ceiling-place"),
+      "num-floor-place": numPlace(jsnums.floor, "num-floor-place"),
+      "num-round-place": numPlace(jsnums.round, "num-round-place"),
+      "num-round-even-place": numPlace(jsnums.roundEven, "num-round-even-place"),
       "num-sqr": numUnop(jsnums.sqr, "num-sqr"),
-      "num-sqrt": numUnop(jsnums.sqrt, "num-sqrt"),
+      "num-sqrt": function(n) {
+        if (arguments.length !== 1) { ae("num-sqrt", 1, arguments); }
+        checkNumAnn(n, function(v) { return jsnums.greaterThanOrEqual(v, 0, NumberErrbacks); }, "NumNonNegative");
+        return jsnums.sqrt(n, NumberErrbacks);
+      },
       "num-to-fixnum": numUnop(jsnums.toFixnum, "num-to-fixnum"),
       "num-to-rational": numUnop(jsnums.toExact, "num-to-rational"),
       "num-to-roughnum": numUnop(jsnums.toRoughnum, "num-to-roughnum"),
       "num-expt": numBinop2(jsnums.expt, "num-expt"),
       "num-to-string": function(n) {
-        if (arguments.length !== 1) { ae("num-to-string", 1, arguments.length); }
+        if (arguments.length !== 1) { ae("num-to-string", 1, arguments); }
         checkNumber(n);
         return numToString(n);
       },
       "num-tostring": function(n) { checkNumber(n); return numToString(n); },
       "num-to-string-digits": function(n, digits) {
-        checkNumber(n); checkNumber(digits);
+        if (arguments.length !== 2) { ae("num-to-string-digits", 2, arguments); }
+        checkNumber(n);
+        checkNumAnn(digits, function(v) { return jsnums.isInteger(v); }, "NumInteger");
         return jsnums.toStringDigits(n, digits, NumberErrbacks);
       },
 
-      "num-random": function(n) {
+      "num-random": numRandom,
+      "num-random-seed": function(n) {
+        if (arguments.length !== 1) { ae("num-random-seed", 1, arguments); }
         checkNumber(n);
-        var max = jsnums.toFixnum(n, NumberErrbacks);
-        return Math.floor(Math.random() * max);
+        rng = seedrandom(String(n));
+        return NOTHING;
       },
-      "num-random-seed": function(n) { return NOTHING; },
       "random": function(n) {
+        if (arguments.length !== 1) { ae("random", 1, arguments); }
         checkNumber(n);
-        var max = jsnums.toFixnum(n, NumberErrbacks);
-        return Math.floor(Math.random() * max);
+        return numRandom(n);
       },
 
-      "time-now": function() { return timeNow(); },
+      "time-now": function() {
+        if (arguments.length !== 0) { ae("time-now", 0, arguments); }
+        return new Date().getTime();
+      },
 
       "gensym": gensym,
       "string-repeat": function(s, n) {
+        if (arguments.length !== 2) { ae("string-repeat", 2, arguments); }
         checkString(s); checkNumber(n);
-        return s.repeat(jsnums.toFixnum(n, NumberErrbacks));
+        var res = "";
+        for (var i = 0; i < jsnums.toFixnum(n, NumberErrbacks); i++) { res += s; }
+        return res;
       },
-      "string-substring": function(s, start, stop) {
-        checkString(s); checkNumber(start); checkNumber(stop);
-        var st = jsnums.toFixnum(start, NumberErrbacks);
-        var sp = jsnums.toFixnum(stop, NumberErrbacks);
-        if (st < 0 || sp > s.length || st > sp) {
-          interr("string-substring bounds " + st + ", " + sp + " out of range for " + quoteString(s));
+      "string-substring": function(s, min, max) {
+        if (arguments.length !== 3) { ae("string-substring", 3, arguments); }
+        checkString(s);
+        checkNumAnn(min, function(v) { return jsnums.isInteger(v); }, "NumInteger");
+        checkNumAnn(max, function(v) { return jsnums.isInteger(v); }, "NumInteger");
+        if (jsnums.greaterThan(min, max, NumberErrbacks)) {
+          interr("substring: min index " + String(min) + " is greater than max index " + String(max));
         }
-        return s.substring(st, sp);
+        if (jsnums.lessThan(min, 0, NumberErrbacks)) {
+          interr("substring: min index " + String(min) + " is less than 0");
+        }
+        if (jsnums.greaterThan(max, s.length, NumberErrbacks)) {
+          interr("substring: max index " + String(max) + " is larger than the string length " + String(s.length));
+        }
+        return s.substring(jsnums.toFixnum(min, NumberErrbacks), jsnums.toFixnum(max, NumberErrbacks));
       },
       "string-to-lower": strUnop(function(s) { return s.toLowerCase(); }, "string-to-lower"),
       "string-to-upper": strUnop(function(s) { return s.toUpperCase(); }, "string-to-upper"),
       "string-tolower": strUnop(function(s) { return s.toLowerCase(); }, "string-tolower"),
       "string-toupper": strUnop(function(s) { return s.toUpperCase(); }, "string-toupper"),
       "string-append": function(a, b) {
-        if (arguments.length !== 2) { ae("string-append", 2, arguments.length); }
+        if (arguments.length !== 2) { ae("string-append", 2, arguments); }
         checkString(a); checkString(b);
         return a + b;
       },
       "string-char-at": function(s, n) {
+        if (arguments.length !== 2) { ae("string-char-at", 2, arguments); }
         checkString(s); checkNumber(n);
-        var ix = jsnums.toFixnum(n, NumberErrbacks);
-        if (ix < 0 || ix >= s.length) { interr("string-char-at index " + ix + " out of range"); }
-        return s.charAt(ix);
+        if (!jsnums.isInteger(n) || (n < 0)) {
+          interr("string-char-at: expected a positive integer for the index, but got " + String(n));
+        }
+        if (n > (s.length - 1)) {
+          interr("string-char-at: index " + String(n) + " is greater than the largest index the string " + s);
+        }
+        return String(s.charAt(jsnums.toFixnum(n, NumberErrbacks)));
       },
       "string-contains": function(a, b) { checkString(a); checkString(b); return a.indexOf(b) !== -1; },
       "string-starts-with": function(a, b) { checkString(a); checkString(b); return a.startsWith(b); },
       "string-ends-with": function(a, b) { checkString(a); checkString(b); return a.endsWith(b); },
       "string-equal": function(a, b) { checkString(a); checkString(b); return a === b; },
       "string-explode": stringExplode,
-      "string-from-code-point": function(n) {
-        checkNumber(n);
-        return String.fromCodePoint(jsnums.toFixnum(n, NumberErrbacks));
-      },
+      "string-from-code-point": stringFromCodePoint,
       "string-from-code-points": function(l) {
+        if (arguments.length !== 1) { ae("string-from-code-points", 1, arguments); }
         var arr = listToArray(l);
         var res = "";
-        for (var i = 0; i < arr.length; i++) {
-          res += String.fromCodePoint(jsnums.toFixnum(arr[i], NumberErrbacks));
-        }
+        for (var i = 0; i < arr.length; i++) { res += stringFromCodePoint(arr[i]); }
         return res;
       },
       "string-index-of": function(s, sub) { checkString(s); checkString(sub); return s.indexOf(sub); },
-      "string-find": function(s, sub) { checkString(s); checkString(sub); return s.indexOf(sub); },
+      "string-find": function(s, sub) {
+        if (arguments.length !== 2) { ae("string-get-index", 2, arguments); }
+        checkString(s); checkString(sub);
+        var ix = s.indexOf(sub);
+        if (ix < 0) {
+          interr('string-find: Target string "' + sub + '" was not found inside source string "' + s + '"');
+        }
+        return ix;
+      },
       "string-find-opt": function(s, sub) {
         checkString(s); checkString(sub);
         var ix = s.indexOf(sub);
@@ -1586,7 +1868,15 @@ define("pyret-base/js/runtime-direct",
         var ix = s.indexOf(sub);
         return ix === -1 ? makeNone() : makeSome(ix);
       },
-      "string-get-index": function(s, sub) { checkString(s); checkString(sub); return s.indexOf(sub); },
+      "string-get-index": function(s, sub) {
+        if (arguments.length !== 2) { ae("string-get-index", 2, arguments); }
+        checkString(s); checkString(sub);
+        var ix = s.indexOf(sub);
+        if (ix < 0) {
+          interr('string-find: Target string "' + sub + '" was not found inside source string "' + s + '"');
+        }
+        return ix;
+      },
       "string-is-number": function(s) {
         checkString(s);
         var res = jsnums.fromString(s, NumberErrbacks);
@@ -1598,7 +1888,7 @@ define("pyret-base/js/runtime-direct",
         return !(res === false || res === undefined);
       },
       "string-length": function(s) {
-        if (arguments.length !== 1) { ae("string-length", 1, arguments.length); }
+        if (arguments.length !== 1) { ae("string-length", 1, arguments); }
         checkString(s);
         return s.length;
       },
@@ -1616,11 +1906,7 @@ define("pyret-base/js/runtime-direct",
         checkString(s); checkString(on);
         return arrayToList(s.split(on));
       },
-      "string-to-code-point": function(s) {
-        checkString(s);
-        if (s.length === 0) { interr("string-to-code-point on empty string"); }
-        return s.codePointAt(0);
-      },
+      "string-to-code-point": stringToCodePoint,
       "string-to-code-points": stringToCodePoints,
 
       "_plus": _plus,
