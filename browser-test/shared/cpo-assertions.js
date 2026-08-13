@@ -2,7 +2,7 @@
  * cpo-assertions.js
  *
  * Reproduces the upstream assertion functions from
- * code.pyret.org/test-util/util.js against an abstract `page` adapter. The
+ * cpo/test-util/util.js against an abstract `page` adapter. The
  * DOM-level work is delegated to window.PA (shared/page-assertions.js), a
  * line-for-line port of the util.js predicates.
  *

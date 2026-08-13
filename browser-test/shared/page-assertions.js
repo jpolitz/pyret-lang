@@ -2,7 +2,7 @@
  * page-assertions.js
  *
  * A driver-agnostic, IN-PAGE port of the content predicates from
- * code.pyret.org/test-util/util.js. Everything here runs *inside the editor
+ * cpo/test-util/util.js. Everything here runs *inside the editor
  * document* (the CPO editor, whether it is a top-level page, an embed iframe,
  * or a vscode webview frame) and returns plain JSON. It has no dependency on
  * selenium or playwright, so the SAME predicate code can be evaluated by any

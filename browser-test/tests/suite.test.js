@@ -2,8 +2,8 @@
  * suite.test.js -- the node:test entry point.
  *
  * Boots one environment (PYRET_ENV = cpo | embed | vscode), focuses the editor
- * frame ONCE, then registers one test() per spec loaded from the unmodified
- * code.pyret.org/test/*.js. Each test runs the matching assertion
+ * frame ONCE, then registers one test() per spec loaded from the editor's spec files in
+ * cpo/test/. Each test runs the matching assertion
  * (shared/dispatch.js -> shared/cpo-assertions.js), which uses node:assert for
  * content and ProceduralError for setup problems.
  *
@@ -18,7 +18,7 @@ const { warmUp } = require("../shared/cpo-assertions");
 
 const ENV = process.env.PYRET_ENV;
 // A suite is either a string naming where its specs come from -- a
-// code.pyret.org/test/*.js file, or a relative path to a harness-local module
+// cpo/test/*.js spec file, or a relative path to a harness-local module
 // exporting specs() -- or a function that registers its own test()s, for the
 // cases where what is under test is the editor's behaviour rather than a
 // program's value.
@@ -29,8 +29,8 @@ const SUITES = {
   "type-check": "type-check.js",
   "tables": "tables.js",
   "url-imports": "url-imports.js",
-  // Harness-local specs (generated large-program stress shapes; not an
-  // upstream code.pyret.org/test file -- see tests/big-programs.js).
+  // Harness-local specs (generated large-program stress shapes; not a
+  // cpo/test spec file -- see tests/big-programs.js).
   "big-programs": "./big-programs.js",
   "stop-during-load": require("./stop-during-load"),
   "rapid-rerun": require("./rapid-rerun"),

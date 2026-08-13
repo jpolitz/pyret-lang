@@ -90,12 +90,13 @@ Only how you *reach* that DOM differs — the editor is the main page (cpo), a c
 iframe (embed), or a webview frame (vscode) — and a single `findEditorFrame`
 helper (the frame with a `#runButton`) locates it in every case.
 
-Two mechanisms keep the inputs and assertions identical to upstream:
+Two mechanisms keep the inputs and assertions identical to the editor's own
+mocha corpus (`cpo/test/`, moved here from `code.pyret.org/`):
 
 - **Same inputs, zero copying.** `shared/load-cpo-specs.js` `require`s the
-  unmodified `code.pyret.org/test/*.js` with the mocha globals and `util.js`
+  spec files in `cpo/test/` with the mocha globals and `util.js`
   replaced by *recording shims*, capturing the exact `(program, expected)` tuples
-  upstream feeds its assertions — the same check-block table, the same
+  the mocha suite feeds its assertions — the same check-block table, the same
   error→substring table, the same `.arr` chart/table programs. No spec is copied.
 
 - **Same assertions.** `shared/page-assertions.js` is a line-for-line, in-page
@@ -156,7 +157,7 @@ pages/
 shared/
   static-server.js      plain correct-MIME static server (multi-root)
   ovsx-server.js        static server that mimics Open VSX serving (text/plain+nosniff, size cap)
-  load-cpo-specs.js     extract exact specs from code.pyret.org/test/*.js (no copying)
+  load-cpo-specs.js     extract exact specs from cpo/test/*.js (no copying)
   page-assertions.js    in-page DOM port of util.js predicates (window.PA)
   cpo-assertions.js     node:assert assertions mirroring util.js, per content check
   dispatch.js           map a loaded spec to its assertion
@@ -171,6 +172,9 @@ tests/
   stop-during-load.js   run/stop: Stop during program load
   effective-ids.js      run/stop: effective-ids invariants across reruns
   big-programs.js       generated large-program stress specs (see above)
+cpo/
+  test/                 the editor's spec sources + mocha-only selenium suites (see its README)
+  test-util/            selenium harness (util.js) + fixtures (pyret-programs/, test-images/, embed host pages)
 vscode/fixture-workspace/     the workspace the custom editor opens (algebra-2/test.arr)
 vscode/fixture-workspace-ts/  same, with pyret-parley.compiler: "ts" in its settings
 results/                captured run logs
@@ -211,6 +215,7 @@ node run.js --env=embed-static
 # everything (prereqs + CPO server handled for you):
 make all-envs            # every env, one compiler flavor
 make matrix              # every env x both compiler flavors, logs in results/
+make cpo-mocha           # the editor's mocha-only selenium suites (cpo/test/)
 ```
 
 ### Filtering (local dev)

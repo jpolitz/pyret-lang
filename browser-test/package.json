@@ -9,11 +9,16 @@
     "embed-static": "node run.js --env=embed-static",
     "vscode": "node run.js --env=vscode",
     "vscode-ovsx": "node run.js --env=vscode-ovsx",
+    "cpo-mocha": "cd cpo && mocha test/embed.js test/image-equality.js test/number.js test/pyret.js test/shareUrls.js test/static-pages.js test/world.js",
     "all": "make matrix"
   },
   "//": "Filter with --grep (regex over suite + test names), e.g. `npm run embed -- --grep tables`.",
   "devDependencies": {
     "@vscode/test-web": "^0.0.81",
-    "playwright": "^1.49.1"
+    "chromedriver": "^148.0.4",
+    "mocha": "^11.7.6",
+    "playwright": "^1.49.1",
+    "q": "~1.4.1",
+    "selenium-webdriver": "^3.6.0"
   }
 }

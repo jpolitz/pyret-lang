@@ -124,14 +124,16 @@ At https://console.developers.google.com/project, make a project, then:
 
 ## Testing
 
-The Selenium/mocha suites live in `test/`, with their harness and fixtures in
-`test-util/`; see `test/README.md` for which suites run under mocha and which
-serve as spec sources for the top-level `browser-test/` harness instead.
+All tests for this app live in the top-level `browser-test/` directory: the
+five-environment suite that drives the editor in cpo/embed/vscode contexts,
+and the editor's Selenium/mocha corpus in `browser-test/cpo/` (which moved
+there from this directory — see `browser-test/cpo/test/README.md`).
 
-With Chrome available and a development server running:
+With this app built, the quickest way to run the mocha suites is from
+`browser-test/`, which builds prerequisites and starts the server itself:
 
 ```
-$ npm run mocha
+$ cd ../browser-test && make cpo-mocha
 ```
 
 Selenium needs a
@@ -139,19 +141,6 @@ Selenium needs a
 Chrome; either put one on your `PATH` or point `CHROMEDRIVER_BINARY` at one
 (and `GOOGLE_CHROME_BINARY` at the browser), which is how CI wires up a
 matched chrome-for-testing pair.
-
-To run a single file, name it explicitly:
-
-```
-$ npm run mocha -- test/world.js
-```
-
-Check out how `world.js` and `image-equality.js` are written: they look up
-files from `test-util/pyret-programs` and run them according to Selenium
-testers in `test-util/util.js`.  The best way to test a whole new library is
-probably to add a directory here and figure out a good predicate that can be
-applied across the files (`runAndCheckAllTestsPassed` is probably a good
-candidate for many use cases).
 
 ## Setting up your own remote version of code.pyret.org with Heroku:
 

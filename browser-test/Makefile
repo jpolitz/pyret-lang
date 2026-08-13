@@ -41,7 +41,7 @@ endif
 
 # Mirrors the "Start CPO server" step in .github/workflows/browser-test.yml.
 # NODE_ENV=development is load-bearing, not a nicety: it is what mounts
-# code.pyret.org/test-util/ (server.js:192), which serves both the embed host
+# browser-test/cpo/test-util/ (see CPO's server.js), serving both the embed host
 # page (/embed/embed1.html) and the url-imports fixtures (/pyret-programs/...).
 SERVER_ENV := BASE_URL=$(BASE_URL) PORT=$(PORT) \
   PYRET=$(BASE_URL)/js/cpo-main.jarr POSTMESSAGE_ORIGIN='*' \
@@ -49,7 +49,7 @@ SERVER_ENV := BASE_URL=$(BASE_URL) PORT=$(PORT) \
   URL_FILE_MODE=all-remote IMAGE_PROXY_BYPASS=true \
   SHARED_FETCH_SERVER=https://code.pyret.org CURRENT_PYRET_RELEASE=
 
-.PHONY: help cpo embed embed-static vscode vscode-ovsx all-envs matrix \
+.PHONY: help cpo embed embed-static vscode vscode-ovsx all-envs matrix cpo-mocha \
         cpo-build embed-build vscode-build deps server stop-server clean-stamps
 
 help:
@@ -145,6 +145,13 @@ vscode: vscode-build deps
 
 vscode-ovsx: vscode-build deps
 	cd $(HERE) && env -u BASE_URL node run.js --env=vscode-ovsx $(RUNFLAGS)
+
+# The editor's selenium/mocha suites (cpo/test/, moved here from
+# code.pyret.org) -- only the ones the five envs above do not cover; see
+# cpo/test/README.md. They drive /editor on the CPO server. cwd is cpo/ so the
+# suites' test-util/... fixture paths resolve.
+cpo-mocha: server deps
+	cd $(HERE) && BASE_URL=$(BASE_URL) npm run --silent cpo-mocha
 
 all-envs:
 	@rc=0; for e in cpo embed embed-static vscode vscode-ovsx; do \

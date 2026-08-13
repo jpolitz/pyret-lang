@@ -61,7 +61,6 @@ jobs:
 
     - name: Set up test environment variables
       run: |
-        echo "TEST_LOC=local" >> $GITHUB_ENV
         echo "GOOGLE_CLIENT_ID=" >> $GITHUB_ENV
         echo "GOOGLE_CLIENT_SECRET=" >> $GITHUB_ENV
         echo "GOOGLE_API_KEY=" >> $GITHUB_ENV
@@ -91,11 +90,16 @@ jobs:
         # Verify server is running
         curl -f http://localhost:4999 || (echo "Server failed to start" && exit 1)
 
-    - name: Run tests
+    - name: Install browser-test harness deps
+      working-directory: ./browser-test
+      run: npm ci --ignore-scripts
+
+    - name: Run the editor mocha suites
+      working-directory: ./browser-test
       run: |
         # Wait a bit more for everything to be ready
         sleep 3
         
-        # The mocha script runs only the suites browser-test does not already
-        # cover -- see code.pyret.org/test/README.md.
-        npm run mocha
+        # Only the suites browser-test's five envs do not already cover --
+        # see browser-test/cpo/test/README.md.
+        npm run cpo-mocha

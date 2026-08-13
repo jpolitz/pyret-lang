@@ -3,7 +3,7 @@
  * artifact, code.pyret.org/build/web/editor.embed.html -- no CPO server.
  *
  * --env=embed drives /editor#controlled=true through a running CPO server via
- * code.pyret.org's test-util host page, so it never loads editor.embed.html:
+ * the cpo/test-util host page, so it never loads editor.embed.html:
  * the file an embedding host actually deploys, rendered at build time from
  * .env.embed (BASE_URL=".", relative asset paths, POSTMESSAGE_ORIGIN="*"; see
  * code.pyret.org/make-template.js). This env serves that artifact from a plain

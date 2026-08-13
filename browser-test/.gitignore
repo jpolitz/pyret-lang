@@ -4,3 +4,4 @@ results/
 # Marker for "Playwright's Chromium has been installed at least once"; see the
 # .chromium.stamp target in the Makefile.
 .chromium.stamp
+cpo/test-util/failed-test-screenshots/*

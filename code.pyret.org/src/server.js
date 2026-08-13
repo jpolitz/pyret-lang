@@ -214,7 +214,10 @@ function start(config, onServerReady) {
   });
 
   if(config.development) {
-    app.use(express.static(__dirname + "/../test-util/"));
+    // The editor test corpus (fixtures + embed host pages) lives with the
+    // browser-test harness; serving it here keeps /embed/embed1.html and the
+    // /pyret-programs/... url-import fixtures reachable same-origin in dev.
+    app.use(express.static(__dirname + "/../../browser-test/cpo/test-util/"));
     app.get("/keys", function(req, res) {
       var keys = db.getKeys(req.query.q);
       keys.then(function(keys) {

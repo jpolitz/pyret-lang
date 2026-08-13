@@ -1,15 +1,15 @@
 /*
  * load-cpo-specs.js
  *
- * Extracts the EXACT test inputs ("specs") that code.pyret.org's mocha suite
- * feeds to its assertions, WITHOUT copying or editing any file under
- * code.pyret.org/.
+ * Extracts the EXACT test inputs ("specs") that the editor's mocha suite
+ * feeds to its assertions, without editing the spec files.
  *
- * It does this by `require`-ing the original, unmodified test files
- * (code.pyret.org/test/errors.js, check-blocks.js, type-check.js, ...) with the
- * mocha globals (describe/it/before/...) and the `../test-util/util.js` module
- * stubbed out by *recording shims*. When the original file runs its
- * registration code -- e.g.
+ * The spec files live in cpo/test/ (moved there from code.pyret.org/test when
+ * the editor test corpus moved into this harness). This loader `require`s them
+ * (cpo/test/errors.js, check-blocks.js, type-check.js, ...) with the mocha
+ * globals (describe/it/before/...) and the `../test-util/util.js` module
+ * stubbed out by *recording shims*, so no selenium ever starts. When a spec
+ * file runs its registration code -- e.g.
  *
  *     tests.forEach(function(t) {
  *       tester.testRunsAndHasCheckBlocks(it, t[0], t[1], t[2]);
@@ -17,9 +17,10 @@
  *
  * our shim for `testRunsAndHasCheckBlocks` records `{name, code, specs}` instead
  * of registering a selenium test. The result is the byte-for-byte same list of
- * (program text, expected content) tuples the upstream suite checks -- so when
- * we later run the SAME assertions against the embed iframe / vscode webview, we
- * are provably checking the same things on the same inputs.
+ * (program text, expected content) tuples the editor suite historically
+ * checked -- so when we run the SAME assertions against /editor, the embed
+ * iframe, or the vscode webview, we are provably checking the same things on
+ * the same inputs.
  *
  * Nothing here is specific to a browser/runner; it is pure Node.
  */
@@ -28,11 +29,11 @@ const path = require("path");
 const fs = require("fs");
 const Module = require("module");
 
-const CPO_DIR = path.resolve(__dirname, "../../code.pyret.org");
+const SUITE_DIR = path.resolve(__dirname, "../cpo");
 const TESTS_DIR = path.resolve(__dirname, "../tests");
-const UTIL_PATH = require.resolve(path.join(CPO_DIR, "test-util/util.js"));
+const UTIL_PATH = require.resolve(path.join(SUITE_DIR, "test-util/util.js"));
 
-// The upstream test files use require("../test-util/util.js"). We intercept that
+// The spec files use require("../test-util/util.js"). We intercept that
 // require so it returns a recording stub instead of the real selenium harness.
 function withStubbedUtil(recorder, body) {
   const realResolveFilename = Module._resolveFilename;
@@ -58,7 +59,7 @@ function withStubbedUtil(recorder, body) {
     // recorded from `name` (chart/image/tables/world) so the runner can dispatch
     // to the matching assertion.
     doForEachPyretFile: (it, name, base, testFun, baseTimeout) => {
-      const dir = path.resolve(CPO_DIR, base);
+      const dir = path.resolve(SUITE_DIR, base);
       const programs = fs.readdirSync(dir).filter((p) => p.endsWith(".arr"));
       programs.forEach((program) => {
         recorder.push({
@@ -134,15 +135,15 @@ function withStubbedMocha(body) {
 }
 
 /**
- * Load the specs registered by one upstream test file (e.g. "errors.js").
- * Returns an array of recorded spec objects. cwd is temporarily set to CPO_DIR
- * because the upstream files use cwd-relative fs.readFileSync paths.
+ * Load the specs registered by one spec file (e.g. "errors.js").
+ * Returns an array of recorded spec objects. cwd is temporarily set to
+ * SUITE_DIR because the spec files use cwd-relative fs.readFileSync paths.
  */
 function loadSpecsFromFile(testFileName) {
-  const testFilePath = path.join(CPO_DIR, "test", testFileName);
+  const testFilePath = path.join(SUITE_DIR, "test", testFileName);
   const recorder = [];
   const prevCwd = process.cwd();
-  process.chdir(CPO_DIR);
+  process.chdir(SUITE_DIR);
   try {
     delete require.cache[require.resolve(testFilePath)];
     withStubbedMocha(() => withStubbedUtil(recorder, () => {
@@ -158,11 +159,11 @@ function loadSpecsFromFile(testFileName) {
 /**
  * Load one suite's specs, whichever kind of source names them.
  *
- * A bare filename ("errors.js") is an upstream code.pyret.org/test file, read
- * through the recording shims above. A relative specifier ("./big-programs.js")
- * is a harness-local module that exports specs() -- generated or hand-written
- * stress shapes that have no upstream counterpart, kept here so the "nothing
- * under code.pyret.org/ is modified" property holds. Node's own rule for
+ * A bare filename ("errors.js") is a cpo/test/ spec file, read through the
+ * recording shims above. A relative specifier ("./big-programs.js") is a
+ * harness-local module that exports specs() -- generated or hand-written
+ * stress shapes that have no counterpart in the editor's own suite, so they
+ * live with the harness instead. Node's own rule for
  * telling those apart (bare vs relative) is the rule used here, so a suite
  * entry reads like the require() it stands in for; local paths resolve against
  * tests/, where the suite table lives.
@@ -177,7 +178,7 @@ function loadSpecs(source) {
   return loadSpecsFromFile(source);
 }
 
-module.exports = { loadSpecs, loadSpecsFromFile, CPO_DIR };
+module.exports = { loadSpecs, loadSpecsFromFile, SUITE_DIR };
 
 // CLI: `node load-cpo-specs.js errors.js` prints a summary.
 if (require.main === module) {
@@ -185,6 +186,6 @@ if (require.main === module) {
   const specs = loadSpecs(file);
   const byKind = {};
   for (const s of specs) byKind[s.kind] = (byKind[s.kind] || 0) + 1;
-  console.log(`Loaded ${specs.length} specs from test/${file}:`, byKind);
+  console.log(`Loaded ${specs.length} specs from cpo/test/${file}:`, byKind);
   console.log(JSON.stringify(specs.slice(0, 3), null, 2));
 }

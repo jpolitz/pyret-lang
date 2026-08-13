@@ -12,7 +12,7 @@
  * behavior ("Looks shipshape") rather than just "it compiled".
  *
  * Unlike the other suites, these specs are NOT extracted from
- * code.pyret.org/test/*.js -- they are stress shapes specific to fixed-stack
+ * cpo/test/*.js -- they are stress shapes specific to fixed-stack
  * environments, so they live here in the harness (which keeps the "nothing
  * under code.pyret.org/ is modified" property). The spec objects use the same
  * {kind, name, code, options} shape load-cpo-specs records, so dispatch.js

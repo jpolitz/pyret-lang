@@ -62,14 +62,15 @@ var tests = [
     options: { timeout: 180000 } },
 ];
 
-// Hermetic cases served by the dev server itself (server.js serves test-util/
-// statically in development), so they need no outside network. The "/app"
+// Hermetic cases served by the dev server itself (in development, CPO's
+// server.js serves browser-test/cpo/test-util/ statically), so they need no
+// outside network. The "/app"
 // path segment need not exist; it is there for "../" to consume, the same
 // way the starter files' base URLs work.
 // browser-test serves these fixtures itself (PYRET_FIXTURE_BASE, see its
 // run.js) so that the envs which run no CPO server can reach them too; the
 // mocha suite has no such server and falls back to BASE_URL, where the dev
-// server's test-util mount serves the same tree same-origin.
+// server's mount of this tree serves it same-origin.
 var base = process.env.PYRET_FIXTURE_BASE || process.env.BASE_URL;
 if (base) {
   var localBase = base.replace(/\/+$/, "") + "/pyret-programs/url-imports";
