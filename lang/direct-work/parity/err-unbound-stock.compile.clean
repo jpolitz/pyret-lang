@@ -1,0 +1,6 @@
+
+The name `undefined-name-xyz` at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-unbound.arr:1:15-1:33 is unbound. It is used but not previously defined.  You may need to run the program, or check dashes and capitalization in the name.
+The run ended in error:
+
+There were compilation errors
+Pyret stack:

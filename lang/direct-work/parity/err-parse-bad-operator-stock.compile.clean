@@ -1,0 +1,4 @@
+
+The run ended in error:
+The operator at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-parse-bad-operator.arr:1:6-1:7 has no surrounding whitespace.
+Pyret stack:

@@ -714,6 +714,7 @@ define("pyret-base/js/runtime-direct",
         }
       }
       function renderSkeleton(sk, depth, mode) {
+        // Items/args of skeleton nodes are themselves ValueSkeletons
         switch (sk.$name) {
           case "vs-str": return sk[sk.$fields[0]];
           case "vs-value": return help(sk[sk.$fields[0]], depth + 1, mode);
@@ -721,26 +722,21 @@ define("pyret-base/js/runtime-direct",
             var name = sk[sk.$fields[0]];
             var items = listToArray(sk[sk.$fields[1]]);
             var parts = [];
-            for (var i = 0; i < items.length; i++) { parts.push(help(items[i], depth + 1, mode)); }
+            for (var i = 0; i < items.length; i++) { parts.push(renderSkeleton(items[i], depth + 1, mode)); }
             return "[" + name + ": " + parts.join(", ") + "]";
           }
           case "vs-constr": {
             var cname = sk[sk.$fields[0]];
             var argsl = listToArray(sk[sk.$fields[1]]);
             var cparts = [];
-            for (var ci = 0; ci < argsl.length; ci++) { cparts.push(help(argsl[ci], depth + 1, mode)); }
+            for (var ci = 0; ci < argsl.length; ci++) { cparts.push(renderSkeleton(argsl[ci], depth + 1, mode)); }
             return cname + "(" + cparts.join(", ") + ")";
           }
           case "vs-seq": {
             var sitems = listToArray(sk[sk.$fields[0]]);
             var sparts = [];
             for (var si = 0; si < sitems.length; si++) {
-              var item = sitems[si];
-              if (isDataValue(item) && item.$name !== undefined && item.$name.indexOf("vs-") === 0) {
-                sparts.push(renderSkeleton(item, depth, mode));
-              } else {
-                sparts.push(help(item, depth + 1, mode));
-              }
+              sparts.push(renderSkeleton(sitems[si], depth + 1, mode));
             }
             return sparts.join("");
           }
@@ -754,7 +750,6 @@ define("pyret-base/js/runtime-direct",
             return "<matrix>";
           }
           default:
-            // vs-collection items etc. may also be skeleton values
             return help(sk, depth + 1, mode);
         }
       }
@@ -1355,6 +1350,28 @@ define("pyret-base/js/runtime-direct",
           checkString(f);
           return isObject(obj) && (f in obj);
         },
+        "get-value": function(obj, key) {
+          return g(obj, "get-value")(key);
+        },
+        "raw-list-join-str-last": function(lst, sep, lastSep) {
+          if (arguments.length !== 3) { ae("raw-list-join-str-last", 3, arguments.length); }
+          var arr = listToArray(lst).map(function(v) { return toReprJS(v, "tostring"); });
+          if (arr.length <= 1) { return arr.join(sep); }
+          var lastElem = arr.pop();
+          return arr.join(sep) + lastSep + lastElem;
+        },
+        "record-concat": function(left, right) {
+          if (!isObject(left) || !isObject(right)) {
+            interr("(Internal merge) Tried to extend a non-object");
+          }
+          return ext(left, right);
+        },
+        "open-table": function(spec) { interr("tables are not supported in direct mode"); },
+        "as-loader-option": function() { interr("loader options are not supported in direct mode"); },
+        "raw-make-row": function(arr) { interr("tables are not supported in direct mode"); },
+        "___debug": function() { return NOTHING; },
+        "within-rel3": withinFam(false, true, true),
+        "within3": withinFam(false, true, true),
         "raw-array-to-list": rawArrayToList,
         "raw-array-from-list": rawArrayFromList,
         "raw-array-join-str": function(a) { return rawArrayJoinStr(a, ""); },
@@ -1971,6 +1988,34 @@ define("pyret-base/js/runtime-direct",
     if (!Object.prototype.hasOwnProperty.call(Function.prototype, "app")) {
       Object.defineProperty(Function.prototype, "app", {
         get: function() { return this; },
+        configurable: true,
+        enumerable: false
+      });
+    }
+    // js modules invoke methods as m.full_meth(self, args...) and
+    // m.meth(self)(args...); direct methods are `this`-based functions.
+    if (!Object.prototype.hasOwnProperty.call(Function.prototype, "full_meth")) {
+      Object.defineProperty(Function.prototype, "full_meth", {
+        get: function() {
+          var m = this;
+          return function(self) {
+            var rest = new Array(arguments.length - 1);
+            for (var i = 1; i < arguments.length; i++) { rest[i - 1] = arguments[i]; }
+            return m.apply(self, rest);
+          };
+        },
+        configurable: true,
+        enumerable: false
+      });
+    }
+    if (!Object.prototype.hasOwnProperty.call(Function.prototype, "meth")) {
+      Object.defineProperty(Function.prototype, "meth", {
+        get: function() {
+          var m = this;
+          return function(self) {
+            return function() { return m.apply(self, arguments); };
+          };
+        },
         configurable: true,
         enumerable: false
       });

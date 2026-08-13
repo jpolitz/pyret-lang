@@ -1,0 +1,6 @@
+There were 0 potential parses.
+Parse failed, next token is <end of file> at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-parse-eof.arr, 2:1-2:1
+The run ended in error:
+
+Pyret didn't understand the very end of your program.You may be missing an "end", or closing punctuation like ")" or "]" right at the end.
+Pyret stack:

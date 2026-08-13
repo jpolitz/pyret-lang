@@ -1,0 +1,6 @@
+
+Well-formedness: (at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-reactor-key.arr:6:4-10:3) A reactor can only specify one of on-key and on-raw-key srcloc(file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-reactor-key.arr, 6, 4, 306, 10, 3, 388)
+The run ended in error:
+
+There were compilation errors
+Pyret stack:

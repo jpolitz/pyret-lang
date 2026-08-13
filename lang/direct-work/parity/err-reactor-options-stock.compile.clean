@@ -1,0 +1,6 @@
+
+Well-formedness: (at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-reactor-options.arr:7:2-7:22) Valid options for reactors are `close-when-stop`, `init`, `last-image`, `on-key`, `on-mouse`, `on-raw-key`, `on-tick`, `seconds-per-tick`, `stop-when`, `title`, or `to-draw`, but found one named `not-a-real-option`  srcloc(file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-reactor-options.arr, 7, 2, 316, 7, 22, 336)
+The run ended in error:
+
+There were compilation errors
+Pyret stack:

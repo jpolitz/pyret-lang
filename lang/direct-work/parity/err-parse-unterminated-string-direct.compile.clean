@@ -1,0 +1,5 @@
+There were 0 potential parses.
+Parse failed, next token is ('UNTERMINATED-STRING "\"abc") at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-parse-unterminated-string.arr, 1:4-1:8
+The run ended in error:
+Pyret thinks your program has an incomplete string literal around file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-parse-unterminated-string.arr:1:4-1:8; you may be missing closing punctuation.
+Pyret stack:

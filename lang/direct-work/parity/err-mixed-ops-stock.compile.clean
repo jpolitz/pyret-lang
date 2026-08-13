@@ -1,0 +1,6 @@
+
+Operators of different kinds cannot be mixed at the same level, but `+` is at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-mixed-ops.arr:1:6-1:7 at the same level as `*` at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-mixed-ops.arr:1:10-1:11. Use parentheses to group the operations and to make the order of operations clear.
+The run ended in error:
+
+There were compilation errors
+Pyret stack:

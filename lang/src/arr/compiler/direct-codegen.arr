@@ -427,7 +427,57 @@ fun compile-lettable-expr(ctx, e :: N.ALettable) -> Option<{ CList<J.JStmt>; J.J
   end
 end
 
+# Does this expression contain a self-recursive tail call (not inside a
+# nested function)?
+fun has-self-tail-expr(e :: N.AExpr) -> Boolean:
+  cases(N.AExpr) e:
+    | a-type-let(_, _, body) => has-self-tail-expr(body)
+    | a-let(_, _, le, body) => has-self-tail-lettable(le) or has-self-tail-expr(body)
+    | a-arr-let(_, _, _, le, body) => has-self-tail-lettable(le) or has-self-tail-expr(body)
+    | a-var(_, _, le, body) => has-self-tail-lettable(le) or has-self-tail-expr(body)
+    | a-seq(_, e1, e2) => has-self-tail-lettable(e1) or has-self-tail-expr(e2)
+    | a-lettable(_, le) => has-self-tail-lettable(le)
+  end
+end
+fun has-self-tail-lettable(e :: N.ALettable) -> Boolean:
+  cases(N.ALettable) e:
+    | a-app(_, _, _, app-info) => app-info.is-recursive and app-info.is-tail
+    | a-if(_, _, t, alt) => has-self-tail-expr(t) or has-self-tail-expr(alt)
+    | a-cases(_, _, _, branches, _else) =>
+      branches.any(lam(b): has-self-tail-expr(b.body) end) or has-self-tail-expr(_else)
+    | else => false
+  end
+end
+
 fun compile-lettable(ctx, e :: N.ALettable, dest :: Dest) -> CList<J.JStmt>:
+  is-self-tail-call = cases(N.ALettable) e:
+    | a-app(_, _, args, app-info) =>
+      app-info.is-recursive and app-info.is-tail and is-d-return(dest)
+        and is-some(ctx.tco-formals)
+        and (args.length() == ctx.tco-formals.value.length())
+    | else => false
+  end
+  if is-self-tail-call block:
+    cases(N.ALettable) e:
+      | a-app(l, _, args, _) =>
+        formals = ctx.tco-formals.value
+        arg-temps = for map(arg from args):
+          { tmp: fresh-id(compiler-name("tco")), value: compile-v(ctx, arg) }
+        end
+        temp-stmts = for CL.map_list(at from arg-temps):
+          j-var(at.tmp, at.value)
+        end
+        assign-stmts = for CL.map_list(pair from map2({(f, at): {f; at}}, formals, arg-temps)):
+          j-expr(j-assign(pair.{0}, j-id(pair.{1}.tmp)))
+        end
+        temp-stmts ^ cl-append(_, assign-stmts) ^ cl-snoc(_, J.j-continue)
+    end
+  else:
+    compile-lettable-nontail(ctx, e, dest)
+  end
+end
+
+fun compile-lettable-nontail(ctx, e :: N.ALettable, dest :: Dest) -> CList<J.JStmt>:
   cases(Option) compile-lettable-expr(ctx, e):
     | some({stmts; expr}) => cl-append(stmts, finish(dest, expr))
     | none =>
@@ -449,6 +499,7 @@ end
 
 fun compile-fun(ctx, name :: String, args :: List<N.ABind>, body :: N.AExpr, is-method :: Boolean) -> J.JExpr:
   formals = if is-method: args.rest else: args end
+  formal-ids-list = for map(a from formals): js-id-of(a.id) end
   formal-ids = for CL.map_list(a from formals): js-id-of(a.id) end
   self-stmts = if is-method:
     cl-sing(j-var(js-id-of(args.first.id), THIS))
@@ -456,7 +507,19 @@ fun compile-fun(ctx, name :: String, args :: List<N.ABind>, body :: N.AExpr, is-
     cl-empty
   end
   n = formals.length()
-  body-stmts = compile-expr(ctx, body, d-return)
+  uses-tco = not(is-method) and has-self-tail-expr(body)
+  body-ctx = if uses-tco:
+    ctx.{tco-formals: some(formal-ids-list)}
+  else:
+    ctx.{tco-formals: none}
+  end
+  body-stmts-raw = compile-expr(body-ctx, body, d-return)
+  body-stmts = if uses-tco:
+    # Self-recursive tail calls compile to parameter reassignment + continue
+    cl-sing(J.j-while(j-true, j-block(body-stmts-raw)))
+  else:
+    body-stmts-raw
+  end
   j-fun(J.next-j-fun-id(), fun-name-of(name), formal-ids,
     j-block(cl-cons(arity-stmt(if name == "": "anonymous function" else: name end, n), self-stmts)
         ^ cl-append(_, body-stmts)))
@@ -675,7 +738,8 @@ fun compile-program(prog :: N.AProg, env, post-env, provides, options) -> D.Stri
         get-loc-id: get-loc-id,
         prog-provides: prog-provides,
         env: env,
-        post-env: post-env
+        post-env: post-env,
+        tco-formals: none
       }
 
       body-stmts = compile-expr(ctx, body, d-return)

@@ -1,0 +1,6 @@
+
+0The declaration of `f` at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-shadow.arr:2:0-2:19 shadows a previous declaration of `f` defined at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-shadow.arr:1:0-1:19 and imported from file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-shadow.arr:1:0-1:19
+The run ended in error:
+
+There were compilation errors
+Pyret stack:

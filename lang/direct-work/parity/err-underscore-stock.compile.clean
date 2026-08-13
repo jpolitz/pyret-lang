@@ -1,0 +1,6 @@
+
+The underscore `_` at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-underscore.arr:1:4-1:5 cannot be used where an expression is expected.
+The run ended in error:
+
+There were compilation errors
+Pyret stack:

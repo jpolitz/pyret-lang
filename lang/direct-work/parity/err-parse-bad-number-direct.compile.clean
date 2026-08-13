@@ -1,0 +1,5 @@
+There were 0 potential parses.
+Parse failed, next token is ('BAD-NUMBER ".5") at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-parse-bad-number.arr, 1:4-1:6
+The run ended in error:
+Pyret thinks your program probably has a number at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-parse-bad-number.arr:1:4-1:6; number literals in Pyret require at least one digit before the decimal point.
+Pyret stack:

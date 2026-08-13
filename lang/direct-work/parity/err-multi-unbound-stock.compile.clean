@@ -1,0 +1,12 @@
+
+The name `aa` at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-multi-unbound.arr:7:4-7:6 is unbound. It is used but not previously defined.  You may need to run the program, or check dashes and capitalization in the name.
+
+The name `bb` at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-multi-unbound.arr:7:9-7:11 is unbound. It is used but not previously defined.  You may need to run the program, or check dashes and capitalization in the name.
+
+The name `dd` at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-multi-unbound.arr:11:4-11:6 is unbound. It is used but not previously defined.  You may need to run the program, or check dashes and capitalization in the name.
+
+The name `cc` at file:///home/exedev/work/drydock/lang/src/ts-compiler/tests/programs/err-multi-unbound.arr:9:2-9:4 is unbound. It is used but not previously defined.  You may need to run the program, or check dashes and capitalization in the name.
+The run ended in error:
+
+There were compilation errors
+Pyret stack:
