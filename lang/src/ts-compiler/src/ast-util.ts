@@ -283,6 +283,49 @@ export class DefaultEnvMapVisitor<E, TE> extends DefaultMapVisitor {
     return new A.SLetrec(node.l, visitBinds, visitBody, node.blocky);
   }
 
+  // The flat block: each binding group extends the environment for
+  // everything after it, with per-group logic exactly as in the nested
+  // s-let-expr / s-letrec / s-type-let-expr methods above.
+  sScopeBlock(node: A.SScopeBlock): A.Expr {
+    let env = this.env;
+    let typeEnv = this.typeEnv;
+    const newEntries: A.ScopeEntry[] = [];
+    for (const entry of node.entries) {
+      if (A.isSScopeLet(entry)) {
+        const bs: A.LetBind[] = [];
+        for (const b of entry.binds) {
+          const newBind = b.visit(extendVisitor(this, { env, typeEnv }));
+          env = this.bindHandlers.sLetBind(newBind, env);
+          bs.push(newBind);
+        }
+        newEntries.push(new A.SScopeLet(entry.l, bs));
+      } else if (A.isSScopeTypeLet(entry)) {
+        const bs: A.TypeLetBind[] = [];
+        for (const b of entry.binds) {
+          const updated = this.bindHandlers.sTypeLetBind(b, env, typeEnv);
+          const visitEnvs = extendVisitor(this, { env: updated.valEnv, typeEnv: updated.typeEnv });
+          const newBind = b.visit(visitEnvs);
+          env = updated.valEnv;
+          typeEnv = updated.typeEnv;
+          bs.push(newBind);
+        }
+        newEntries.push(new A.SScopeTypeLet(entry.l, bs));
+      } else if (A.isSScopeLetrec(entry)) {
+        let bindEnv = env;
+        for (const b of entry.binds) {
+          bindEnv = this.bindHandlers.sLetrecBind(b, bindEnv);
+        }
+        const newVisitor = extendVisitor(this, { env: bindEnv, typeEnv });
+        newEntries.push(new A.SScopeLetrec(entry.l, entry.binds.map((b: A.LetrecBind) => b.visit(newVisitor))));
+        env = bindEnv;
+      } else {
+        newEntries.push(entry.visit(extendVisitor(this, { env, typeEnv })));
+      }
+    }
+    const tail = node.tail.visit(extendVisitor(this, { env, typeEnv }));
+    return new A.SScopeBlock(node.l, newEntries, tail);
+  }
+
   sLam(node: A.SLam): A.Expr {
     let newTypeEnv = this.typeEnv;
     for (const param of node.params) {
@@ -420,6 +463,44 @@ export class DefaultEnvIterVisitor<E, TE> extends DefaultIterVisitor {
     const newVisitor = extendVisitor(this, { env: bindEnv });
     const continueBinds = node.binds.every((b: A.LetrecBind) => b.visit(newVisitor));
     return continueBinds && node.body.visit(newVisitor);
+  }
+
+  // Flat-block analogue of the nested s-let-expr / s-letrec /
+  // s-type-let-expr methods above, with the same env threading and
+  // short-circuiting.
+  sScopeBlock(node: A.SScopeBlock): boolean {
+    let env = this.env;
+    let typeEnv = this.typeEnv;
+    for (const entry of node.entries) {
+      if (A.isSScopeLet(entry)) {
+        for (const b of entry.binds) {
+          const thisEnv = this.bindHandlers.sLetBind(b, env);
+          const newBind = b.visit(extendVisitor(this, { env, typeEnv }));
+          env = thisEnv;
+          if (!newBind) { return false; }
+        }
+      } else if (A.isSScopeTypeLet(entry)) {
+        for (const b of entry.binds) {
+          const updated = this.bindHandlers.sTypeLetBind(b, env, typeEnv);
+          const visitEnvs = extendVisitor(this, { env: updated.valEnv, typeEnv: updated.typeEnv });
+          const newBind = b.visit(visitEnvs);
+          env = updated.valEnv;
+          typeEnv = updated.typeEnv;
+          if (!newBind) { return false; }
+        }
+      } else if (A.isSScopeLetrec(entry)) {
+        let bindEnv = env;
+        for (const b of entry.binds) {
+          bindEnv = this.bindHandlers.sLetrecBind(b, bindEnv);
+        }
+        const newVisitor = extendVisitor(this, { env: bindEnv, typeEnv });
+        if (!entry.binds.every((b: A.LetrecBind) => b.visit(newVisitor))) { return false; }
+        env = bindEnv;
+      } else {
+        if (!entry.visit(extendVisitor(this, { env, typeEnv }))) { return false; }
+      }
+    }
+    return node.tail.visit(extendVisitor(this, { env, typeEnv }));
   }
 
   sLam(node: A.SLam): boolean {
@@ -818,6 +899,14 @@ class SetRecursiveVisitor extends DefaultMapVisitor {
       node.blocky);
   }
 
+  sScopeLetrec(node: A.SScopeLetrec): A.ScopeEntry {
+    // Same per-bind fun-name collection as s-letrec; the rest of the flat
+    // block (the old body) is visited with the plain visitor by default.
+    return new A.SScopeLetrec(
+      node.l,
+      node.binds.map((bind: A.LetrecBind) => bind.visit(this.collectFunName(bind))));
+  }
+
   sDataField(node: A.SDataField): A.Member {
     return new A.SDataField(node.l, node.name, node.value.visit(this.collectMethodName(node.name)));
   }
@@ -910,6 +999,22 @@ class SetTailVisitor extends DefaultMapVisitor {
       node.l,
       [...prefix.map((s: A.Expr) => s.visit(this.noTail())),
        ...suffix.map((s: A.Expr) => s.visit(this))]);
+  }
+
+  sScopeBlock(node: A.SScopeBlock): A.Expr {
+    // Only the tail is in tail position. Let/letrec binds and plain
+    // statements are visited no-tail (as the nested s-let-expr/s-letrec
+    // binds and s-block prefixes were); type-let binds keep the CURRENT
+    // flag, because the nested s-type-let-expr was skipped by this
+    // visitor (its default traversal preserved isTail into the binds).
+    const noTail = this.noTail();
+    const newEntries: A.ScopeEntry[] = node.entries.map((entry) => {
+      if (A.isSScopeTypeLet(entry)) {
+        return entry.visit(this);
+      }
+      return entry.visit(noTail);
+    });
+    return new A.SScopeBlock(node.l, newEntries, node.tail.visit(this));
   }
 
   sCheckExpr(node: A.SCheckExpr): A.Expr {
@@ -1027,6 +1132,42 @@ class LetrecVisitor extends DefaultMapVisitor {
 
   sIdLetrec(node: A.SIdLetrec): A.Expr {
     return new A.SIdLetrec(node.l, node.id, mapGetValue(this.env, node.id.key()));
+  }
+
+  // Flat block: a letrec group's "body env" (every group member safe)
+  // applies to all the entries after it and to the tail, exactly as it
+  // applied to the nested s-letrec's body.
+  sScopeBlock(node: A.SScopeBlock): A.Expr {
+    let cur: LetrecVisitor = this;
+    const newEntries: A.ScopeEntry[] = [];
+    for (const entry of node.entries) {
+      if (A.isSScopeLetrec(entry)) {
+        const bindEnvs = entry.binds.map((b1: A.LetrecBind, i: number) => {
+          const rhsIsDelayed = valueDelaysExecOf(field(b1.b, 'id'), b1.value);
+          const acc = new Map(cur.env);
+          entry.binds.forEach((b2: A.LetrecBind, j: number) => {
+            const key = field(b2.b, 'id').key();
+            if (i < j) {
+              acc.set(key, false);
+            } else if (i === j) {
+              acc.set(key, rhsIsDelayed);
+            } else {
+              acc.set(key, true);
+            }
+          });
+          return acc;
+        });
+        const newBinds = map2((b: A.LetrecBind, bindEnv: Map<string, boolean>) =>
+          b.visit(extendVisitor(cur, { env: bindEnv } as Partial<LetrecVisitor>)), entry.binds, bindEnvs);
+        const bodyEnv = mapSet(bindEnvs[bindEnvs.length - 1],
+          field(entry.binds[entry.binds.length - 1].b, 'id').key(), true);
+        newEntries.push(new A.SScopeLetrec(entry.l, newBinds));
+        cur = extendVisitor(cur, { env: bodyEnv } as Partial<LetrecVisitor>);
+      } else {
+        newEntries.push(entry.visit(cur));
+      }
+    }
+    return new A.SScopeBlock(node.l, newEntries, node.tail.visit(cur));
   }
 }
 

@@ -424,6 +424,90 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
               .typingBind((newStmts, ctx) =>
                 new TCS.TypingResult(new A.SBlock(l, newStmts), expectType, ctx));
           }
+          case 's-scope-block': {
+            /*
+              The flat post-resolve-scope block. Each binding group behaves
+              exactly as its nested wrapper did with "the rest of the
+              entries plus the tail" as its body, so checkEntries mirrors
+              that recursion entry by entry: let groups synthesize their
+              binds and remove them from the context after the rest; type-
+              let groups run handleTypeLetBinds and check the rest at
+              top-level (as s-type-let-expr's body was); letrec groups go
+              through handleLetrecBindings with the rest as the body; plain
+              statements check against t-top like non-final block
+              statements. (Recursion depth is the entry count; type
+              checking is optional and outside the stack-safety envelope.)
+            */
+            const { l, entries, tail } = e;
+            const newEntries: A.ScopeEntry[] = [];
+            const checkEntries = (i: number, topLevel2: boolean, ctx0: Context): AnyTypingResult => {
+              if (i === entries.length) {
+                return checking(tail, expectType, topLevel2, ctx0)
+                  .mapExpr((newTail) => new A.SScopeBlock(l, newEntries, newTail));
+              }
+              const entry = entries[i];
+              if (A.isSScopeLet(entry)) {
+                const binds2 = entry.binds;
+                // ignore-checker: the toplevel `result-after-checks = ...`
+                // binding whose tail is the module — only the module is
+                // checked, everything else passes through untouched.
+                if (binds2.length === 1) {
+                  const bindingId = getField(binds2[0].b, 'id');
+                  if (bindingId.$name === 's-atom' && (bindingId as any).base.length >= 19
+                      && (bindingId as any).base.substring(0, 19) === 'result-after-checks'
+                      && A.isSModule(tail)) {
+                    const ctx1 = ctx0.addBinding(bindingId.key(), new TS.TTop(l, false));
+                    return checking(tail, new TS.TTop(l, false), true, ctx1)
+                      .bind((_newModule, newType, ctx2) => {
+                        const ctx3 = ctx2.removeBinding(bindingId.key());
+                        for (let j = i; j < entries.length; j++) {
+                          newEntries.push(entries[j]);
+                        }
+                        return new TCS.TypingResult(new A.SScopeBlock(l, newEntries, tail), newType, ctx3);
+                      });
+                  }
+                }
+                return TCS.foldTyping(synthesisLetBind, binds2, ctx0).typingBind((rhsResult, ctx2) => {
+                  const newBinds = map2((binding: A.LetBind, rhs: Expr): A.LetBind => {
+                    switch (binding.$name) {
+                      case 's-let-bind':
+                        return new A.SLetBind(binding.l, binding.b, rhs);
+                      case 's-var-bind':
+                        return new A.SVarBind(binding.l, binding.b, rhs);
+                      default:
+                        throw new InternalCompilerError('Unknown LetBind in checking');
+                    }
+                  }, binds2, rhsResult);
+                  newEntries.push(new A.SScopeLet(entry.l, newBinds));
+                  return checkEntries(i + 1, topLevel2, ctx2)
+                    .bind((restExpr, restType, ctx3) => {
+                      let ctx4 = ctx3;
+                      for (let k = binds2.length - 1; k >= 0; k--) {
+                        ctx4 = ctx4.removeBinding(getField(binds2[k].b, 'id').key());
+                      }
+                      return new TCS.TypingResult(restExpr, restType, ctx4);
+                    });
+                });
+              } else if (A.isSScopeTypeLet(entry)) {
+                return handleTypeLetBinds(entry.binds, ctx0).typingBind((_nothing, ctx2) => {
+                  newEntries.push(entry);
+                  return checkEntries(i + 1, true, ctx2);
+                });
+              } else if (A.isSScopeLetrec(entry)) {
+                return handleLetrecBindings(entry.binds, topLevel2, ctx0, (newBinds, ctx2) => {
+                  newEntries.push(new A.SScopeLetrec(entry.l, newBinds));
+                  return checkEntries(i + 1, topLevel2, ctx2);
+                });
+              } else {
+                return checking(entry, new TS.TTop(l, false), topLevel2, ctx0)
+                  .bind((newStmt, _styp, ctx2) => {
+                    newEntries.push(newStmt);
+                    return checkEntries(i + 1, topLevel2, ctx2);
+                  });
+              }
+            };
+            return checkEntries(0, topLevel, context);
+          }
           case 's-user-block':
             return raise('s-user-block should have already been desugared');
           case 's-fun':
@@ -711,6 +795,83 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
             return new TCS.TypingResult(stmtExpr, stmtTyp, ctx2);
           }), stmts, context).typingBind((newStmts, ctx) =>
           new TCS.TypingResult(new A.SBlock(l, newStmts), typ.setLoc(l), ctx));
+      }
+      case 's-scope-block': {
+        // Flat-block synthesis; see the checking case for the shape. The
+        // nested wrappers' body modes are preserved: let and type-let
+        // groups synthesize the rest at non-top-level, letrec keeps the
+        // current level; group result types pick up the group's loc on
+        // the way out, as each wrapper's mapType(setLoc) did.
+        const { l, entries, tail } = e;
+        const newEntries: A.ScopeEntry[] = [];
+        const synthEntries = (i: number, topLevel2: boolean, ctx0: Context): AnyTypingResult => {
+          if (i === entries.length) {
+            return synthesis(tail, topLevel2, ctx0)
+              .mapExpr((newTail) => new A.SScopeBlock(l, newEntries, newTail));
+          }
+          const entry = entries[i];
+          if (A.isSScopeLet(entry)) {
+            const binds2 = entry.binds;
+            if (binds2.length === 1) {
+              const bindingId = getField(binds2[0].b, 'id');
+              if (bindingId.$name === 's-atom' && (bindingId as any).base.length >= 19
+                  && (bindingId as any).base.substring(0, 19) === 'result-after-checks'
+                  && A.isSModule(tail)) {
+                const ctx1 = ctx0.addBinding(bindingId.key(), new TS.TTop(l, false));
+                return checking(tail, new TS.TTop(l, false), true, ctx1)
+                  .bind((_newModule, newType, ctx2) => {
+                    const ctx3 = ctx2.removeBinding(bindingId.key());
+                    for (let j = i; j < entries.length; j++) {
+                      newEntries.push(entries[j]);
+                    }
+                    return new TCS.TypingResult(new A.SScopeBlock(l, newEntries, tail), newType, ctx3);
+                  });
+              }
+            }
+            return TCS.foldTyping(synthesisLetBind, binds2, ctx0).typingBind((newRhs, ctx2) => {
+              const newBinds = map2((binding: A.LetBind, rhs: Expr): A.LetBind => {
+                switch (binding.$name) {
+                  case 's-let-bind':
+                    return new A.SLetBind(binding.l, binding.b, rhs);
+                  case 's-var-bind':
+                    return new A.SVarBind(binding.l, binding.b, rhs);
+                  default:
+                    throw new InternalCompilerError('Unknown LetBind in synthesis');
+                }
+              }, binds2, newRhs);
+              newEntries.push(new A.SScopeLet(entry.l, newBinds));
+              return synthEntries(i + 1, false, ctx2)
+                .mapType((t) => t.setLoc(entry.l))
+                .bind((restExpr, restType, ctx3) => {
+                  let ctx4 = ctx3;
+                  for (let k = binds2.length - 1; k >= 0; k--) {
+                    ctx4 = ctx4.removeBinding(getField(binds2[k].b, 'id').key());
+                  }
+                  return new TCS.TypingResult(restExpr, restType, ctx4);
+                });
+            });
+          } else if (A.isSScopeTypeLet(entry)) {
+            return handleTypeLetBinds(entry.binds, ctx0).typingBind((_nothing, ctx2) => {
+              newEntries.push(entry);
+              return synthEntries(i + 1, false, ctx2)
+                .mapType((t) => t.setLoc(entry.l));
+            });
+          } else if (A.isSScopeLetrec(entry)) {
+            return handleLetrecBindings(entry.binds, topLevel2, ctx0, (newBinds, ctx2) => {
+              newEntries.push(new A.SScopeLetrec(entry.l, newBinds));
+              return synthEntries(i + 1, topLevel2, ctx2)
+                .mapType((t) => t.setLoc(entry.l));
+            });
+          } else {
+            return synthesis(entry, topLevel2, ctx0)
+              .bind((newStmt, _styp, ctx2) => {
+                newEntries.push(newStmt);
+                return synthEntries(i + 1, topLevel2, ctx2);
+              });
+          }
+        };
+        return synthEntries(0, topLevel, context)
+          .mapType((t) => t.setLoc(l));
       }
       case 's-user-block':
         return raise('s-user-block should have already been desugared');

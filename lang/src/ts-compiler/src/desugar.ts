@@ -323,6 +323,18 @@ export function desugarLetrecBinds(binds: A.LetrecBind[]): A.LetrecBind[] {
     new A.SLetrecBind(bind.l, desugarBind(bind.b), desugarExpr(bind.value)));
 }
 
+function desugarScopeEntry(entry: A.ScopeEntry): A.ScopeEntry {
+  if (A.isSScopeLet(entry)) {
+    return new A.SScopeLet(entry.l, desugarLetBinds(entry.binds));
+  } else if (A.isSScopeTypeLet(entry)) {
+    return new A.SScopeTypeLet(entry.l, entry.binds.map(desugarTypeLetBind));
+  } else if (A.isSScopeLetrec(entry)) {
+    return new A.SScopeLetrec(entry.l, desugarLetrecBinds(entry.binds));
+  } else {
+    return desugarExpr(entry);
+  }
+}
+
 // The desugaring of a dot/app chain (`o.m(1).n(2)…`) recurses once per link
 // through desugarExpr -> dsCurry -> dsCurryNullary, so chain LENGTH became
 // stack depth. This walker consumes the whole receiver spine with an explicit
@@ -476,6 +488,8 @@ export function desugarExpr(expr: A.Expr): A.Expr {
       return new A.SInstantiate(expr.l, desugarExpr(expr.expr), expr.params.map(desugarAnn));
     case 's-block':
       return desugarBodySpine(expr);
+    case 's-scope-block':
+      return new A.SScopeBlock(expr.l, expr.entries.map(desugarScopeEntry), desugarExpr(expr.tail));
     case 's-user-block':
       return desugarExpr(expr.body);
     case 's-template': return expr; // template-exn(l)
