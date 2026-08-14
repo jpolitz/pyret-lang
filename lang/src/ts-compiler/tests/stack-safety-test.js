@@ -82,7 +82,7 @@ const CASES = [
   ['chain', 500, true, 'anf continuation unwind (borderline at 600k)'],
   ['chain', 2000, true, 'parse-pyret tr app-expr chain'],
   ['ask', 400, false],
-  ['ask', 2000, true, 'flatness a-if arm cycle'],
+  ['ask', 2000, false],
   ['data', 150, false],
   ['data', 1000, false],
   ['cases', 150, false],
