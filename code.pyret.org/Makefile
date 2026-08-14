@@ -457,20 +457,32 @@ $(CPOGZ): $(CPOMAIN)
 # modules) plus a browser bundle of lang/src/ts-compiler. The editor
 # page selects between flavors via ?compiler=ts or CPO_COMPILER=ts
 # (see src/web/editor.html and src/server.js).
+#
+# The servable ts artifacts are gzip-at-rest under canonical names next
+# to cpo-main.jarr.gz.js -- cpo-main-ts.jarr.gz.js and ts-compiler.gz.js
+# -- because every consumer derives their URLs from PYRET's directory
+# (see editor.html). The plain browserify bundle is an intermediate and
+# deliberately lives OUTSIDE build/web so no packaging step ships it.
 # ============================================================
 
 TS_CPOMAIN=build/web/js/cpo-main-ts.jarr
 TS_CPOGZ=build/web/js/cpo-main-ts.jarr.gz.js
-TS_COMPILER_JS=build/web/js/ts-compiler.js
+TS_COMPILER_JS=build/ts-compiler.js
+TS_COMPILER_GZ=build/web/js/ts-compiler.gz.js
 
 .PHONY: ts-libpyret
 ts-libpyret:
 	$(MAKE) ts-compiler -C pyret/
 
 $(TS_COMPILER_JS): src/scripts/make-ts-compiler-entry.js ts-libpyret
-	@$(call MKDIR,build/web/js)
+	@$(call MKDIR,build)
 	node src/scripts/make-ts-compiler-entry.js build/ts-compiler-entry.js
 	npx browserify build/ts-compiler-entry.js -s PyretTSCompiler -o $(TS_COMPILER_JS)
+
+$(TS_COMPILER_GZ): $(TS_COMPILER_JS)
+	@$(call MKDIR,build/web/js)
+	npx uglifyjs --compress -o $(TS_COMPILER_JS).min -- $(TS_COMPILER_JS)
+	gzip -c -f $(TS_COMPILER_JS).min > $(TS_COMPILER_GZ)
 
 $(TS_CPOMAIN): $(BUNDLED_DEPS) $(TROVE_JS) $(TROVE_ARR) $(WEBJS) src/web/js/*.js src/web/arr/*.arr cpo-standalone.js cpo-config.json src/web/arr/cpo-main-ts.arr $(PHASEA)
 	mkdir -p compiled/;
@@ -493,7 +505,7 @@ $(TS_CPOGZ): $(TS_CPOMAIN)
 	gzip -c -f $(TS_CPOMAIN).min > $(TS_CPOGZ)
 
 .PHONY: web-ts
-web-ts: $(TS_COMPILER_JS) $(TS_CPOMAIN) $(TS_CPOGZ)
+web-ts: $(TS_CPOMAIN) $(TS_CPOGZ) $(TS_COMPILER_GZ)
 
 clean:
 	rm -rf build/

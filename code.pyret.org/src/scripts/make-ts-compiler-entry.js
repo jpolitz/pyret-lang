@@ -1,6 +1,7 @@
 /*
   Generates the browserify entry for the TypeScript compiler bundle
-  (build/web/js/ts-compiler.js). The TS compiler reuses a handful of
+  (build/ts-compiler.js, gzipped into build/web/js/ts-compiler.gz.js for
+  serving). The TS compiler reuses a handful of
   runtime-independent AMD-style JS modules (tokenizer, generated parser,
   js-numbers, type-util, jglr); in node it loads them from disk, in the
   browser their sources are registered up front via the amd hook.

@@ -184,16 +184,12 @@ export const effectiveIds: Map<string, boolean> = new Map();
 export function freshId(id: A.Name): A.Name {
   const baseName = A.isSTypeGlobal(id) ? id.tosourcestring() : id.toname();
   const noHyphens = baseName.split('-').join('$');
-  // Retry collisions in a loop (self-recursion here burns one frame per
-  // collision, which adds up on small stacks).
-  for (;;) {
-    const n = jsNames.makeAtom(noHyphens);
-    if (effectiveIds.has(n.tosourcestring())) { // awkward name collision!
-      continue;
-    }
-    effectiveIds.set(n.tosourcestring(), true);
-    return n;
+  let n = jsNames.makeAtom(noHyphens);
+  while (effectiveIds.has(n.tosourcestring())) { // awkward name collision!
+    n = jsNames.makeAtom(noHyphens);
   }
+  effectiveIds.set(n.tosourcestring(), true);
+  return n;
 }
 
 export function jsIdOf(id: A.Name): A.Name {
@@ -2499,12 +2495,21 @@ export class CompilerVisitor {
             CL.map_list((m: N.AVariantMember) => (N.isAMutable(m.memberType) ? jTrue : jFalse) as J.JExprT, (v as N.AVariant$).members));
 
       const reflFieldsId = jsIdOf(compilerName(vname + '_getfields'));
+      const refmaskId = constId('refmask');
+      // refmask says which fields the caller wants dereferenced: `cases`
+      // passes the fields its branch bound with `ref`, and _match passes the
+      // mutable ones.  derefField also raises if that disagrees with the
+      // field itself.
       const reflFields: J.JExprT =
         N.isAVariant(v)
-          ? jFun(J.nextJFunId(), 'singleton_variant',
-            clist<A.Name>(constId('f')), jBlock1(jReturn(jApp(jId(fId),
-              CL.map_list((m: N.AVariantMember) =>
-                getDictField(THIS, jStr(m.bind.id.toname())), v.members)))))
+          ? jFun(J.nextJFunId(), 'variant',
+            clist<A.Name>(fId, refmaskId), jBlock1(jReturn(jApp(jId(fId),
+              CL.map_list_n((i: number, m: N.AVariantMember) => {
+                const field = getDictField(THIS, jStr(m.bind.id.toname()));
+                const mask = jBracket(jId(refmaskId), jNum(i));
+                return rtMethod('derefField',
+                  clist<J.JExprT>(field, jBool(N.isAMutable(m.memberType)), mask));
+              }, 0, v.members)))))
           : jFun(J.nextJFunId(), 'variant',
             clist<A.Name>(constId('f')), jBlock1(jReturn(jApp(jId(fId), clEmpty))));
 

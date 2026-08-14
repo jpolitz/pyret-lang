@@ -112,7 +112,7 @@
 					],
 					"markdownEnumDescriptions": [
 						"The stock Pyret-hosted compiler (`cpo-main.jarr`)",
-						"The TypeScript port of the compiler (`cpo-main-ts.jarr` + `ts-compiler.js`; requires the extension to be built from a code.pyret.org build that ran `make web-ts`)"
+						"The TypeScript port of the compiler (`cpo-main-ts.jarr.gz.js` + `ts-compiler.gz.js`; requires the extension to be built from a code.pyret.org build that ran `make web-ts`)"
 					],
 					"description": "Which compiler backend the editor webview loads (the same knob as code.pyret.org's ?compiler= flag)"
 				}

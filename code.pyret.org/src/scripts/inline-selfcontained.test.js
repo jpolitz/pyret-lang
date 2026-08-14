@@ -45,7 +45,7 @@ test("absolutizeCssUrls rebases relative urls, leaves data:/http(s):/rooted/#fra
 const TEMPLATE = [
   '<html><head>',
   '<script>window.PYRET = "{{&PYRET}}"; window.PYRET_GZIPPED = "{{ PYRET_GZIPPED }}" === "true";</script>',
-  '<script>window.PYRET_TS = "{{&PYRET_TS}}"; window.CPO_COMPILER = "{{&CPO_COMPILER}}" || "pyret";</script>',
+  '<script>window.CPO_COMPILER = "{{&CPO_COMPILER}}" || "pyret";</script>',
   '{{^PYRET_GZIPPED}}<link rel="preload" href="{{&PYRET}}" as="script">{{/PYRET_GZIPPED}}',
   '<link rel="stylesheet" href="{{ &BASE_URL }}/css/editor.css" />',
   '<link rel="icon" href="{{ &BASE_URL }}/img/icon.png" />',
@@ -79,8 +79,9 @@ test("buildSelfContained: end to end on a miniature editor.html", () => {
   // gzip flag baked true; the non-gzip preload section dropped
   assert.ok(html.includes('window.PYRET = "' + BASE + '/js/cpo-main.jarr.gz.js"'));
   assert.ok(!html.includes("preload"));
-  // ts flavor: asset path baked, backend choice left as a sentinel
-  assert.ok(html.includes('window.PYRET_TS = "' + BASE + '/js/cpo-main-ts.jarr.gz.js"'));
+  // ts flavor: nothing bakes its asset URLs (they derive in-page from
+  // PYRET's directory); only the backend choice survives, as a sentinel
+  assert.ok(!html.includes("PYRET_TS"));
   // runtime sentinels survive for the extension's split/join, exactly once
   assert.strictEqual(html.split(HASH).length - 1, 1);
   assert.strictEqual(html.split(URL_FILE_MODE).length - 1, 1);
