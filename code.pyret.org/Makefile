@@ -452,11 +452,20 @@ $(CPOGZ): $(CPOMAIN)
 	gzip -c -f $(CPOMAIN).min > $(CPOGZ)
 
 # ============================================================
-# TypeScript compiler flavor (strictly additive, opt-in).
-# Builds a second jarr (cpo-main-ts.jarr, no Pyret-hosted compiler
-# modules) plus a browser bundle of lang/src/ts-compiler. The editor
-# page selects between flavors via ?compiler=ts or CPO_COMPILER=ts
-# (see src/web/editor.html and src/server.js).
+# TypeScript compiler flavor (strictly additive, opt-in), and with it the
+# interpreter flavor. Builds a second jarr (cpo-main-ts.jarr, no
+# Pyret-hosted compiler modules) plus a browser bundle of
+# lang/src/ts-compiler. The editor page selects between flavors via
+# ?compiler=ts / ?compiler=interp or CPO_COMPILER (see src/web/editor.html
+# and src/server.js).
+#
+# ts and interp share every artifact here: same jarr, same compiler bundle.
+# They differ only in the back end the bundled compiler uses, which
+# cpo-main-ts.js reads off CPO_COMPILER. That is why this jarr is built
+# with cpo-config-ts.json rather than cpo-config.json -- the one extra
+# entry is the Pyret VM, which interpreted modules name as their
+# nativeRequire and which therefore has to be in this bundle (and only
+# this one; the stock jarr never interprets anything).
 #
 # The servable ts artifacts are gzip-at-rest under canonical names next
 # to cpo-main.jarr.gz.js -- cpo-main-ts.jarr.gz.js and ts-compiler.gz.js
@@ -484,7 +493,7 @@ $(TS_COMPILER_GZ): $(TS_COMPILER_JS)
 	npx uglifyjs --compress -o $(TS_COMPILER_JS).min -- $(TS_COMPILER_JS)
 	gzip -c -f $(TS_COMPILER_JS).min > $(TS_COMPILER_GZ)
 
-$(TS_CPOMAIN): $(BUNDLED_DEPS) $(TROVE_JS) $(TROVE_ARR) $(WEBJS) src/web/js/*.js src/web/arr/*.arr cpo-standalone.js cpo-config.json src/web/arr/cpo-main-ts.arr $(PHASEA)
+$(TS_CPOMAIN): $(BUNDLED_DEPS) $(TROVE_JS) $(TROVE_ARR) $(WEBJS) src/web/js/*.js src/web/arr/*.arr cpo-standalone.js cpo-config-ts.json src/web/arr/cpo-main-ts.arr $(PHASEA)
 	mkdir -p compiled/;
 	node pyret/build/phaseA/pyret.jarr \
     --builtin-js-dir src/web/js/trove/ \
@@ -492,7 +501,7 @@ $(TS_CPOMAIN): $(BUNDLED_DEPS) $(TROVE_JS) $(TROVE_ARR) $(WEBJS) src/web/js/*.js
     -allow-builtin-overrides \
     --builtin-arr-dir src/web/arr/trove/ \
     --builtin-arr-dir pyret/src/arr/trove/ \
-    --require-config cpo-config.json \
+    --require-config cpo-config-ts.json \
     --build-runnable src/web/arr/cpo-main-ts.arr \
     --standalone-file cpo-standalone.js \
     --compiled-dir ./compiled \

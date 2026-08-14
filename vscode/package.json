@@ -108,11 +108,13 @@
 					"scope": "resource",
 					"enum": [
 						"pyret",
-						"ts"
+						"ts",
+						"interp"
 					],
 					"markdownEnumDescriptions": [
 						"The stock Pyret-hosted compiler (`cpo-main.jarr`)",
-						"The TypeScript port of the compiler (`cpo-main-ts.jarr.gz.js` + `ts-compiler.gz.js`; requires the extension to be built from a code.pyret.org build that ran `make web-ts`)"
+						"The TypeScript port of the compiler (`cpo-main-ts.jarr.gz.js` + `ts-compiler.gz.js`; requires the extension to be built from a code.pyret.org build that ran `make web-ts`)",
+						"The TypeScript compiler's interpreter back end: your program runs on the Pyret VM instead of being translated to JavaScript (same assets as `ts`)"
 					],
 					"description": "Which compiler backend the editor webview loads (the same knob as code.pyret.org's ?compiler= flag)"
 				}

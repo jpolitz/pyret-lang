@@ -129,7 +129,8 @@ export function getHtmlForWebview(context: vscode.ExtensionContext, webview: vsc
   // the same knob as code.pyret.org's ?compiler= flag. The selfcontained
   // template bakes both flavors' asset paths (relative to the BASE_URL
   // sentinel); this fill is only the choice between them.
-  const compiler = config.get('compiler') === 'ts' ? 'ts' : 'pyret';
+  const configured = config.get('compiler');
+  const compiler = (configured === 'ts' || configured === 'interp') ? configured : 'pyret';
   // Plain string replacement of the build's literal placeholders. split/join,
   // not String.replace, so a `$` in a filled value can't be read as a
   // replacement pattern.

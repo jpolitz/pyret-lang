@@ -350,7 +350,7 @@ $(TS_COMP_OUT)/pyret.js: $(TS_COMP_SRC) $(TS_COMP_DIR)/tsconfig.json $(TS_COMP_D
 
 
 # Runtime/support files for the TS compiler's output dir (mirrors PHASEA_ALL_DEPS)
-TS_COMP_ALL_DEPS := $(patsubst src/%,$(TS_COMP_OUT)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(TS_COMP_OUT)/js/%.js,$(COPY_LIB)) $(TS_COMP_OUT)/bundled-node-compile-deps.js $(TS_COMP_OUT)/bundled-node-deps.js $(TS_COMP_OUT)/config.json
+TS_COMP_ALL_DEPS := $(patsubst src/%,$(TS_COMP_OUT)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(TS_COMP_OUT)/js/%.js,$(COPY_LIB)) $(TS_COMP_OUT)/bundled-node-compile-deps.js $(TS_COMP_OUT)/bundled-node-deps.js $(TS_COMP_OUT)/config.json $(TS_COMP_OUT)/config-interp.json
 
 $(TS_COMP_OUT)/js/%.js: src/js/base/%.js
 	@$(call MKDIR,$(TS_COMP_OUT)/js)
@@ -367,6 +367,11 @@ $(TS_COMP_OUT)/bundled-node-deps.js: src/js/trove/require-node-dependencies.js
 	$(NPM_EXEC) browserify src/js/trove/require-node-dependencies.js -o $@
 
 $(TS_COMP_OUT)/config.json: src/scripts/node_modules-config.json
+	cp $< $@
+
+# Same config plus the machine's raw-js entry; the served interp backend
+# defaults to it (see server.ts) so `pyret --backend interp` bundles the VM.
+$(TS_COMP_OUT)/config-interp.json: src/scripts/node_modules-config-interp.json
 	cp $< $@
 
 .PHONY : ts-compiler
@@ -427,7 +432,7 @@ ts-wf-parity: ts-compiler $(PHASEA)/pyret.jarr
 # lib-compiled as a read-only cache (how the npm package ships builtins).
 .PHONY : ts-serve-test
 ts-serve-test: ts-compiler $(TS_COMP_OUT)/libs.jarr $(CONFIGA_RUNTIME_FILES)
-	bash $(TS_COMP_DIR)/tests/serve-test.sh
+	bash $(TS_COMP_DIR)/tests/serve-test.sh js
 
 # standalone-configA.json is shared with the .arr side and names
 # build/phaseA/js/* for the runtime support files (baseUrl build/phaseA),
@@ -587,6 +592,154 @@ ts-repl-test: ts-compiler $(TS_COMPILED_CACHE_WARM)
 # browser-like --stack-size; `todo` cases are the known-overflow frontier.
 ts-stack-safety-test: ts-compiler
 	$(NODE) --test src/ts-compiler/tests/stack-safety-test.js
+
+# ============================================================
+# Interpreter back end (src/ts-compiler/src/interp + src/js/base/pyret-vm.js)
+#
+# Same compiler, same front end, same runtime, same module format --
+# `--backend interp` swaps the code generator for a bytecode emitter and
+# runs the result on the Pyret VM. It is selected exactly the way the ts
+# compiler flavor is: a flag on the CLI (`pyret --backend interp` in npm/),
+# a query parameter at code.pyret.org startup (?compiler=interp).
+#
+# Two things differ from the js-backend targets and both are deliberate:
+#   * a separate compiled-module cache (compiled-interp/, tests/interp-compiled/),
+#     since a cached module records which back end produced it only by
+#     living in that back end's directory;
+#   * a separate requirejs config (standalone-config-interp.json), which is
+#     standalone-configA.json plus the one raw-js file the machine lives in.
+#     Interpreted modules name it as their single nativeRequire.
+# ============================================================
+
+INTERP_PYRET = $(TS_PYRET) --backend interp
+INTERP_CONFIG = src/scripts/standalone-config-interp.json
+
+INTERP_TEST_BUILD = $(INTERP_PYRET) \
+	  --builtin-js-dir src/js/trove/ \
+		--builtin-arr-dir src/arr/trove/ \
+		--require-config $(INTERP_CONFIG) \
+		--compiled-dir tests/interp-compiled/
+
+# `make path/to/foo.interp.jarr` builds path/to/foo.arr through the machine,
+# mirroring the %.jarr and %.ts.jarr rules.
+%.interp.jarr: $(TS_COMP_OUT)/pyret.js %.arr $(CONFIGA_RUNTIME_FILES)
+	$(INTERP_PYRET) --outfile $*.interp.jarr \
+                      --build-runnable $*.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir compiled-interp/ \
+                      $(EXTRA_FLAGS) \
+                      --require-config $(INTERP_CONFIG)
+
+# Warming the interpreter's own module cache, the way tests/%/.ts-suite-warm
+# warms the js one: a cached module says which back end built it only by
+# which directory it is in.
+INTERP_COMPILED_CACHE_WARM=tests/interp-compiled/.interp-suite-warm
+.SECONDARY: $(INTERP_COMPILED_CACHE_WARM)
+
+tests/%/.interp-suite-warm: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS) $(CONFIGA_RUNTIME_FILES)
+	@$(call MKDIR,tests/$*)
+	echo '"warm"' > $(TS_COMP_OUT)/interp-cache-warm-$*.arr
+	$(INTERP_PYRET) --build-runnable $(TS_COMP_OUT)/interp-cache-warm-$*.arr \
+                      --outfile $(TS_COMP_OUT)/interp-cache-warm-$*.jarr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir tests/$*/ \
+                      --deps-file $(TS_COMP_OUT)/bundled-node-compile-deps.js \
+                      -no-check-mode -no-display-progress \
+                      --require-config $(INTERP_CONFIG)
+	$(call RM,$(TS_COMP_OUT)/interp-cache-warm-$*.arr)
+	touch $@
+
+# repl.ts against a REAL in-process load-lib runtime, with interactions
+# compiled to bytecode: the same test ts-repl-test runs, on the machine.
+.PHONY : interp-repl-test
+interp-repl-test: ts-compiler $(INTERP_COMPILED_CACHE_WARM)
+	PYRET_TEST_BACKEND=interp $(NODE) --test src/ts-compiler/tests/repl-test.js
+
+# The opcode table and program format are stated twice on purpose -- once
+# for the emitter, once for the machine -- so that neither has to import
+# the other. This asserts they still agree, and exercises the assembler.
+.PHONY : interp-unit-test
+interp-unit-test: ts-compiler
+	$(NODE) --test src/ts-compiler/tests/interp-unit-test.js
+
+# Behavioral coverage for the back end: every parity program built both
+# ways with the same front end, requiring identical output. See the header
+# of the script for why this is the load-bearing interpreter test.
+.PHONY : interp-parity-test
+interp-parity-test: ts-compiler $(CONFIGA_RUNTIME_FILES)
+	bash $(TS_COMP_DIR)/tests/interp-parity.sh
+
+tests/pyret/main2-interp.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/pyret/main2.arr $(TEST_FILES)
+	$(INTERP_TEST_BUILD) \
+		--outfile tests/pyret/main2-interp.jarr \
+		--build-runnable tests/pyret/main2.arr \
+		-check-all
+
+# The language/runtime suite, interpreted: pure machine coverage (main2 has
+# no compile-at-runtime tests, so nothing here re-enters the compiler).
+.PHONY : interp-pyret-test
+interp-pyret-test: tests/pyret/main2-interp.jarr
+	$(NODE) tests/pyret/main2-interp.jarr
+
+tests/pyret/regression-interp.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/pyret/regression.arr $(REG_TEST_FILES)
+	$(INTERP_TEST_BUILD) \
+		--build-runnable tests/pyret/regression.arr --outfile tests/pyret/regression-interp.jarr
+
+.PHONY : interp-regression-test
+interp-regression-test: tests/pyret/regression-interp.jarr
+	$(NODE) tests/pyret/regression-interp.jarr
+
+tests/type-check/main-interp.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/type-check/main.arr $(TYPE_TEST_FILES)
+	$(INTERP_TEST_BUILD) \
+		--build-runnable tests/type-check/main.arr --outfile tests/type-check/main-interp.jarr
+
+.PHONY : interp-type-check-test
+interp-type-check-test: tests/type-check/main-interp.jarr
+	$(NODE) tests/type-check/main-interp.jarr
+
+.PHONY : interp-io-test
+interp-io-test: ts-compiler $(CONFIGA_RUNTIME_FILES)
+	$(NPM_EXEC) jest --detectOpenHandles --forceExit --verbose "src/ts-compiler/tests/io-interp.test.js"
+
+# The counterpart of all-pyret-test / all-ts-pyret-test: the same
+# tests/all.arr, interpreted. That includes compiler-tests.arr, whose
+# modules invoke the compiler AT TEST RUNTIME -- so those run the .arr
+# compiler itself on the machine, and their compile cache in tests/compiled/
+# has to be warm for the same reason the ts target's does.
+tests/pyret/all-interp.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) $(MAIN_TEST_FILES)
+	$(INTERP_TEST_BUILD) \
+		--build-runnable tests/all.arr \
+    --outfile tests/pyret/all-interp.jarr \
+		-check-all
+
+.PHONY : all-interp-pyret-test
+all-interp-pyret-test: tests/pyret/all-interp.jarr $(TS_SUITE_CACHE_WARM)
+	$(NODE) tests/pyret/all-interp.jarr
+
+# The npm CLI's `pyret --backend interp` path: same server smoke test, with
+# the back end the client asks for and the config the server then defaults
+# to. Step 2 runs the standalone, so the bundled machine is covered too.
+.PHONY : interp-serve-test
+interp-serve-test: ts-compiler $(TS_COMP_OUT)/libs.jarr $(CONFIGA_RUNTIME_FILES)
+	bash $(TS_COMP_DIR)/tests/serve-test.sh interp
+
+.PHONY : interp-test
+interp-test: interp-unit-test interp-parity-test interp-repl-test interp-serve-test all-interp-pyret-test interp-io-test
+
+.PHONY : interp-clean
+interp-clean:
+	$(call RMDIR,compiled-interp)
+	$(call RMDIR,tests/interp-compiled)
+	$(call RM,tests/pyret/main2-interp.jarr)
+	$(call RM,tests/pyret/regression-interp.jarr)
+	$(call RM,tests/type-check/main-interp.jarr)
+	$(call RM,tests/pyret/all-interp.jarr)
+	$(call RMDIR,$(TS_COMP_OUT)/interp-parity)
+	$(call RMDIR,$(TS_COMP_OUT)/serve-test-interp)
+	$(call RMDIR,$(TS_COMP_OUT)/interp-bench)
+	$(call RM,$(INTERP_COMPILED_CACHE_WARM))
 
 # ============================================================
 # Bootstrap convergence: byte-identical, self-fixpointing compilers

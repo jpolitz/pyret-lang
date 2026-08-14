@@ -15,8 +15,8 @@ const { findEditorFrame } = require("../shared/find-frame");
 const { resourceScope } = require("../shared/resource-scope");
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:4999";
-// PYRET_COMPILER=ts makes the host page embed the TS-compiler flavor of the
-// editor (embed1.js forwards it to the iframe as /editor?compiler=ts, the
+// PYRET_COMPILER=ts|interp makes the host page embed that flavor of the
+// editor (embed1.js forwards it to the iframe as /editor?compiler=..., the
 // same knob the embed library's `compiler` config option uses).
 const COMPILER = process.env.PYRET_COMPILER || "pyret";
 

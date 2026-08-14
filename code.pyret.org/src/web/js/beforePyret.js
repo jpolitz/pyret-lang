@@ -1522,14 +1522,15 @@ $(function() {
     // DecompressionStream, then run it from a Blob URL. The `error` handler
     // registered below (synchronously) fires before this async append resolves.
     //
-    // In the ts flavor the compiler bundle has the same MIME problem (its
-    // <script src> in editor.html is skipped under PYRET_GZIPPED) and, like
-    // the jarr, is gzip bytes at rest (ts-compiler.gz.js) that this host
-    // serves without Content-Encoding -- so fetch, inflate, and Blob-execute
-    // it FIRST: the jarr expects window.PyretTSCompiler, matching the
-    // synchronous script order of the un-gzipped page.
+    // In the ts and interp flavors the compiler bundle has the same MIME
+    // problem (its <script src> in editor.html is skipped under
+    // PYRET_GZIPPED) and, like the jarr, is gzip bytes at rest
+    // (ts-compiler.gz.js) that this host serves without Content-Encoding --
+    // so fetch, inflate, and Blob-execute it FIRST: the jarr expects
+    // window.PyretTSCompiler, matching the synchronous script order of the
+    // un-gzipped page.
     var tsCompilerLoad = Promise.resolve();
-    if (window.CPO_COMPILER === "ts" && window.PYRET_TS_COMPILER) {
+    if (window.CPO_USES_TS_ASSETS && window.PYRET_TS_COMPILER) {
       tsCompilerLoad = fetch(window.PYRET_TS_COMPILER)
         .then(function (resp) {
           if (!resp.ok) { throw new Error("status " + resp.status); }
