@@ -374,7 +374,7 @@
           builtinSupport.loadables,
           pyRealm,
           {},
-          tsLib.makeFinderFactory(builtinSupport, sourceCache),
+          tsLib.makeFinderFactory(builtinSupport, urlFileMode),
           reparteeOptions);
       }
 
