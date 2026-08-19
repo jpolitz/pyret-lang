@@ -108,6 +108,12 @@ jobs:
           name: vscode-dist
           path: vscode/dist
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('browser-test/package-lock.json') }}
+
       - name: Install browser-test deps + Chromium
         working-directory: ./browser-test
         # --ignore-scripts skips the implicit @playwright/browser-chromium and
