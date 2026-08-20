@@ -23,10 +23,17 @@ run_backend() {
   local out="$smokedir/out-$backend.log"
   local status
   set +e
-  node node_modules/pyret-npm/pyret.js --backend "$backend" --port "$sock" smoke.arr > "$out" 2>&1
+  timeout 300 bash -c \
+    "set -o pipefail; node node_modules/pyret-npm/pyret.js --backend '$backend' --port '$sock' smoke.arr 2>&1 | cat" \
+    > "$out" 2>&1
   status=$?
   set -e
   node node_modules/pyret-npm/pyret.js --backend "$backend" --port "$sock" -s > /dev/null 2>&1 || true
+  if [ "$status" -eq 124 ]; then
+    echo "packaged cli hung for backend $backend: the piped run never saw EOF (the compile server is holding the client's stdout)"
+    cat "$out"
+    exit 1
+  fi
   if [ "$status" -ne 0 ] || ! grep -q "Looks shipshape" "$out"; then
     echo "packaged cli failed for backend $backend (exit $status):"
     cat "$out"

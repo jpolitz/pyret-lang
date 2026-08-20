@@ -203,19 +203,27 @@ function start(options) {
     // that also keeps it from re-exec'ing itself for --stack-size, which
     // would sever this IPC channel and lose the startup success message.
     const isTS = options.client.backend === "ts";
+    const serverLog = port + ".log";
+    const logFd = fs.openSync(serverLog, "a");
     const child = childProcess.fork(
       serverModule,
       ["-serve", "--port", port],
       {
-        stdio: [0, 1, 2, 'ipc'],
+        stdio: ['ignore', logFd, logFd, 'ipc'],
+        detached: true,
         execArgv: isTS
           ? ["--max-old-space-size=8192", "--stack-size=8192"]
           : ["-max-old-space-size=8192"]
       } // To send messages on completion of startup
     );
+    fs.closeSync(logFd);
 
     if(wait) {
       return new Promise((resolve, reject) => {
+        child.on('exit', function(code, signal) {
+          reject(new Error("the compile server exited during startup (" +
+            (signal || ("exit code " + code)) + "); its output is in " + serverLog));
+        });
         child.on('message', function(msg) {
           if(msg.type === 'success') {
             child.unref();
@@ -244,7 +252,10 @@ function start(options) {
       shutdown();
       startupServer(portFile, true)
         .then(() => makeSocketAndConnect())
-        .catch((err) => error('Starting up the server failed: ', err));
+        .catch((err) => {
+          console.error('Starting up the server failed: ', err);
+          process.exitCode = 1;
+        });
     }
     else {
       log("Connecting to: ", connectURL);
@@ -259,7 +270,10 @@ function start(options) {
       info("Starting up server...");
       startupServer(portFile, true)
         .then(() => makeSocketAndConnect())
-        .catch((err) => console.error('Starting up the server failed: ', err));
+        .catch((err) => {
+          console.error('Starting up the server failed: ', err);
+          process.exitCode = 1;
+        });
     }
   }
 
