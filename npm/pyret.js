@@ -132,7 +132,7 @@ const usages = [
       {
         name: 'backend',
         typeLabel: "{underline pyret|ts}",
-        description: "Which compiler backend to use (default pyret, or the PYRET_COMPILER environment variable). {bold ts} selects the TypeScript port of the compiler, if this installation was built with it; each backend keeps its own compile server and socket. An explicit {bold --compiler} path overrides this choice."
+        description: "Which compiler backend to use (defaults to {bold pyret} or the PYRET_COMPILER environment variable if set). {bold ts} selects the TypeScript port of the compiler. An explicit {bold --compiler} path overrides this choice."
       },
     ]
   },
