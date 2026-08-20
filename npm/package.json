@@ -5,7 +5,8 @@
   "files": [
     "pyret.js",
     "client-lib.js",
-    "pyret-lang/build/phaseA/*"
+    "pyret-lang/build/phaseA/*",
+    "pyret-lang/build/ts-compiler/*"
   ],
   "dependencies": {
     "ascii-table": "^0.0.9",
