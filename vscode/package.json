@@ -111,10 +111,10 @@
 						"ts"
 					],
 					"markdownEnumDescriptions": [
-						"The stock Pyret-hosted compiler (`cpo-main.jarr`)",
-						"The TypeScript port of the compiler (`cpo-main-ts.jarr.gz.js` + `ts-compiler.gz.js`; requires the extension to be built from a code.pyret.org build that ran `make web-ts`)"
+						"“Regular” Pyret. This is the default, pick this if you're not sure.",
+						"A version of the compiler implemented in TypeScript. No special features, just loads and runs faster. Currently an experiment."
 					],
-					"description": "Which compiler backend the editor webview loads (the same knob as code.pyret.org's ?compiler= flag)"
+					"description": "Which compiler implementation to use"
 				}
 			}
 		}
