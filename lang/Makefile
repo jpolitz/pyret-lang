@@ -689,15 +689,6 @@ $(PHASEBTS)/config.json: src/scripts/node_modules-config.json
 $(PHASECTS)/config.json: src/scripts/node_modules-config.json
 	cp $< $@
 
-# TS-seeded self-fixpoint: phaseB-ts must equal phaseC-ts.
-#
-# Always rebuilt FRESH: both compilers (the .arr original and the TS port,
-# faithfully) serialize the standalone's natives list and module map in
-# worklist order, and the worklist differs when modules load from a
-# populated compiled/ cache instead of being compiled -- so a jarr
-# regenerated over a warm cache is byte-shuffled relative to a fresh one,
-# and comparing across cache states reports phantom divergence. CI is
-# always fresh; this makes local runs mean the same thing.
 .PHONY : no-diff-ts
 no-diff-ts:
 	rm -rf $(PHASEBTS)/pyret.jarr $(PHASEBTS)/compiled $(PHASECTS)/pyret.jarr $(PHASECTS)/compiled
@@ -707,9 +698,6 @@ no-diff-ts:
 # The grand convergence check.  Builds both chains and asserts that all
 # four standalones are one byte-identical fixpoint reached from two
 # independent seeds (the committed phase0 chain and the TS compiler).
-# Byte comparisons are only meaningful between FRESH builds (see the
-# no-diff-ts comment: warm compiled/ caches reorder the standalone); CI
-# starts clean, and locally the quick fresh check is `make no-diff-ts`.
 #   * phaseB    == phaseC     (.arr self-fixpoint; == existing no-diff-standalone)
 #   * phaseB-ts == phaseC-ts  (TS  self-fixpoint)
 #   * phaseB    == phaseB-ts  (headline: TS compiler is a byte-exact drop-in)

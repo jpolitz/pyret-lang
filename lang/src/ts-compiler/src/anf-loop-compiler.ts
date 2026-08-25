@@ -689,11 +689,6 @@ export function compileFunBody(
 ): J.JBlockT {
   let argUsedInLambda = false;
   const argNames = args.map((a) => a.id);
-  // Detect whether any formal argument is referenced from inside a nested
-  // lambda (that disables TCO below). This is a pure usage query, so
-  // traversal order is irrelevant; AExpr bodies are queued and drained by
-  // the loop below instead of recursed, to keep stack depth bounded on
-  // long statement chains, while lettables recurse (nesting-bounded).
   const pendingBodies: Array<{ body: N.AExpr; lam: boolean }> = [{ body, lam: false }];
   function scanVal(v: N.AVal, lam: boolean): void {
     if (lam && !argUsedInLambda && v.$name === 'a-id' && argNames.some((an) => an.key() === v.id.key())) {
@@ -1102,10 +1097,7 @@ export function compileAnnotatedLet(
 }
 
 /*
-  Compilation of the flattened AExpr chain.
-
-  An AExpr is a flat list of statement heads plus a tail lettable (see
-  ast-anf.ts). The recursive formulation compiled each head by doing some
+  The original recursive implementation compiled each head by doing some
   work, compiling the entire rest of the chain, and then wrapping the
   compiled rest -- one stack frame per statement. Here each head's
   compilation is split at exactly that point: a "pre" phase (the work
@@ -1114,10 +1106,7 @@ export function compileAnnotatedLet(
   after -- wrapping the destination binding, assembling the block and
   case list) folded backward from the compiled tail. The effect order
   (jsIdOf/freshId minting, makeLabel, getLoc interning, dispatch-table
-  pushes) is exactly the recursive formulation's, so the generated code
-  is identical. Genuinely nested AExprs (if/cases branch bodies, lambda
-  bodies) are compiled by plain recursion: nesting depth costs stack,
-  statement count does not.
+  pushes) is kept exactly the same, so the generated code is identical.
 */
 type HeadPost = (rest: DAG.CBlock) => DAG.CBlock;
 
@@ -1212,8 +1201,6 @@ function finishRest(
   return [clCons(jCase(preBodyLabel, compiledBody.block) as J.JCaseT, compiledBody.newCases), preBodyLabel];
 }
 
-// Plain (non-split) lettables: the compiled expression either binds a
-// destination or runs for effect at the head of the following block.
 function plainPost(compiler: CompilerVisitor, b: BindType | undefined, compiledE: DAG.CExp): HeadPost {
   if (b !== undefined) {
     return (rest) => compileAnnotatedLet(compiler, b, compiledE, rest);
@@ -1260,8 +1247,6 @@ function preLettable(compiler: CompilerVisitor, b: BindType | undefined, e: N.AL
   }
 }
 
-// The tail lettable of an AExpr: there is no rest of the chain, so split
-// forms jump to the enclosing target and plain forms assign the answer.
 function compileTailLettable(compiler: CompilerVisitor, e: N.ALettable): DAG.CBlock {
   switch (e.$name) {
     case 'a-prim-app': {
@@ -1326,8 +1311,6 @@ function tailPlain(compiler: CompilerVisitor, visitE: DAG.CExp): DAG.CBlock {
     clEmpty);
 }
 
-// Where a flat call in tail position falls through to: jump straight to
-// the enclosing target.
 function tailRemainingBlock(compiler: CompilerVisitor): J.JBlockT {
   return jBlock(clist<J.JStmt>(
     jExpr(jAssign(compiler.curStep, compiler.curTarget)),

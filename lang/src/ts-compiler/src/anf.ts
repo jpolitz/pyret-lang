@@ -31,13 +31,10 @@ export function mkId(loc: N.Loc, base: string): { id: A.Name; idB: N.ABind; idE:
 }
 
 /*
-  AExpr is flat (a heads array plus one tail lettable; see ast-anf.ts), so
-  the iterative spine translations below no longer patch placeholder body
-  fields into nested nodes: a continuation that stands for "the rest of
-  the program is not translated yet" returns an AExpr whose tail is the
-  HOLE sentinel, the caller harvests its heads, and the real rest's heads
-  are appended to the same array. Translation order (hence gensym order)
-  is exactly the Pyret compiler's.
+  This code is careful to maintain the translation order (hence gensym order) as
+  exactly the Pyret compiler's. There are more direct ways to do this that
+  wouldn't result in byte-identical output; this somewhat tortured process lets
+  us do the fold exactly as the natural recursive solution did.
 */
 const HOLE: N.ALettable = new N.AVal(N.dummyLoc, new N.AUndefined(N.dummyLoc));
 
@@ -112,17 +109,6 @@ export function anfName(expr: A.Expr, nameHint: string, k: (v: N.AVal) => N.AExp
   });
 }
 
-/*
-  Iterative version of the natural recursion (which nests one whole anf()
-  activation per element and overflows fixed-size stacks on long lists —
-  e.g. a module's defined values, which are one identifier per top-level
-  definition). Elements are translated left-to-right, exactly as in the
-  recursive formulation, so gensym-generated names are identical. Each
-  element's continuation is single-shot and returns a HOLE-tailed AExpr
-  (with the element's ALet when it needs a name, empty when it ANFs
-  directly to a value); the element's heads accumulate into one array
-  that is prepended onto k's result.
-*/
 export function anfNameRec(
   exprs: A.Expr[],
   nameHint: string,
