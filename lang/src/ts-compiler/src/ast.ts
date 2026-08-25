@@ -1297,6 +1297,10 @@ export class SScopeBlock extends ExprBase {
   }
 }
 
+export function sScopeLetBlock(l: Loc, binds: LetBind[], body: Expr): SScopeBlock {
+  return new SScopeBlock(l, [new SScopeLet(l, binds)], body);
+}
+
 export class SFun extends ExprBase {
   get $name(): 's-fun' { return 's-fun'; }
   constructor(public l: Loc, public name: string, public params: Name[], public args: Bind[],

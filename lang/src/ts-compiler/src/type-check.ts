@@ -19,6 +19,7 @@ import * as AU from './ast-util';
 import * as TS from './type-structs';
 import * as TCS from './type-check-structs';
 import * as C from './compile-structs';
+import { eliminatedScopeForm } from './ast-visitors';
 import {
   InternalCompilerError,
   asVariant,
@@ -368,45 +369,10 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
           }
           case 's-template':
             return new TCS.TypingResult(e, expectType, context);
-          case 's-type-let-expr': {
-            const { l, binds, body, blocky } = e;
-            return handleTypeLetBinds(binds, context).typingBind((_nothing, ctx) =>
-              checking(body, expectType, true, ctx)
-                .mapExpr((newBody) => new A.STypeLetExpr(l, binds, newBody, blocky)));
-          }
-          case 's-let-expr': {
-            const { l, binds, body, blocky } = e;
-            const handler = (l2: Loc, binds2: A.LetBind[], body2: Expr, ctx: Context): AnyTypingResult => {
-              return TCS.foldTyping(synthesisLetBind, binds2, ctx).typingBind((rhsResult, ctx2) => {
-                const newBinds = map2((binding: A.LetBind, rhs: Expr): A.LetBind => {
-                  switch (binding.$name) {
-                    case 's-let-bind':
-                      return new A.SLetBind(binding.l, binding.b, rhs);
-                    case 's-var-bind':
-                      return new A.SVarBind(binding.l, binding.b, rhs);
-                    default:
-                      throw new InternalCompilerError('Unknown LetBind in checking');
-                  }
-                }, binds2, rhsResult);
-                return checking(body2, expectType, topLevel, ctx2)
-                  .mapExpr((newBody) => new A.SLetExpr(l2, newBinds, newBody, blocky))
-                  .bind((newExpr, newType, ctx3) => {
-                    let ctx4 = ctx3;
-                    for (let i = binds2.length - 1; i >= 0; i--) {
-                      ctx4 = ctx4.removeBinding(getField(binds2[i].b, 'id').key());
-                    }
-                    return new TCS.TypingResult(newExpr, newType, ctx4);
-                  });
-              });
-            };
-            return ignoreChecker(l, binds, body, blocky, context, handler);
-          }
-          case 's-letrec': {
-            const { l, binds, body, blocky } = e;
-            return handleLetrecBindings(binds, topLevel, context, (newBinds, ctx) =>
-              checking(body, expectType, topLevel, ctx)
-                .mapExpr((newBody) => new A.SLetrec(l, newBinds, newBody, blocky)));
-          }
+          case 's-type-let-expr':
+          case 's-let-expr':
+          case 's-letrec':
+            return eliminatedScopeForm(e);
           case 's-hint-exp':
             return raise('checking for s-hint-exp not implemented');
           case 's-instantiate':
@@ -425,19 +391,6 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
                 new TCS.TypingResult(new A.SBlock(l, newStmts), expectType, ctx));
           }
           case 's-scope-block': {
-            /*
-              The flat post-resolve-scope block. Each binding group behaves
-              exactly as its nested wrapper did with "the rest of the
-              entries plus the tail" as its body, so checkEntries mirrors
-              that recursion entry by entry: let groups synthesize their
-              binds and remove them from the context after the rest; type-
-              let groups run handleTypeLetBinds and check the rest at
-              top-level (as s-type-let-expr's body was); letrec groups go
-              through handleLetrecBindings with the rest as the body; plain
-              statements check against t-top like non-final block
-              statements. (Recursion depth is the entry count; type
-              checking is optional and outside the stack-safety envelope.)
-            */
             const { l, entries, tail } = e;
             const newEntries: A.ScopeEntry[] = [];
             const checkEntries = (i: number, topLevel2: boolean, ctx0: Context): AnyTypingResult => {
@@ -448,9 +401,7 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
               const entry = entries[i];
               if (A.isSScopeLet(entry)) {
                 const binds2 = entry.binds;
-                // ignore-checker: the toplevel `result-after-checks = ...`
-                // binding whose tail is the module — only the module is
-                // checked, everything else passes through untouched.
+                // ignore-checker (the Pyret original's helper), inlined
                 if (binds2.length === 1) {
                   const bindingId = getField(binds2[0].b, 'id');
                   if (bindingId.$name === 's-atom' && (bindingId as any).base.length >= 19
@@ -737,49 +688,10 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
         const ctx = context.addVariable(newExists);
         return new TCS.TypingResult(e, newExists, ctx);
       }
-      case 's-type-let-expr': {
-        const { l, binds, body, blocky } = e;
-        return handleTypeLetBinds(binds, context).typingBind((_nothing, ctx) =>
-          synthesis(body, false, ctx)
-            .mapExpr((newBody) => new A.STypeLetExpr(l, binds, newBody, blocky))
-            .mapType((t) => t.setLoc(l)));
-      }
-      case 's-let-expr': {
-        const { l, binds, body, blocky } = e;
-        const handler = (l2: Loc, binds2: A.LetBind[], body2: Expr, ctx: Context): AnyTypingResult => {
-          const bindsResult = TCS.foldTyping(synthesisLetBind, binds2, ctx);
-          return bindsResult.typingBind((newRhs, ctx2) => {
-            const newBinds = map2((binding: A.LetBind, rhs: Expr): A.LetBind => {
-              switch (binding.$name) {
-                case 's-let-bind':
-                  return new A.SLetBind(binding.l, binding.b, rhs);
-                case 's-var-bind':
-                  return new A.SVarBind(binding.l, binding.b, rhs);
-                default:
-                  throw new InternalCompilerError('Unknown LetBind in synthesis');
-              }
-            }, binds2, newRhs);
-            return synthesis(body2, false, ctx2)
-              .mapExpr((newBody) => new A.SLetExpr(l2, newBinds, newBody, blocky))
-              .mapType((t) => t.setLoc(l2))
-              .bind((newExpr, newType, ctx3) => {
-                let ctx4 = ctx3;
-                for (let i = binds2.length - 1; i >= 0; i--) {
-                  ctx4 = ctx4.removeBinding(getField(binds2[i].b, 'id').key());
-                }
-                return new TCS.TypingResult(newExpr, newType, ctx4);
-              });
-          });
-        };
-        return ignoreChecker(l, binds, body, blocky, context, handler);
-      }
-      case 's-letrec': {
-        const { l, binds, body, blocky } = e;
-        return handleLetrecBindings(binds, topLevel, context, (newBinds, ctx) =>
-          synthesis(body, topLevel, ctx)
-            .mapExpr((newBody) => new A.SLetrec(l, newBinds, newBody, blocky))
-            .mapType((t) => t.setLoc(l)));
-      }
+      case 's-type-let-expr':
+      case 's-let-expr':
+      case 's-letrec':
+        return eliminatedScopeForm(e);
       case 's-hint-exp':
         return raise('synthesis for s-hint-exp not implemented');
       case 's-instantiate': {
@@ -797,11 +709,6 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
           new TCS.TypingResult(new A.SBlock(l, newStmts), typ.setLoc(l), ctx));
       }
       case 's-scope-block': {
-        // Flat-block synthesis; see the checking case for the shape. The
-        // nested wrappers' body modes are preserved: let and type-let
-        // groups synthesize the rest at non-top-level, letrec keeps the
-        // current level; group result types pick up the group's loc on
-        // the way out, as each wrapper's mapType(setLoc) did.
         const { l, entries, tail } = e;
         const newEntries: A.ScopeEntry[] = [];
         const synthEntries = (i: number, topLevel2: boolean, ctx0: Context): AnyTypingResult => {
@@ -2771,52 +2678,7 @@ export function toType(inAnn: A.Ann, context: Context): AnyFoldResult<Type | und
   }
 }
 
-// ignores the desugared checker output
-export function ignoreChecker(l: Loc, binds: A.LetBind[], body: Expr, blocky: boolean, context: Context, handler: (l: Loc, binds: A.LetBind[], body: Expr, context: Context) => AnyTypingResult): AnyTypingResult {
-  if (binds.length === 1) {
-    const binding = binds[0];
-    const bindingId = getField(binding.b, 'id');
-    switch (bindingId.$name) {
-      case 's-atom': {
-        const base = bindingId.base;
-        if (base.length >= 19) {
-          const name = base.substring(0, 19);
-          if (name === 'result-after-checks') {
-            switch (body.$name) {
-              case 's-block': {
-                const stmts = body.stmts;
-                if (stmts.length === 0) {
-                  return raise('last of empty list');
-                }
-                const maybeModule = stmts[stmts.length - 1];
-                if (A.isSModule(maybeModule)) {
-                  const ctx = context.addBinding(bindingId.key(), new TS.TTop(l, false));
-                  return checking(maybeModule, new TS.TTop(l, false), true, ctx)
-                    .bind((_newModule, newType, ctx2) => {
-                      const ctx3 = ctx2.removeBinding(bindingId.key());
-                      return new TCS.TypingResult(new A.SLetExpr(l, binds, body, blocky), newType, ctx3);
-                    });
-                } else {
-                  return handler(l, binds, body, context);
-                }
-              }
-              default:
-                return handler(l, binds, body, context);
-            }
-          } else {
-            return handler(l, binds, body, context);
-          }
-        } else {
-          return handler(l, binds, body, context);
-        }
-      }
-      default:
-        return handler(l, binds, body, context);
-    }
-  } else {
-    return handler(l, binds, body, context);
-  }
-}
+// NOTE: ignore-checker is inlined in the s-scope-block cases above.
 
 export function synthesisSCheckTest(e: Expr, loc: Loc, op: A.CheckOp, refinement: Expr | undefined, left: Expr, right: Expr | undefined, cause: Expr | undefined, context: Context): AnyTypingResult {
   void cause;

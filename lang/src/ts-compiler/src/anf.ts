@@ -14,6 +14,7 @@ import * as SL from './srcloc';
 import * as N from './ast-anf';
 import { InternalCompilerError, raise, map2, toRepr as torepr, field, asVariant } from './shared';
 import { jsnums, PyretNumber, throwingErrbacks } from './interop/js-numbers';
+import { eliminatedScopeForm } from './ast-visitors';
 
 export type Loc = SL.Srcloc;
 
@@ -244,46 +245,7 @@ function anfLinear(eInit: A.Expr, k: ANFCont): N.AExpr {
         e = stmts[stmts.length - 1];
         continue;
       }
-      case 's-type-let-expr': {
-        const { l, binds, body } = e;
-        for (const f of binds) {
-          let newBind: N.ATypeBind;
-          switch (f.$name) {
-            case 's-type-bind':
-              newBind = new N.ATypeBind(f.l, f.name, f.ann); // TODO(MATT): is this going to have to change?
-              break;
-            case 's-newtype-bind':
-              newBind = new N.ANewtypeBind(f.l, f.name, f.namet);
-              break;
-            default:
-              throw new InternalCompilerError('No case matched in anf s-type-let-expr: ' + (f as any).$name);
-          }
-          spine.push(new N.ATypeLet(l, newBind));
-        }
-        e = body;
-        continue;
-      }
-      case 's-let-expr': {
-        const { binds, body } = e;
-        for (const f of binds) {
-          emitLetBind(f);
-        }
-        e = body;
-        continue;
-      }
-      case 's-letrec': {
-        const { l, binds, body } = e;
-        const letBinds = binds.map((b) =>
-          new A.SVarBind(b.l, b.b, new A.SUndefined(l)));
-        const assigns = binds.map((b): A.Expr =>
-          new A.SAssign(b.l, field(b.b, 'id'), b.value));
-        e = new A.SLetExpr(l, letBinds, new A.SBlock(l, [...assigns, body]), true);
-        continue;
-      }
       case 's-scope-block': {
-        // The flat post-resolve-scope block: entries in order, then the
-        // tail. Each entry kind translates exactly as its nested wrapper
-        // did (letrec via the same hoisted-vars-then-assignments rewrite).
         for (const entry of e.entries) {
           if (A.isSScopeLet(entry)) {
             for (const b of entry.binds) {
@@ -294,7 +256,7 @@ function anfLinear(eInit: A.Expr, k: ANFCont): N.AExpr {
               let newBind: N.ATypeBind;
               switch (f.$name) {
                 case 's-type-bind':
-                  newBind = new N.ATypeBind(f.l, f.name, f.ann);
+                  newBind = new N.ATypeBind(f.l, f.name, f.ann); // TODO(MATT): is this going to have to change?
                   break;
                 case 's-newtype-bind':
                   newBind = new N.ANewtypeBind(f.l, f.name, f.namet);
@@ -403,14 +365,12 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
       return k(new N.AIdVarModref(e.l, e.id, e.uri, e.name));
     case 's-srcloc':
       return k(new N.AVal(e.l, new N.ASrcloc(e.l, e.loc)));
-    // The linear-spine shapes are translated by anfLinear: the flat
-    // s-scope-block from resolve-scope, plus the bounded nested wrappers
-    // other passes still build locally.
     case 's-scope-block':
+      return anfLinear(e, k);
     case 's-type-let-expr':
     case 's-let-expr':
     case 's-letrec':
-      return anfLinear(e, k);
+      return eliminatedScopeForm(e);
 
     case 's-data-expr': {
       const l = e.l;
@@ -568,7 +528,7 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
       const { l, expr, ann } = e;
       const name = mkId(l, 'ann_check_temp');
       const bindings = [new A.SLetBind(l, new A.SBind(l, false, name.id, ann), expr)];
-      return anf(new A.SLetExpr(l, bindings, new A.SId(l, name.id), false), k);
+      return anf(A.sScopeLetBlock(l, bindings, new A.SId(l, name.id)), k);
     }
 
     case 's-lam': {
@@ -578,9 +538,9 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
       } else {
         const temp = mkId(l, 'ann_check_temp');
         return k(new N.ALam(l, name, args.map((a) => new N.ABind(a.l, field(a, 'id'), field(a, 'ann'))), ret,
-          anfTerm(new A.SLetExpr(l,
+          anfTerm(A.sScopeLetBlock(l,
             [new A.SLetBind(l, new A.SBind(l, false, temp.id, ret), body)],
-            new A.SId(l, temp.id), false))));
+            new A.SId(l, temp.id)))));
       }
     }
     case 's-method': {
@@ -590,9 +550,9 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
       } else {
         const temp = mkId(l, 'ann_check_temp');
         return k(new N.AMethod(l, name, args.map((a) => new N.ABind(a.l, field(a, 'id'), field(a, 'ann'))), ret,
-          anfTerm(new A.SLetExpr(l,
+          anfTerm(A.sScopeLetBlock(l,
             [new A.SLetBind(l, new A.SBind(l, false, temp.id, ret), body)],
-            new A.SId(l, temp.id), false))));
+            new A.SId(l, temp.id)))));
       }
     }
     case 's-tuple': {
@@ -633,23 +593,22 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
           const params = f.args;
           const ann = f.ann;
           const body = f.body;
-          const blocky = f.blocky;
           if (params.length === args.length) {
             const letBinds = map2((p: A.Bind, a: A.Expr): A.LetBind =>
               new A.SLetBind(p.l, p, a), params, args);
             let inlined: A.Expr;
             switch (ann.$name) {
               case 'a-blank':
-                inlined = new A.SLetExpr(l, letBinds, body, blocky);
+                inlined = A.sScopeLetBlock(l, letBinds, body);
                 break;
               case 'a-any':
-                inlined = new A.SLetExpr(l, letBinds, body, blocky);
+                inlined = A.sScopeLetBlock(l, letBinds, body);
                 break;
               default: {
                 const a = A.globalNames.makeAtom('inline_body');
-                inlined = new A.SLetExpr(l,
+                inlined = A.sScopeLetBlock(l,
                   [...letBinds, new A.SLetBind(body.l, new A.SBind(l, false, a, ann), body)],
-                  new A.SId(l, a), false);
+                  new A.SId(l, a));
                 break;
               }
             }

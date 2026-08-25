@@ -37,7 +37,7 @@ const line = (n, f) => Array.from({ length: n }, (_, i) => f(i + 1)).join('\n');
 const GENERATORS = {
   // one binding statement per line; pins the ConcatList spine + emit path
   stmts: (n) => line(n, (i) => `x${i} = ${i}`) + '\nx1',
-  // alternating binding/use pairs; pins the desugar s-let-expr body spine
+  // alternating binding/use pairs; pins the s-scope-block entry list
   alt: (n) => line(n, (i) => `y${i} = ${i}\nprint(y${i})`),
   // one long left-associated arithmetic chain on a single source line
   binop: (n) => 'n = ' + new Array(n).fill('1').join(' + ') + '\nn',

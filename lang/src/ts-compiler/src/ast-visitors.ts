@@ -4,6 +4,7 @@
 
 import * as A from './ast';
 import { Loc, dummyLoc } from './srcloc';
+import { InternalCompilerError } from './shared';
 
 export class DefaultMapVisitor {
   protected option<T extends { visit(v: any): any }>(x: T | undefined): any {
@@ -1313,6 +1314,25 @@ export class DefaultIterVisitor {
   aField(node: A.AField): boolean {
     return node.ann.visit(this);
   }
+}
+
+// ---------- post-resolve-scope visitors ----------
+
+export function eliminatedScopeForm(node: A.STypeLetExpr | A.SLetExpr | A.SLetrec): never {
+  throw new InternalCompilerError(
+    node.$name + ' is not a post-resolve-scope form; desugar-scope replaces it with s-scope-block');
+}
+
+export class PostScopeMapVisitor extends DefaultMapVisitor {
+  sTypeLetExpr(node: A.STypeLetExpr): A.Expr { return eliminatedScopeForm(node); }
+  sLetExpr(node: A.SLetExpr): A.Expr { return eliminatedScopeForm(node); }
+  sLetrec(node: A.SLetrec): A.Expr { return eliminatedScopeForm(node); }
+}
+
+export class PostScopeIterVisitor extends DefaultIterVisitor {
+  sTypeLetExpr(node: A.STypeLetExpr): boolean { return eliminatedScopeForm(node); }
+  sLetExpr(node: A.SLetExpr): boolean { return eliminatedScopeForm(node); }
+  sLetrec(node: A.SLetrec): boolean { return eliminatedScopeForm(node); }
 }
 
 export class DummyLocVisitor {
