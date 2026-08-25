@@ -133,18 +133,6 @@ export function isATypeBind(x: any): x is ATypeBind$ { return x instanceof AType
 export function isANewtypeBind(x: any): x is ANewtypeBind { return x instanceof ANewtypeBind; }
 
 // ---------- data AExpr ----------
-/*
-  FLATTENED representation. The Pyret original stores a program's
-  statement spine as a right-nested chain (a-let/a-var/a-seq/... each
-  holding the entire rest of the program in its `body`), so every
-  traversal pays one stack frame per statement. Here an AExpr is a
-  single node holding the *list* of statement heads plus the final
-  lettable, so consumers loop over `heads` and only genuine source
-  nesting (lambda bodies, if/cases branches) recurses.
-
-  A head is one of the old spine variants minus its body field. The
-  $name strings are kept so switch-based dispatch reads the same.
-*/
 
 export abstract class AExprHeadBase {
   abstract get $name(): string;
@@ -575,16 +563,7 @@ export class ACases extends ALettableBase {
   }
 }
 
-/*
-  FLATTENED a-if. In the Pyret original an `ask`/`if-else-if` chain is
-  stored as right-nested binary a-if nodes (each else holding the next
-  arm), so every traversal pays stack per arm. Here one AIf holds the
-  whole arm list. Each branch carries the statement heads that compute
-  its test (they only run once all earlier arms have failed — in the
-  nested original they were the spine of the previous arm's else), the
-  test value, and the branch body. The first branch's heads are always
-  empty: its test computation sits in the enclosing AExpr, as before.
-*/
+
 export class AIfBranch {
   get $name(): 'a-if-branch' { return 'a-if-branch'; }
   constructor(public l: Loc, public heads: AExprHead[], public test: AVal, public body: AExpr) {}
@@ -1165,14 +1144,6 @@ export function freevarsAnnAcc(ann: A.Ann, seenSoFar: NameDict<A.Name>): NameDic
   }
 }
 
-/*
-  The natural recursion on the (formerly nested) spine is a fold on the
-  way back up: the tail's free variables are computed first, then each
-  binding is processed innermost-to-outermost. With the flattened AExpr
-  that is simply the tail followed by a reverse loop over the heads. The
-  dict operations happen in exactly the order of the recursive
-  formulation on the nested representation.
-*/
 export function freevarsEAcc(expr: AExpr, seenSoFar: NameDict<A.Name>): NameDict<A.Name> {
   let acc = freevarsLAcc(expr.e, seenSoFar);
   const heads = expr.heads;

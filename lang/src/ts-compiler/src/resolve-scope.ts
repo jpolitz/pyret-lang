@@ -714,9 +714,13 @@ export function desugarScope(prog: A.Program, env: C.CompileEnvironment): C.Scop
 
   errors = [];
   const visited = withProvides.visit(desugarScopeVisitor);
+  // The hoisted binds get the same visit the statements got: today their
+  // anns can only carry ids (refinements are syntactically ids), but this
+  // is where a block-bearing ann would need scope-desugaring.
+  const visitedTypeBinds = typeBinds.map((b) => b.visit(desugarScopeVisitor));
   const block = typeBinds.length === 0
     ? visited
-    : prependScopeEntries(blockL, [new A.SScopeTypeLet(blockL, typeBinds)], visited);
+    : prependScopeEntries(blockL, [new A.SScopeTypeLet(blockL, visitedTypeBinds)], visited);
   return new C.ResolvedScope(
     new A.SProgram(l, _useRaw, _provideRaw, provideTypesRaw, provides, importsRaw, block),
     errors);

@@ -210,12 +210,6 @@ export function anfBlock(esInit: A.Expr[], k: ANFCont): N.AExpr {
   fixed-size stacks (e.g. browsers, where the CLI's --stack-size escape
   hatch does not exist) on long programs.
 
-  The continuations involved are single-shot, so the spine is walked with
-  a loop: each step translates one statement or binding whose HOLE-tailed
-  heads accumulate into one flat array, finished with the tail expression
-  translated against the original continuation. anf()'s only side effect
-  is gensym, and every translation below happens in the same order as in
-  the recursive formulation, so generated names are identical.
 */
 function anfLinear(eInit: A.Expr, k: ANFCont): N.AExpr {
   const spine: N.AExprHead[] = [];
@@ -431,10 +425,6 @@ export function anf(e: A.Expr, k: ANFCont): N.AExpr {
             throw new InternalCompilerError('No case matched in anfVariant: ' + (v as any).$name);
         }
       }
-      // Iterative for the same reason as anfNameRec (the natural
-      // recursion nests one frame set per variant): each variant's
-      // heads accumulate into one flat array, prepended onto ks's
-      // result; ks still runs after every variant.
       function anfVariants(vs: A.Variant[], ks: (avs: N.AVariant[]) => N.AExpr): N.AExpr {
         const avs: N.AVariant[] = [];
         const heads: N.AExprHead[] = [];

@@ -1229,13 +1229,6 @@ export class SUserBlock extends ExprBase {
   }
 }
 
-/*
-  FLATTENED scope representation, internal to the post-resolve-scope
-  pipeline (never parsed; not user-visible). Flattens out scope chains of
-  alternating let/letrec/typelet so that traversals of the AST don't stack
-  overflow in plain JS.
-*/
-
 export class SScopeLet {
   get $name(): 's-scope-let' { return 's-scope-let'; }
   constructor(public l: Loc, public binds: LetBind[]) {}
