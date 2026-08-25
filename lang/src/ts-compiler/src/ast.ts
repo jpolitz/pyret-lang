@@ -1231,18 +1231,9 @@ export class SUserBlock extends ExprBase {
 
 /*
   FLATTENED scope representation, internal to the post-resolve-scope
-  pipeline (never parsed; not user-visible). desugar-scope used to emit
-  each block as a right-nested alternation of s-let-expr / s-letrec /
-  s-type-let-expr wrappers and s-block statement runs — one nesting level
-  per binding-group/statement alternation, so a straight-line script's
-  statement count became every later pass's recursion depth. An
-  s-scope-block stores the same program flat: `entries` is the sequence
-  of binding groups (each keeping the l its nested wrapper carried) and
-  plain statement expressions, and `tail` is the block's result
-  expression. A binding's scope is the rest of the entry list plus the
-  tail; an s-scope-letrec group is mutually recursive, exactly like
-  s-letrec. The nested nodes still exist for bounded, locally-built
-  wrappers (function-arg tuple bindings, desugar-generated lets, ...).
+  pipeline (never parsed; not user-visible). Flattens out scope chains of
+  alternating let/letrec/typelet so that traversals of the AST don't stack
+  overflow in plain JS.
 */
 
 export class SScopeLet {
@@ -1278,7 +1269,19 @@ export class SScopeLetrec {
   }
 }
 
-export type ScopeEntry = SScopeLet | SScopeTypeLet | SScopeLetrec | Expr;
+// A plain (non-binding) statement between binding groups. The wrapper
+// exists so ScopeEntry is a closed union of scope-entry nodes -- a bare
+// Expr member would make every consumer's else-branch a silent
+// catch-all.
+export class SScopeStmt {
+  get $name(): 's-scope-stmt' { return 's-scope-stmt'; }
+  constructor(public l: Loc, public stmt: Expr) {}
+  visit(visitor: any): any { return visitor.sScopeStmt(this); }
+  label(): string { return 's-scope-stmt'; }
+  tosource(): any { return this.stmt.tosource(); }
+}
+
+export type ScopeEntry = SScopeLet | SScopeTypeLet | SScopeLetrec | SScopeStmt;
 
 export class SScopeBlock extends ExprBase {
   get $name(): 's-scope-block' { return 's-scope-block'; }
@@ -2209,6 +2212,7 @@ export function isSScopeBlock(x: any): x is SScopeBlock { return x instanceof SS
 export function isSScopeLet(x: any): x is SScopeLet { return x instanceof SScopeLet; }
 export function isSScopeTypeLet(x: any): x is SScopeTypeLet { return x instanceof SScopeTypeLet; }
 export function isSScopeLetrec(x: any): x is SScopeLetrec { return x instanceof SScopeLetrec; }
+export function isSScopeStmt(x: any): x is SScopeStmt { return x instanceof SScopeStmt; }
 export function isSFun(x: any): x is SFun { return x instanceof SFun; }
 export function isSType(x: any): x is SType { return x instanceof SType; }
 export function isSNewtype(x: any): x is SNewtype { return x instanceof SNewtype; }

@@ -313,7 +313,7 @@ function anfLinear(eInit: A.Expr, k: ANFCont): N.AExpr {
               emit(anf(stmt, (lettable) => new N.AExpr([new N.ASeq(stmt.l, lettable)], HOLE)));
             }
           } else {
-            const f = entry;
+            const f = entry.stmt;
             emit(anf(f, (lettable) => new N.AExpr([new N.ASeq(f.l, lettable)], HOLE)));
           }
         }

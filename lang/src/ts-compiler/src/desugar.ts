@@ -331,7 +331,7 @@ function desugarScopeEntry(entry: A.ScopeEntry): A.ScopeEntry {
   } else if (A.isSScopeLetrec(entry)) {
     return new A.SScopeLetrec(entry.l, desugarLetrecBinds(entry.binds));
   } else {
-    return desugarExpr(entry);
+    return new A.SScopeStmt(entry.l, desugarExpr(entry.stmt));
   }
 }
 

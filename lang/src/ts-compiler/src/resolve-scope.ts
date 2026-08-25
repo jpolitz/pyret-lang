@@ -274,11 +274,11 @@ export function weaveContracts(contracts: Contract[], revBinds: any[]): any[] {
   return ans;
 }
 
-export function addLetrecBind(bg: BindingGroup, lrb: A.LetrecBind, stmts: A.Expr[]): A.Expr {
+function addLetrecBind(bg: BindingGroup, lrb: A.LetrecBind, stmts: A.Expr[]): DsbStep {
   return addLetrecBinds(bg, [lrb], stmts);
 }
 
-export function addLetrecBinds(bg: BindingGroup, lrbs: A.LetrecBind[], stmts: A.Expr[]): A.Expr {
+function addLetrecBinds(bg: BindingGroup, lrbs: A.LetrecBind[], stmts: A.Expr[]): DsbStep {
   if (isLetrecBinds(bg)) {
     return dsbDefer(stmts, new LetrecBinds(bg.contracts, [...lrbs, ...bg.binds]));
   } else {
@@ -333,7 +333,7 @@ export function simplifyLetBind(
 const mkSLetBind = (l: C.Loc, b: A.Bind, v: A.Expr) => new A.SLetBind(l, b, v);
 const mkSVarBind = (l: C.Loc, b: A.Bind, v: A.Expr) => new A.SVarBind(l, b, v);
 
-export function addLetBinds(bg: BindingGroup, lbs: A.LetBind[], stmts: A.Expr[]): A.Expr {
+function addLetBinds(bg: BindingGroup, lbs: A.LetBind[], stmts: A.Expr[]): DsbStep {
   let simplifiedLbs: any[] = [];
   for (const lb of lbs) {
     if (A.isSLetBind(lb)) {
@@ -351,11 +351,11 @@ export function addLetBinds(bg: BindingGroup, lbs: A.LetBind[], stmts: A.Expr[])
   }
 }
 
-export function addLetBind(bg: BindingGroup, lb: A.LetBind, stmts: A.Expr[]): A.Expr {
+function addLetBind(bg: BindingGroup, lb: A.LetBind, stmts: A.Expr[]): DsbStep {
   return addLetBinds(bg, [lb], stmts);
 }
 
-export function addTypeLetBind(bg: BindingGroup, tlb: A.TypeLetBind, stmts: A.Expr[]): A.Expr {
+function addTypeLetBind(bg: BindingGroup, tlb: A.TypeLetBind, stmts: A.Expr[]): DsbStep {
   if (isTypeLetBinds(bg)) {
     return dsbDefer(stmts, new TypeLetBinds([tlb, ...bg.binds]));
   } else {
@@ -363,7 +363,7 @@ export function addTypeLetBind(bg: BindingGroup, tlb: A.TypeLetBind, stmts: A.Ex
   }
 }
 
-export function addContracts(bg: BindingGroup, cs: Contract[], stmts: A.Expr[]): A.Expr {
+function addContracts(bg: BindingGroup, cs: Contract[], stmts: A.Expr[]): DsbStep {
   // The type of the next statement determines which binding group this contract belongs in
   if (stmts.length === 0) {
     // NOTE(Ben): would rather raise an informative error than a "no cases matched" error,
@@ -395,59 +395,62 @@ export function addContracts(bg: BindingGroup, cs: Contract[], stmts: A.Expr[]):
   one full activation per block statement (all calls are tail calls or a
   single wrap around a tail call), which overflows fixed-size stacks
   (e.g. browsers) on long blocks. desugarScopeBlock drives the per-step
-  worker iteratively, and assembles the FLAT s-scope-block directly: a
-  step either finishes (recording the pending binding group plus the
-  block's tail expression) or defers, closing off a completed binding
-  group and/or emitting a plain statement. Side effects happen in the
-  same order as the nested formulation did them: atom generation in the
-  worker steps, forward; contract weaving and unused-contract errors when
-  groups are materialized, in the nested unwind order (the tail's group
-  first, then the rest right-to-left).
+  worker iteratively, and assembles the FLAT s-scope-block directly.
+  Side effects happen in the same order as the nested formulation did
+  them: atom generation in the worker steps, forward; contract weaving
+  and unused-contract errors when groups are materialized, in the nested
+  unwind order (the tail's group first, then the rest right-to-left).
 */
-type DsbPending =
-  | { kind: 'defer'; stmts: A.Expr[]; bg: BindingGroup }
-  | { kind: 'group'; closedBg: BindingGroup; stmts: A.Expr[]; bg: BindingGroup }
-  | { kind: 'stmt'; closedBg: BindingGroup; stmt: A.Expr; stmts: A.Expr[]; bg: BindingGroup }
-  | { kind: 'tail'; closedBg: BindingGroup; tail: A.Expr };
-let dsbPending: DsbPending | undefined = undefined;
-const dsbSentinel: A.Expr = undefined as unknown as A.Expr;
+// One flat-block output item, listed in source order: a completed
+// binding group (binds nonempty), contracts that never met a binding
+// (reported as ContractUnused when reached), or a plain statement.
+type DsbEmit =
+  | { kind: 'group'; bg: BindingGroup }
+  | { kind: 'unusedContracts'; contracts: Contract[] }
+  | { kind: 'stmt'; stmt: A.Expr };
+type DsbStep =
+  | { kind: 'step'; emits: DsbEmit[]; stmts: A.Expr[]; bg: BindingGroup }
+  | { kind: 'tail'; emits: DsbEmit[]; tail: A.Expr };
 
-function dsbDefer(stmts: A.Expr[], bg: BindingGroup): A.Expr {
-  dsbPending = { kind: 'defer', stmts, bg };
-  return dsbSentinel;
+// Close a binding group into its emission: a real group, leftover
+// contracts, or nothing. (TypeLetBinds has no contracts field and is
+// never constructed empty.)
+function dsbGroupEmits(bg: BindingGroup): DsbEmit[] {
+  if (bg.binds.length > 0) {
+    return [{ kind: 'group', bg }];
+  }
+  if (isTypeLetBinds(bg) || bg.contracts.length === 0) {
+    return [];
+  }
+  return [{ kind: 'unusedContracts', contracts: bg.contracts }];
+}
+
+function dsbDefer(stmts: A.Expr[], bg: BindingGroup): DsbStep {
+  return { kind: 'step', emits: [], stmts, bg };
 }
 
 // The binding group `closedBg` is complete (the next statement starts a
 // group of a different kind); it becomes one flat entry.
-function dsbDeferGroup(closedBg: BindingGroup, stmts: A.Expr[], bg: BindingGroup): A.Expr {
-  dsbPending = { kind: 'group', closedBg, stmts, bg };
-  return dsbSentinel;
+function dsbDeferGroup(closedBg: BindingGroup, stmts: A.Expr[], bg: BindingGroup): DsbStep {
+  return { kind: 'step', emits: dsbGroupEmits(closedBg), stmts, bg };
 }
 
 // A plain (non-binding) statement: the pending group is closed and the
 // statement itself becomes an entry.
-function dsbDeferStmt(closedBg: BindingGroup, stmt: A.Expr, stmts: A.Expr[]): A.Expr {
-  dsbPending = { kind: 'stmt', closedBg, stmt, stmts, bg: new LetBinds([], []) };
-  return dsbSentinel;
+function dsbDeferStmt(closedBg: BindingGroup, stmt: A.Expr, stmts: A.Expr[]): DsbStep {
+  return { kind: 'step', emits: [...dsbGroupEmits(closedBg), { kind: 'stmt', stmt }],
+           stmts, bg: new LetBinds([], []) };
 }
 
-function dsbFinish(closedBg: BindingGroup, tail: A.Expr): A.Expr {
-  dsbPending = { kind: 'tail', closedBg, tail };
-  return dsbSentinel;
+function dsbFinish(closedBg: BindingGroup, tail: A.Expr): DsbStep {
+  return { kind: 'tail', emits: dsbGroupEmits(closedBg), tail };
 }
 
 // The group half of the old bindWrap: weave the group's contracts and
-// build its flat entry. An empty group yields no entry (its unused
-// contracts error, as before).
-function materializeGroup(bg: BindingGroup): A.ScopeEntry | undefined {
-  if (bg.binds.length === 0) {
-    // NOTE: for type-let-binds (which has no contracts field) this access
-    // fails, mirroring the Pyret field-access error; that case cannot occur.
-    for (const c of field<Contract[]>(bg, 'contracts')) {
-      errors = [new CE.ContractUnused(c.l, c.name.toname()), ...errors];
-    }
-    return undefined;
-  } else if (isLetBinds(bg)) {
+// build its flat entry. Only nonempty groups reach here (dsbGroupEmits
+// resolves empty ones into unusedContracts or nothing).
+function materializeGroup(bg: BindingGroup): A.ScopeEntry {
+  if (isLetBinds(bg)) {
     return new A.SScopeLet(bg.binds[0].l, weaveContracts(bg.contracts, bg.binds));
   } else if (isLetrecBinds(bg)) {
     return new A.SScopeLetrec(bg.binds[0].l, weaveContracts(bg.contracts, bg.binds));
@@ -458,53 +461,42 @@ function materializeGroup(bg: BindingGroup): A.ScopeEntry | undefined {
 }
 
 export function desugarScopeBlock(l: C.Loc, stmts: A.Expr[], bindingGroup: BindingGroup): A.Expr {
-  const items: Array<{ closedBg: BindingGroup; stmt?: A.Expr }> = [];
+  const items: DsbEmit[] = [];
   let curStmts = stmts;
   let curBg = bindingGroup;
-  let tailBg: BindingGroup | undefined = undefined;
-  let tail: A.Expr | undefined = undefined;
+  let tail: A.Expr;
   for (;;) {
-    dsbPending = undefined;
-    desugarScopeBlockStep(curStmts, curBg);
-    const pending = dsbPending as DsbPending | undefined;
-    if (pending === undefined) {
-      throw new InternalCompilerError('desugar-scope-block: step neither deferred nor finished');
-    }
+    const pending = desugarScopeBlockStep(curStmts, curBg);
+    items.push(...pending.emits);
     if (pending.kind === 'tail') {
-      tailBg = pending.closedBg;
       tail = pending.tail;
       break;
-    }
-    if (pending.kind === 'group') {
-      items.push({ closedBg: pending.closedBg });
-    } else if (pending.kind === 'stmt') {
-      items.push({ closedBg: pending.closedBg, stmt: pending.stmt });
     }
     curStmts = pending.stmts;
     curBg = pending.bg;
   }
+  // Materialize backwards: the nested formulation wove contracts and
+  // reported unused-contract errors in unwind order (tail's group first).
   const rev: A.ScopeEntry[] = [];
-  const tailGroup = materializeGroup(tailBg!);
-  if (tailGroup !== undefined) {
-    rev.push(tailGroup);
-  }
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
-    if (it.stmt !== undefined) {
-      rev.push(it.stmt);
-    }
-    const g = materializeGroup(it.closedBg);
-    if (g !== undefined) {
-      rev.push(g);
+    if (it.kind === 'stmt') {
+      rev.push(new A.SScopeStmt(it.stmt.l, it.stmt));
+    } else if (it.kind === 'unusedContracts') {
+      const mkErr = c => new CE.ContractUnused(c.l, c.name.toname());
+      const contractErrs = it.contracts.map(mkErr).reverse();
+      errors = [ ...contractErrs, ...errors ]
+    } else {
+      rev.push(materializeGroup(it.bg));
     }
   }
   if (rev.length === 0) {
-    return tail!;
+    return tail;
   }
-  return new A.SScopeBlock(l, rev.reverse(), tail!);
+  return new A.SScopeBlock(l, rev.reverse(), tail);
 }
 
-function desugarScopeBlockStep(stmts: A.Expr[], bindingGroup: BindingGroup): A.Expr {
+function desugarScopeBlockStep(stmts: A.Expr[], bindingGroup: BindingGroup): DsbStep {
   // Treating stmts as a block, resolve scope.
   // There should be no blocks left after this stage of the compiler pipeline.
   if (stmts.length === 0) {

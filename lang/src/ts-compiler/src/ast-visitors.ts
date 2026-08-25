@@ -234,6 +234,10 @@ export class DefaultMapVisitor {
     return new A.SScopeLetrec(node.l, node.binds.map(b => b.visit(this)));
   }
 
+  sScopeStmt(node: A.SScopeStmt): A.ScopeEntry {
+    return new A.SScopeStmt(node.l, node.stmt.visit(this));
+  }
+
   sScopeBlock(node: A.SScopeBlock): A.Expr {
     return new A.SScopeBlock(node.l, node.entries.map(e => e.visit(this)), node.tail.visit(this));
   }
@@ -887,6 +891,10 @@ export class DefaultIterVisitor {
     return node.binds.every(b => b.visit(this));
   }
 
+  sScopeStmt(node: A.SScopeStmt): boolean {
+    return node.stmt.visit(this);
+  }
+
   sScopeBlock(node: A.SScopeBlock): boolean {
     return node.entries.every(e => e.visit(this)) && node.tail.visit(this);
   }
@@ -1537,6 +1545,10 @@ export class DummyLocVisitor {
 
   sScopeLetrec(node: A.SScopeLetrec): A.ScopeEntry {
     return new A.SScopeLetrec(dummyLoc, node.binds.map(b => b.visit(this)));
+  }
+
+  sScopeStmt(node: A.SScopeStmt): A.ScopeEntry {
+    return new A.SScopeStmt(dummyLoc, node.stmt.visit(this));
   }
 
   sScopeBlock(node: A.SScopeBlock): A.Expr {

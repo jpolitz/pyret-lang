@@ -499,9 +499,9 @@ function _checking(e: Expr, expectType0: Type, topLevel: boolean, context0: Cont
                   return checkEntries(i + 1, topLevel2, ctx2);
                 });
               } else {
-                return checking(entry, new TS.TTop(l, false), topLevel2, ctx0)
+                return checking(entry.stmt, new TS.TTop(l, false), topLevel2, ctx0)
                   .bind((newStmt, _styp, ctx2) => {
-                    newEntries.push(newStmt);
+                    newEntries.push(new A.SScopeStmt(entry.l, newStmt));
                     return checkEntries(i + 1, topLevel2, ctx2);
                   });
               }
@@ -863,9 +863,9 @@ function _synthesis(e: Expr, topLevel: boolean, context0: Context): AnyTypingRes
                 .mapType((t) => t.setLoc(entry.l));
             });
           } else {
-            return synthesis(entry, topLevel2, ctx0)
+            return synthesis(entry.stmt, topLevel2, ctx0)
               .bind((newStmt, _styp, ctx2) => {
-                newEntries.push(newStmt);
+                newEntries.push(new A.SScopeStmt(entry.l, newStmt));
                 return synthEntries(i + 1, topLevel2, ctx2);
               });
           }
