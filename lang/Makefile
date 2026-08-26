@@ -689,9 +689,15 @@ $(PHASEBTS)/config.json: src/scripts/node_modules-config.json
 $(PHASECTS)/config.json: src/scripts/node_modules-config.json
 	cp $< $@
 
+.PHONY : no-diff-ts
+no-diff-ts:
+	rm -rf $(PHASEBTS)/pyret.jarr $(PHASEBTS)/compiled $(PHASECTS)/pyret.jarr $(PHASECTS)/compiled
+	$(MAKE) phaseB-ts phaseC-ts
+	diff $(PHASEBTS)/pyret.jarr $(PHASECTS)/pyret.jarr
+
 # The grand convergence check.  Builds both chains and asserts that all
 # four standalones are one byte-identical fixpoint reached from two
-# independent seeds (the committed phase0 chain and the TS compiler):
+# independent seeds (the committed phase0 chain and the TS compiler).
 #   * phaseB    == phaseC     (.arr self-fixpoint; == existing no-diff-standalone)
 #   * phaseB-ts == phaseC-ts  (TS  self-fixpoint)
 #   * phaseB    == phaseB-ts  (headline: TS compiler is a byte-exact drop-in)
