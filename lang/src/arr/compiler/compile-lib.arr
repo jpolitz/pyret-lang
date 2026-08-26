@@ -582,10 +582,7 @@ fun make-standalone(wl, compiled, options):
       J.j-field("pauseSchedule",
         cases(Option) options.pause-schedule:
           | none => j-false
-          | some(code) =>
-            J.j-raw-code("(function(module) { var exports = module.exports;\n"
-              + code
-              + "\nreturn module.exports; })({ exports: {} })")
+          | some(code) => j-str(code)
         end)
     ])
 

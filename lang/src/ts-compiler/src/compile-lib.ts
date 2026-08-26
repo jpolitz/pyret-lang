@@ -640,9 +640,7 @@ export function makeStandalone(
     new J.JField("pauseSchedule",
       options.pauseSchedule === undefined
         ? new J.JFalse()
-        : new J.JRawCode("(function(module) { var exports = module.exports;\n"
-            + options.pauseSchedule
-            + "\nreturn module.exports; })({ exports: {} })"))
+        : new J.JStr(options.pauseSchedule))
   ));
 
   if (allCompileProblems.length > 0) {

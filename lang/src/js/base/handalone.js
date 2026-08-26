@@ -44,7 +44,14 @@ requirejs(["pyret-base/js/runtime", "pyret-base/js/post-load-hooks", "pyret-base
   }
 
   if(checkFlag("pauseSchedule")) {
-    runtime.setPauseSchedule(program.runtimeOptions.pauseSchedule);
+    var scheduleModule = { exports: {} };
+    try {
+      (new Function("module", "exports", program.runtimeOptions.pauseSchedule))(
+        scheduleModule, scheduleModule.exports);
+    } catch(e) {
+      throw new Error("Could not evaluate the pause schedule baked in by --pause-schedule: " + e.message);
+    }
+    runtime.setPauseSchedule(scheduleModule.exports);
   }
 
   if(checkFlag("disableAnnotationChecks")) {

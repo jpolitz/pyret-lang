@@ -697,6 +697,22 @@ $(PHASECTS)/config.json: src/scripts/node_modules-config.json
 #   * phaseB    == phaseB-ts  (headline: TS compiler is a byte-exact drop-in)
 # Prints sha256 of all four and a PASS/FAIL line per invariant; exits
 # nonzero if any invariant fails.
+.PHONY : bootstrap-converge
+bootstrap-converge: phaseB phaseC phaseB-ts phaseC-ts
+	@B=$(PHASEB)/pyret.jarr; C=$(PHASEC)/pyret.jarr; \
+	 BT=$(PHASEBTS)/pyret.jarr; CT=$(PHASECTS)/pyret.jarr; \
+	 echo "=== bootstrap convergence ==="; \
+	 sha256sum $$B $$C $$BT $$CT; \
+	 echo "---"; \
+	 fail=0; \
+	 if cmp -s $$B  $$C;  then echo "PASS  .arr fixpoint       phaseB    == phaseC";    else echo "FAIL  .arr fixpoint       phaseB    != phaseC";    fail=1; fi; \
+	 if cmp -s $$BT $$CT; then echo "PASS  ts   fixpoint       phaseB-ts == phaseC-ts"; else echo "FAIL  ts   fixpoint       phaseB-ts != phaseC-ts"; fail=1; fi; \
+	 if cmp -s $$B  $$BT; then echo "PASS  cross (headline)    phaseB    == phaseB-ts"; else echo "FAIL  cross (headline)    phaseB    != phaseB-ts"; fail=1; fi; \
+	 echo "---"; \
+	 if [ $$fail -eq 0 ]; then echo "CONVERGED: all four standalones are byte-identical"; \
+	 else echo "NOT CONVERGED: see FAILs above (diff the named .jarr files to diagnose)"; fi; \
+	 exit $$fail
+
 # ============================================================
 # Pause schedules: run the main2 suite with varied initial GAS/RUNGAS
 # (see tests/pause-schedules/). Each scheduled run's output must match
@@ -749,19 +765,3 @@ pause-schedule-clean:
 	$(call RM,tests/pyret/main2-ps-alternate.jarr)
 	$(call RM,tests/pyret/main2-ps-sawtooth.jarr)
 	$(call RM,tests/pyret/main2-ps-ts-rand-small.jarr)
-
-.PHONY : bootstrap-converge
-bootstrap-converge: phaseB phaseC phaseB-ts phaseC-ts
-	@B=$(PHASEB)/pyret.jarr; C=$(PHASEC)/pyret.jarr; \
-	 BT=$(PHASEBTS)/pyret.jarr; CT=$(PHASECTS)/pyret.jarr; \
-	 echo "=== bootstrap convergence ==="; \
-	 sha256sum $$B $$C $$BT $$CT; \
-	 echo "---"; \
-	 fail=0; \
-	 if cmp -s $$B  $$C;  then echo "PASS  .arr fixpoint       phaseB    == phaseC";    else echo "FAIL  .arr fixpoint       phaseB    != phaseC";    fail=1; fi; \
-	 if cmp -s $$BT $$CT; then echo "PASS  ts   fixpoint       phaseB-ts == phaseC-ts"; else echo "FAIL  ts   fixpoint       phaseB-ts != phaseC-ts"; fail=1; fi; \
-	 if cmp -s $$B  $$BT; then echo "PASS  cross (headline)    phaseB    == phaseB-ts"; else echo "FAIL  cross (headline)    phaseB    != phaseB-ts"; fail=1; fi; \
-	 echo "---"; \
-	 if [ $$fail -eq 0 ]; then echo "CONVERGED: all four standalones are byte-identical"; \
-	 else echo "NOT CONVERGED: see FAILs above (diff the named .jarr files to diagnose)"; fi; \
-	 exit $$fail
