@@ -43,6 +43,10 @@ requirejs(["pyret-base/js/runtime", "pyret-base/js/post-load-hooks", "pyret-base
     return program.runtimeOptions && program.runtimeOptions[name];
   }
 
+  if(checkFlag("pauseSchedule")) {
+    runtime.setPauseSchedule(program.runtimeOptions.pauseSchedule);
+  }
+
   if(checkFlag("disableAnnotationChecks")) {
     runtime.checkArgsInternal1 = function() {};
     runtime.checkArgsInternal2 = function() {};

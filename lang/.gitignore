@@ -35,6 +35,8 @@ build/docs
 build/phaseA
 build/phaseB
 build/phaseC
+build/phaseB-ts
+build/phaseC-ts
 build/phase1
 build/phase2
 build/phase3

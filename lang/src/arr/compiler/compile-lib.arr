@@ -549,7 +549,7 @@ end
 fun make-standalone(wl, compiled, options):
   natives = for fold(natives from empty, w from wl):
     w.locator.get-native-modules().map(_.path) + natives
-  end
+  end.sort()
   
   var all-compile-problems = empty
   static-modules = j-obj(for C.map_list(w from wl):
@@ -578,6 +578,14 @@ fun make-standalone(wl, compiled, options):
           j-false
         else:
           j-true
+        end),
+      J.j-field("pauseSchedule",
+        cases(Option) options.pause-schedule:
+          | none => j-false
+          | some(code) =>
+            J.j-raw-code("(function(module) { var exports = module.exports;\n"
+              + code
+              + "\nreturn module.exports; })({ exports: {} })")
         end)
     ])
 

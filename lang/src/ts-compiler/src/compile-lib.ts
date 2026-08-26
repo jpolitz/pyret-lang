@@ -614,6 +614,7 @@ export function makeStandalone(
   for (const w of wl) {
     natives = [...w.locator.getNativeModules().map((n) => n.path), ...natives];
   }
+  natives.sort();
 
   let allCompileProblems: CS.CompileError[] = [];
   const staticModules = new J.JObj(CL.map_list<ToCompile, J.JFieldT>((w) => {
@@ -635,7 +636,13 @@ export function makeStandalone(
     new J.JField("disableAnnotationChecks",
       options.runtimeAnnotations
         ? new J.JFalse()
-        : new J.JTrue())
+        : new J.JTrue()),
+    new J.JField("pauseSchedule",
+      options.pauseSchedule === undefined
+        ? new J.JFalse()
+        : new J.JRawCode("(function(module) { var exports = module.exports;\n"
+            + options.pauseSchedule
+            + "\nreturn module.exports; })({ exports: {} })"))
   ));
 
   if (allCompileProblems.length > 0) {
