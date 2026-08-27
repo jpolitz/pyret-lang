@@ -286,8 +286,8 @@ pyret-io-test: phaseA
 	$(NPM_EXEC) jest --detectOpenHandles --forceExit --verbose "tests/io-tests/io.test.js"
 
 .PHONY : jsnums-test
-jsnums-test: phaseA
-	$(NODE) tests/jsnums-test/jsnums-test.js
+jsnums-test:
+	$(NODE) --test tests/jsnums-test/*.test.js
 
 .PHONY : regression-test
 regression-test: tests/pyret/regression.jarr
