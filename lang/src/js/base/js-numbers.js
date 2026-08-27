@@ -4150,8 +4150,11 @@ define("pyret-base/js/js-numbers", function() {
         }
         return ans;
       }
-      // n is not an integer implies that d >= 1
-      var decimal = toRepeatingDecimal(n.numerator(), n.denominator(), undefined);
+      // n is not an integer implies that d >= 1; n was rounded to d
+      // digits above, so its expansion terminates within d digits — make
+      // sure the expansion limit doesn't cut it off first
+      var decimal = toRepeatingDecimal(n.numerator(), n.denominator(),
+                                       { limit: Math.max(512, d + 10) });
       var ans = decimal[1].toString();
       while (ans.length < d) {
         ans += decimal[2];

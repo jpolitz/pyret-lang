@@ -249,7 +249,19 @@ otherwise.
   strict mode) and would have thrown `ReferenceError`s; the complex-number
   rejection threw a bare string. All now use errbacks.
 
-### 22. Misc latent fixes
+### 22. `toStringDigits` with digit counts past ~500 spliced literal "..."
+
+After rounding, the value's decimal expansion always terminates within
+`digits` places, but `toRepeatingDecimal`'s default 512-step exploration
+limit could cut it off first, and the cutoff marker `"..."` was then
+appended into the numeric output (`toStringDigits(1/1867, 600)` ended in
+dots). The limit now scales with the requested digit count. Verified
+against a BigInt long-division oracle. (An `expt` guard was also added so
+a rational base with an integer exponent above 2^32 raises the same
+"exponent too large" domain error the BigInteger path already had,
+instead of attempting an astronomically large exact power.)
+
+### 23. Misc latent fixes
 
 - `bnpFromInt` referenced the global `DV` (strict-mode `ReferenceError` on
   a dead-but-reachable-by-refactoring path); now `this.DV`.
@@ -314,6 +326,13 @@ otherwise.
 - `bigint-config.test.js` — the division regression and randomized
   division/multiplication/gcd oracles under am1/26, am2/30, am3/28.
 
+Setting `JSNUMS_TEST_APPNAME` (e.g. `Opera` → am1/26,
+`Microsoft Internet Explorer` → am2/30) runs the *entire* suite under a
+forced digit configuration; all tests pass under all three. A one-off
+heavier fuzz (360k random divisions per configuration, biased toward exact
+multiples and off-by-one neighbors, plus signed modulo spot checks) was run
+during development with zero mismatches.
+
 ## Performance
 
 Micro-benchmarks (this 2-CPU VM, Node 24) before vs after:
@@ -357,6 +376,9 @@ values by direct word summation, restoring baseline.
 - `make jsnums-test`: 119/119 passing.
 - Property tests are seeded and deterministic; they exercise roughly
   40k randomized oracle comparisons per run.
-- `make pyret-test` (phaseA rebuild + 12.4k-check main2 suite, which both
-  compiles and runs on the patched library): result recorded below once
-  the run finishes.
+- `make pyret-test` (phaseA rebuild + main2 suite, which both compiles and
+  runs on the patched library): all 12411 checks pass. A first run failed
+  exactly 3 checks — the `num-sin(very-bignum) raises "roughnum overflow"`
+  family — because a draft gave `Roughnum.makeInstance(NaN)` a NaN-specific
+  message; the historical message was restored (see bug 16) and the rerun
+  is clean.

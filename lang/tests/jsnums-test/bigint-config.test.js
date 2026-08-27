@@ -14,7 +14,8 @@ const CONFIGS = [
   ['am2-30 (IE appName)', { appName: 'Microsoft Internet Explorer' }],
 ];
 
-test('default Node environment uses the 28-bit configuration', () => {
+test('default Node environment uses the 28-bit configuration',
+     { skip: !!process.env.JSNUMS_TEST_APPNAME }, () => {
   const b = jsnums.makeBignum('12345678901234567890');
   assert.equal(b.DB, 28, 'expected dbits 28 under Node');
 });

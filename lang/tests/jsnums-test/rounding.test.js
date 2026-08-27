@@ -185,6 +185,19 @@ test('toStringDigits', () => {
   assertThrowsTag(() => JN.toStringDigits(5, N('1/2')), 'domain-error');
 });
 
+test('toStringDigits beyond the default repeating-decimal limit', () => {
+  // regression: digit counts past ~500 used to splice literal "..." in
+  for (const [den, d] of [[1867, 600], [65537, 700], [7, 555]]) {
+    const s = JN.toStringDigits(JN.divide(1, den), d);
+    assert.ok(!s.includes('.' + '.'), `no dots in toStringDigits(1/${den}, ${d})`);
+    assert.equal(s.length, 2 + d, `length of toStringDigits(1/${den}, ${d})`);
+    // oracle: round(10^d / den) digits
+    const scaled = (10n ** BigInt(d) + BigInt(Math.floor(den / 2))) / BigInt(den);
+    const digits = scaled.toString().padStart(d, '0');
+    assert.equal(s, '0.' + digits, `digits of toStringDigits(1/${den}, ${d})`);
+  }
+});
+
 test('property: toStringDigits output parses back within 10^-d', () => {
   const rng = makeRng(0x51de);
   for (let i = 0; i < 300; i++) {

@@ -21,7 +21,10 @@ function loadJsNumbers(fakeNavigator) {
   return mod;
 }
 
-const jsnums = loadJsNumbers();
+// JSNUMS_TEST_APPNAME forces a digit configuration for the whole suite
+// (e.g. "Opera" -> am1/26, "Microsoft Internet Explorer" -> am2/30).
+const forcedAppName = process.env.JSNUMS_TEST_APPNAME;
+const jsnums = loadJsNumbers(forcedAppName ? { appName: forcedAppName } : undefined);
 
 // Shorthand: parse a number literal, asserting the parse succeeds.
 function N(s) {
