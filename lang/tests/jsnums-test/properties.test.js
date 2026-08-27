@@ -38,8 +38,7 @@ test('oracle self-check: rounding boundaries at half-ulp', () => {
     const mid = q.add(up).div(new Q(2n));
     const rounded = qToNearestDouble(mid);
     assert.ok(rounded === x || rounded === nextUp(x), `midpoint lands on a neighbor of ${x}`);
-    const evenPick = (doubleToQ(rounded).sub(q).n === 0n) ? x : nextUp(x);
-    assert.equal(rounded, evenPick === rounded ? rounded : rounded); // structural sanity
+    assert.ok(mantissaIsEven(rounded), `tie rounds to even significand for ${x}`);
     // strictly inside the half-open interval rounds to x
     const closer = q.mul(new Q(3n)).add(up).div(new Q(4n)); // 3/4 x + 1/4 next
     assert.equal(qToNearestDouble(closer), x, `inside interval of ${x}`);
@@ -53,6 +52,12 @@ test('oracle self-check: rounding boundaries at half-ulp', () => {
     if (lo === 0) hi = (hi + 1) >>> 0;
     buf.setUint32(0, hi); buf.setUint32(4, lo);
     return buf.getFloat64(0);
+  }
+
+  function mantissaIsEven(v) {
+    const buf = new DataView(new ArrayBuffer(8));
+    buf.setFloat64(0, v);
+    return (buf.getUint32(4) & 1) === 0;
   }
 });
 
