@@ -82,9 +82,55 @@ contents, not just counts, are the oracle.
 
 ## Performance
 
-PENDING: async-opt bench table (vm vs cont, paired/interleaved,
-LOOP-MS medians + ratios), trove size comparison (bytecode vs
-generated JS; raw and gzipped), compile-time comparison.
+All numbers measured on this box (2-CPU VM, node 24), vm vs the js
+backend on the same tree, same front end.
+
+### Execution: async-opt suite (interleaved, N=5, LOOP-seconds medians)
+
+| benchmark | js med | vm med | vm/js |
+|---|---:|---:|---:|
+| bench-spell | 3.044 | 4.197 | 1.379 |
+| bench-car-compute | 2.650 | 3.109 | 1.173 |
+| bench-car-render | 2.517 | 2.546 | 1.012 |
+| bench-lander | 1.750 | 1.734 | 0.991 |
+| bench-orbital-compute | 2.263 | 2.938 | 1.298 |
+| bench-orbital-ems | 1.536 | 1.560 | 1.016 |
+| bench-orbital-render | 2.762 | 3.081 | 1.115 |
+| bench-boids-compute | 2.655 | 3.631 | 1.368 |
+| bench-boids-compute-data | 2.789 | 3.666 | 1.314 |
+| bench-boids-raster | 2.575 | 2.985 | 1.159 |
+| bench-vec-methods | 2.545 | 2.869 | 1.127 |
+| bench-matrix | 3.255 | 4.033 | 1.239 |
+| bench-dtree | 0.753 | 0.950 | 1.262 |
+| bench-kmeans | 0.497 | 0.692 | 1.392 |
+| bench-plagiarism | 1.254 | 1.658 | 1.322 |
+| bench-seam | 0.320 | 0.469 | 1.466 |
+
+**geomean vm/js = 1.219** over 16 benches; output parity OK on all.
+The render/ems-shaped benches sit near 1.0 (flat fast forms and
+runtime helpers dominate); tight numeric/data-structure loops pay the
+dispatch cost (up to ~1.47x).
+
+### Size (main2's 140 modules; raw / gzip -9 bytes)
+
+| artifact | js | vm | ratio |
+|---|---|---|---|
+| all compiled modules | 24,924,042 / 3,558,679 | 11,902,386 / 1,608,188 | 2.1x / 2.2x |
+| builtin (trove) modules only | 13,435,690 / 2,101,923 | 4,641,287 / 820,026 | **2.9x / 2.6x** |
+| main2 standalone jarr | 28,586,370 / 4,120,094 | 14,859,082 / 2,043,087 | 1.9x / 2.0x |
+
+(The vm numbers include the flat fast-form factories.)
+
+### Compile time (cold main2 build, single sample)
+
+| backend | wall | peak RSS |
+|---|---|---|
+| js | 14.15 s | 1.36 GB |
+| vm | 10.12 s | 1.28 GB |
+
+The vm backend compiles ~29% faster despite computing the js
+backend's lift metric per cases branch and compiling flat functions
+twice (bytecode + fast form).
 
 ## Deviations / notes for review
 
