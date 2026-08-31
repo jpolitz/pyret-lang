@@ -4326,9 +4326,14 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
         }
         check_array_size("raw-array-build-opt", len);
         while (curIdx < len) {
+          // The cont version's RUNGAS trip has no `break`: it falls
+          // through and still calls the callback once, whose own entry
+          // check (RUNGAS stays exhausted) performs the capture -- so the
+          // callback's frame is on the captured stack. Replicated here.
+          var tripped = false;
           if (--thisRuntime.RUNGAS <= 0) {
             thisRuntime.EXN_STACKHEIGHT = 0;
-            return captureEventP().then(function() { return resumeEnter(step, ansV); });
+            tripped = true;
           }
           var res;
           if (step === 1) {
@@ -4345,6 +4350,12 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
             arr.push(thisRuntime.getField(res, "value"));
           }
           curIdx++;
+          if (tripped) {
+            // A synchronous callback after the trip: the cont version
+            // corrupts on this path (it attaches a frame to the callback's
+            // return value); pause cleanly instead.
+            return captureEventP().then(function() { return resumeEnter(0, undefined); });
+          }
         }
         return arr;
       }
