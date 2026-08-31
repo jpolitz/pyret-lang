@@ -44,10 +44,13 @@ section marked PENDING has not been measured/finished yet.*
   run-length compressed); the comparator is `diff`. 20/20 programs x 6
   schedule profiles: byte-identical traces (deep-recursion alone:
   19,143 pauses on one profile).
-- main2 under the oracle (3 profiles, ~645k pauses per profile):
-  outputs identical; traces PENDING (last divergence fixed was the
-  flat-prim $al rule; rerun in flight).
-- FLATCALL validation: PENDING.
+- main2 under the oracle, cold builds both sides, fast forms ON:
+  byte-identical outputs AND traces on all three profiles --
+  rand-small 645,565 pauses, alternate 1,354,509 pauses, const-small
+  447,394 pauses. ~2.45M pauses with identical stacks at every one.
+- FLATCALL validation: unit 5/5, parity 34/34, pause oracle 20/20 x 6
+  schedules, main2 12,522/12,522, and the main2 oracle above -- all
+  with fast forms enabled.
 - `vm-bootstrap-converge` (the compiler as bytecode self-builds,
   byte-equal to the cont chain): PENDING.
 - CPO in-browser: PENDING.
