@@ -44,7 +44,7 @@
 define("pyret-base/js/pyret-vm", [], function() {
 
   // Must match src/ts-compiler/src/vm/opcodes.ts.
-  var FORMAT_VERSION = 6;
+  var FORMAT_VERSION = 7;
 
   var OPCODE_NAMES = [
     'MOVE', 'BOX', 'UNBOX', 'SETVAR', 'LETREC', 'MODREF', 'MODVARREF', 'ARRSET',
@@ -774,10 +774,11 @@ define("pyret-base/js/pyret-vm", [], function() {
           case OP_PRIMAPP: {
             var d = code[pc++];
             var prim = names[code[pc++]];
-            var lk = code[pc++];
+            var lkOp = code[pc++];
+            var lk = lkOp >> 1;
             var n = code[pc++];
             f.locK = lk;
-            f.locKS = lk;
+            if ((lkOp & 1) !== 0) { f.locKS = lk; }
             f.pc = pc + n;
             st.resumeDest = d;
             ans = applyPrim(R, prim, code, pc, n, f);

@@ -2012,6 +2012,14 @@ export function compileALam(
   body: N.AExpr,
   bindOpt: BindType | undefined
 ): DAG.CExp {
+  // vm backend hook (see compileVmFlatFactory): inside a flat function's
+  // synchronous JS form, a nested lambda must become a bytecode closure,
+  // not this backend's generated code. Inert for ordinary compiles.
+  const nestedHook = (compiler as any).vmNestedLamHook;
+  if (nestedHook !== undefined) {
+    const replaced = nestedHook(body, false);
+    if (replaced !== undefined) { return cExp(replaced, clEmpty); }
+  }
   let isFlat: boolean;
   if (bindOpt !== undefined && isBLet(bindOpt)) {
     const bind = bindOpt.value;
@@ -2249,6 +2257,12 @@ export class CompilerVisitor {
   }
 
   aMethod(node: N.AMethod): DAG.CExp {
+    // vm backend hook, as in compileALam.
+    const nestedHook = (this as any).vmNestedLamHook;
+    if (nestedHook !== undefined) {
+      const replaced = nestedHook(node.body, true);
+      if (replaced !== undefined) { return cExp(replaced, clEmpty); }
+    }
     const step = freshId(compilerName('step'));
     const tempFull = freshId(compilerName('temp_full'));
     const len = node.args.length;
@@ -3159,4 +3173,73 @@ export function casesBranchBodyCaseCount(
     allowTco,
   });
   return compileAExpr(compiler, body).newCases.length();
+}
+
+/*
+  The vm backend's flat-function factory (its one carried optimization):
+  a function this backend would compile FLAT is compiled here with the
+  REAL compileFunBody(isFlat=true) -- byte-identical synchronous JS to
+  the cont backend, same source-mapped error frames -- wrapped in a
+  factory over its free variables so the machine can instantiate it at
+  closure-creation time:
+
+      function($m, R, <jsIdOf(free1)>, <jsIdOf(free2)>, ...) {
+        var G = ...; var U = ...; var M = ...; var D = ...;  // mkAbbrevs
+        var L = $m.locs;
+        <hoisted cases-dispatch tables>
+        var $temp = function(<shadow args>) { <flat body> };
+        return $temp;
+      }
+
+  Nested lambdas/methods inside the body become bytecode closures via the
+  vmNestedLamHook (they are not flat, so this backend's generated code
+  for them would be cont-protocol code).
+*/
+export function compileVmFlatFactory(
+  env: CS.CompileEnvironment,
+  flatnessEnvs: [FL.FEnv, FL.FEnv],
+  provides: CS.Provides,
+  postEnv: CS.ComputedEnvironment,
+  options: SplitCompileOptions,
+  getLocIdIn: (loc: Loc) => number,
+  name: string,
+  l: Loc,
+  args: N.ABind[],
+  body: N.AExpr,
+  freeNames: A.Name[],
+  modParam: A.Name,
+  nestedHook: (bodyKey: N.AExpr, isMethod: boolean) => J.JExprT | undefined
+): J.JExprT {
+  const base = splittingCompiler(env, (_name: string, v: any) => v, flatnessEnvs, provides, postEnv, options);
+  const LOCSID = constId('L');
+  function getLoc(loc: Loc): J.JExprT { return jBracket(jId(LOCSID), jNum(getLocIdIn(loc))); }
+  const dispatches = new DispatchesBox(clEmpty);
+  const compiler: CompilerVisitor = ext(base as unknown as CompilerVisitor, {
+    progProvides: provides,
+    getLoc,
+    getLocId: getLocIdIn,
+    resumer: compilerName('resumer'),
+    dispatches,
+    allowTco: true,
+    vmNestedLamHook: nestedHook,
+  });
+  const newStep = freshId(compilerName('step'));
+  const temp = freshId(compilerName('temp_flat'));
+  const len = args.length;
+  const effectiveArgs =
+    len > 0 ? args : [new N.ABind(l, compiler.resumer, A.aBlank)];
+  const fnBody = compileFunBody(l, newStep, temp, compiler, effectiveArgs, len, body, true, true, false);
+  const fn = jFun(J.nextJFunId(), makeFunName(compiler, l),
+    CL.map_list((arg: N.ABind) => formalShadowName(arg.id), effectiveArgs), fnBody);
+  const factoryBody = jBlock(
+    clAppend(
+      clAppend(
+        clSnoc(mkAbbrevs(l), jVar(LOCSID, jDot(jId(modParam), 'locs')) as J.JStmt),
+        dispatches.dispatches),
+      clist<J.JStmt>(
+        jVar(temp, fn),
+        jReturn(jId(temp)))));
+  const params = clist<A.Name>(modParam, RUNTIME.id).append(
+    CL.map_list((n: A.Name) => jsIdOf(n), freeNames));
+  return jFun(J.nextJFunId(), makeFunName(compiler, l), params, factoryBody);
 }

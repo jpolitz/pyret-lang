@@ -41,7 +41,7 @@
 // $al at statically-flat call sites or maybeMethodCall sites). PRIMAPP,
 // DOT, CASES, ANNCHECK, ANNCHECKV and TUPLECHK carry unshifted locKs and
 // always update both, matching where generated code assigns $al.
-export const FORMAT_VERSION = 6;
+export const FORMAT_VERSION = 7;
 
 // The AMD module name the emitted stub pulls the machine in from.
 export const VM_MODULE_NAME = 'pyret-base/js/pyret-vm';
@@ -221,6 +221,12 @@ export interface VMFunc {
   /** 1 when the cont backend compiles this function FLAT (a-let-bound,
       flatness <= 5): no entry fuel check, no ret refund, never captured. */
   fl: number;
+  /** Index of this function's synchronous fast-form factory in the
+      module's $F array, or -1. Flat functions only. */
+  ff: number;
+  /** Value sources (resolved in the CREATING frame with rd()) for the
+      factory's free-variable parameters, in parameter order. */
+  fa: number[];
 }
 
 export interface VMVariantMember {

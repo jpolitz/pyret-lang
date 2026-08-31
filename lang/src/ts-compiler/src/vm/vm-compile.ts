@@ -200,6 +200,8 @@ class FuncCtx {
   nslots = 0;
   upvals: number[] = [];
   upvalMap: Map<string, number> = new Map();
+  /** The A.Name for each upval slot, in upvals order (fast-form plumbing). */
+  upvalNames: A.Name[] = [];
   /** Slot the machine lands a tail call's value in when the callee turns
       out to be a JS-land function (see OP_TAILCALL in pyret-vm.js). */
   scratch = 0;
@@ -253,7 +255,14 @@ export class VMCompiler {
         casesBranchBodyCaseCount): (body, numEnclosingArgs, allowTco) ->
         number of switch cases the JS backend would mint. */
     private liftCaseCount: (body: N.AExpr, numArgs: number, allowTco: boolean) => number,
-    private inlineCaseBodyLimit: number
+    private inlineCaseBodyLimit: number,
+    /** Compiles one flat function's synchronous fast-form factory (see
+        compileVmFlatFactory) and returns its index in the module's $F
+        array; undefined disables fast forms. */
+    private makeFlatFactory?: (
+      name: string, l: Loc, args: N.ABind[], body: N.AExpr, freeNames: A.Name[],
+      getNested: (bodyKey: N.AExpr, isMethod: boolean) => { idx: number; upvalNames: A.Name[] }
+    ) => number
   ) {
     this.prog = {
       v: OP.FORMAT_VERSION,
@@ -328,7 +337,7 @@ export class VMCompiler {
    * A name that stands for a constant or a module-level global needs no
    * capture at all: it means the same thing at every depth.
    */
-  private resolveOuter(ctx: FuncCtx, key: string): number | undefined {
+  private resolveOuter(ctx: FuncCtx, key: string, name: A.Name): number | undefined {
     const have = ctx.upvalMap.get(key);
     if (have !== undefined) { return OP.vsUpval(have); }
     const p = ctx.parent;
@@ -336,7 +345,7 @@ export class VMCompiler {
     let inParent = p.aliases.get(key);
     if (inParent === undefined) {
       const slot = p.slots.get(key);
-      inParent = slot === undefined ? this.resolveOuter(p, key) : OP.vsLocal(slot);
+      inParent = slot === undefined ? this.resolveOuter(p, key, name) : OP.vsLocal(slot);
     }
     if (inParent === undefined) { return undefined; }
     let desc: number;
@@ -350,6 +359,7 @@ export class VMCompiler {
     }
     const idx = ctx.upvals.length;
     ctx.upvals.push(desc);
+    ctx.upvalNames.push(name);
     ctx.upvalMap.set(key, idx);
     return OP.vsUpval(idx);
   }
@@ -361,7 +371,7 @@ export class VMCompiler {
     if (alias !== undefined) { return alias; }
     const local = ctx.slots.get(key);
     if (local !== undefined) { return OP.vsLocal(local); }
-    const outer = this.resolveOuter(ctx, key);
+    const outer = this.resolveOuter(ctx, key, id);
     if (outer !== undefined) { return outer; }
     const g = this.globalIdx.get(key);
     if (g !== undefined) { return OP.vsGlobal(g); }
@@ -563,11 +573,19 @@ export class VMCompiler {
       c: ctx.code,
       l: ctx.loc,
       fl: isFlat ? 1 : 0,
+      ff: -1,
+      fa: [],
     };
     const idx = this.prog.funcs.length;
     this.prog.funcs.push(fn);
+    // Fast-form plumbing: a factory compiling an enclosing flat function
+    // replaces nested lambdas with bytecode-closure builders and needs
+    // this function's index and upval order, keyed by body identity.
+    this.nestedIdx.set(body, { idx, upvalNames: ctx.upvalNames });
     return idx;
   }
+
+  private nestedIdx: Map<N.AExpr, { idx: number; upvalNames: A.Name[] }> = new Map();
 
   /** The `compile-anns` pass: argument annotations, checked left to right. */
   private compileAnnChecks(ctx: FuncCtx, binds: N.ABind[]): void {
@@ -885,7 +903,10 @@ export class VMCompiler {
       case 'a-prim-app': {
         const args = this.valSources(ctx, e.args);
         if (this.properTailCalls && cont === RETURN) { emit(ctx, OP.OP_SETRET); }
-        emit(ctx, OP.OP_PRIMAPP, dest, this.nameK(e.f), this.locK(e.l),
+        // cont updates $al only for split prims (needsStep); flat prims
+        // (buildFlatPrimApp) leave it stale.
+        emit(ctx, OP.OP_PRIMAPP, dest, this.nameK(e.f),
+          (this.locK(e.l) << 1) | (e.appInfo.needsStep ? 1 : 0),
           args.length, ...args);
         break;
       }
@@ -894,6 +915,23 @@ export class VMCompiler {
           isFunctionFlat(this.flatnessEnv, bindKey);
         const idx = this.compileFunc(ctx, e.name, e.l, e.args, e.args.length, false, e.body,
           true, isFlat);
+        if (isFlat && this.makeFlatFactory !== undefined) {
+          // The factory's parameters are the lambda's free names (sorted
+          // by key for determinism); fa records how the CREATING frame
+          // supplies each one.
+          const fvs = N.freevarsL(e);
+          const freeNames = [...fvs.keys()].sort().map((k) => fvs.get(k)!);
+          const fdef = this.prog.funcs[idx];
+          fdef.fa = freeNames.map((n) => this.idSource(ctx, n));
+          fdef.ff = this.makeFlatFactory(e.name, e.l, e.args, e.body, freeNames,
+            (bodyKey, _isMethod) => {
+              const rec = this.nestedIdx.get(bodyKey);
+              if (rec === undefined) {
+                throw new InternalCompilerError('vm-compile: flat factory saw an unknown nested lambda');
+              }
+              return rec;
+            });
+        }
         emit(ctx, OP.OP_CLOSURE, dest, idx);
         break;
       }
