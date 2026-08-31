@@ -69,6 +69,7 @@ const LAYOUTS: Record<string, Layout> = {
   ANNCHECKV: L(3),
   SELFTAIL: L(1, 0, 1),
   SETRET: L(0),
+  APPFIELDS: L(5, 4, 1),
 };
 
 export interface Instr {

@@ -100,10 +100,14 @@ export function makeVmPyret(
     FL.getFlatProvides(provides, env, postEnv, flatnessEnv, anfed));
 
   const computed = postEnv as C.ComputedEnv;
+  const liftCaseCount = (body: import('../ast-anf').AExpr, numArgs: number, allowTco: boolean) =>
+    AL.casesBranchBodyCaseCount(env, flatnessEnv, flatProvides, postEnv,
+      options as AL.SplitCompileOptions, body, numArgs, allowTco);
   const compiler = new VMCompiler(
     flatProvides.fromUri,
     computed.bindings, computed.typeBindings, computed.moduleBindings,
-    env, options.properTailCalls, flatnessEnv[0]);
+    env, options.properTailCalls, flatnessEnv[0],
+    liftCaseCount, options.inlineCaseBodyLimit);
   const prog = compiler.compileProgram(anfed);
   addPhase('Bytecode', prog);
 

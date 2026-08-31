@@ -248,7 +248,12 @@ export class VMCompiler {
     private moduleBindings: Map<string, CS.ModuleBind>,
     private env: CS.CompileEnvironment,
     private properTailCalls: boolean,
-    private flatnessEnv: FL.FEnv
+    private flatnessEnv: FL.FEnv,
+    /** The JS backend's cases-branch lift metric (see
+        casesBranchBodyCaseCount): (body, numEnclosingArgs, allowTco) ->
+        number of switch cases the JS backend would mint. */
+    private liftCaseCount: (body: N.AExpr, numArgs: number, allowTco: boolean) => number,
+    private inlineCaseBodyLimit: number
   ) {
     this.prog = {
       v: OP.FORMAT_VERSION,
@@ -737,9 +742,18 @@ export class VMCompiler {
     emitRef(ctx, elseL);
     for (const branch of e.branches) {
       table[branch.name] = ctx.code.length;
+      // The JS backend lifts a branch whose body mints too many switch
+      // cases into its own function; the machine must match its frame
+      // and fuel granularity exactly, so it consults the same metric.
+      const lifted =
+        this.liftCaseCount(branch.body, ctx.arity, ctx.allowTco) >= this.inlineCaseBodyLimit;
       if (branch.$name === 'a-cases-branch') {
         emit(ctx, OP.OP_CASESPRE, valSrc, branch.args.length,
           this.locK(branch.l), casesLocK);
+        if (lifted) {
+          this.compileLiftedBranch(ctx, e, branch, valSrc, dest, cont);
+          continue;
+        }
         if (branch.args.length > 0) {
           const operands: number[] = [];
           for (const a of branch.args) {
@@ -751,11 +765,46 @@ export class VMCompiler {
         }
       } else {
         emit(ctx, OP.OP_CASESPRE, valSrc, -1, this.locK(branch.l), casesLocK);
+        if (lifted) {
+          this.compileLiftedBranch(ctx, e, branch, valSrc, dest, cont);
+          continue;
+        }
       }
       this.compileAExpr(ctx, branch.body, dest, cont);
     }
     place(ctx, elseL);
     return e._else;
+  }
+
+  /**
+   * The JS backend's lifted-branch shape: `$step = curTarget; $al =
+   * branch.l; var temp = function(args) {body}; $ans =
+   * v.$app_fields(temp, refmask)`. The branch body becomes its own
+   * non-flat function (allowTco false, no arity check -- the runtime's
+   * $app_fields supplies exactly the fields), entered through APPFIELDS.
+   */
+  private compileLiftedBranch(
+    ctx: FuncCtx,
+    e: N.ACases,
+    branch: N.ACasesBranch,
+    valSrc: number,
+    dest: number,
+    cont: Label
+  ): void {
+    const branchArgs: N.ABind[] =
+      (branch.$name === 'a-cases-branch' && branch.args.length > 0)
+        ? branch.args.map((a) => a.bind)
+        : [];
+    const mask: number[] =
+      (branch.$name === 'a-cases-branch')
+        ? branch.args.map((a) => (A.isSCasesBindRef(a.fieldType) ? 1 : 0))
+        : [];
+    if (this.properTailCalls && cont === RETURN) { emit(ctx, OP.OP_SETRET); }
+    const funcIdx = this.compileFunc(ctx, '', branch.body.l, branchArgs, -1, false,
+      branch.body, false, false);
+    emit(ctx, OP.OP_APPFIELDS, dest, valSrc, funcIdx,
+      (this.locK(branch.l) << 1) | 1, mask.length, ...mask);
+    jump(ctx, cont, dest);
   }
 
   // ---------- lettables ----------

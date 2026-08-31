@@ -3106,3 +3106,57 @@ export function splittingCompiler(
 ): SplittingCompiler {
   return new SplittingCompiler(env, addPhase, flatnessEnvs, provides, postEnv, options);
 }
+
+/*
+  The vm backend's window into this compiler's cases-branch lift decision:
+  compileCasesBranch inlines a branch iff the body compiles to fewer than
+  inlineCaseBodyLimit switch cases -- a metric of THIS backend's label
+  minting. The machine must lift exactly where this backend lifts (a
+  lifted branch is a real function: entry fuel, a frame, its own capture
+  behavior), so the count is computed here with the real compileAExpr
+  over a throwaway visitor rather than re-derived. Label values are lazy
+  and no output is generated; only the case count is observed.
+*/
+export function casesBranchBodyCaseCount(
+  env: CS.CompileEnvironment,
+  flatnessEnvs: [FL.FEnv, FL.FEnv],
+  provides: CS.Provides,
+  postEnv: CS.ComputedEnvironment,
+  options: SplitCompileOptions,
+  body: N.AExpr,
+  numEnclosingArgs: number,
+  allowTco: boolean
+): number {
+  const base = splittingCompiler(env, (_name: string, v: any) => v, flatnessEnvs, provides, postEnv, options);
+  const makeLabel = makeLabelSequence(0);
+  const target = makeLabel();
+  const locCache: Map<string, number> = new Map();
+  let locCount = 0;
+  const LOCSID = constId('L');
+  function getLocId(loc: Loc): number {
+    const k = loc.key();
+    const cached = locCache.get(k);
+    if (cached !== undefined) { return cached; }
+    locCache.set(k, locCount);
+    return locCount++;
+  }
+  function getLoc(loc: Loc): J.JExprT { return jBracket(jId(LOCSID), jNum(getLocId(loc))); }
+  const dummyArgs: A.Name[] = [];
+  for (let i = 0; i < numEnclosingArgs; i++) { dummyArgs.push(freshId(compilerName('carg'))); }
+  const compiler: CompilerVisitor = ext(base as unknown as CompilerVisitor, {
+    progProvides: provides,
+    getLoc,
+    getLocId,
+    resumer: compilerName('resumer'),
+    dispatches: new DispatchesBox(clEmpty),
+    makeLabel,
+    curTarget: target,
+    curStep: freshId(compilerName('step')),
+    curAns: freshId(compilerName('ans')),
+    curApploc: freshId(compilerName('al')),
+    args: dummyArgs,
+    elidedFrames: freshId(compilerName('elidedFrames')),
+    allowTco,
+  });
+  return compileAExpr(compiler, body).newCases.length();
+}

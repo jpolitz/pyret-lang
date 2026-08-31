@@ -671,6 +671,13 @@ vm-unit-test: ts-compiler
 vm-parity-test: ts-compiler $(CONFIGA_RUNTIME_FILES)
 	bash $(TS_COMP_DIR)/tests/vm-parity.sh
 
+# The strongest interpreter oracle: same programs, same pause schedules,
+# byte-identical stdout AND byte-identical stacks at every pause event
+# (PYRET_PAUSE_TRACE) between the js and vm backends.
+.PHONY : vm-pause-oracle
+vm-pause-oracle: ts-compiler $(CONFIGA_RUNTIME_FILES)
+	bash $(TS_COMP_DIR)/tests/vm-pause-oracle.sh
+
 tests/pyret/main2-vm.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/pyret/main2.arr $(TEST_FILES)
 	$(INTERP_TEST_BUILD) \
 		--outfile tests/pyret/main2-vm.jarr \

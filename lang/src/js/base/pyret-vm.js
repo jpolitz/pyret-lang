@@ -44,14 +44,15 @@
 define("pyret-base/js/pyret-vm", [], function() {
 
   // Must match src/ts-compiler/src/vm/opcodes.ts.
-  var FORMAT_VERSION = 5;
+  var FORMAT_VERSION = 6;
 
   var OPCODE_NAMES = [
     'MOVE', 'BOX', 'UNBOX', 'SETVAR', 'LETREC', 'MODREF', 'MODVARREF', 'ARRSET',
     'JMP', 'IF', 'RET', 'CALL', 'TAILCALL', 'METHCALL', 'PRIMAPP', 'CLOSURE',
     'METHOD', 'OBJ', 'EXTEND', 'UPDATE', 'DOT', 'COLON', 'GETBANG', 'TUPLE',
     'TUPLEGET', 'REF', 'CASES', 'CASESPRE', 'CASESBIND', 'DATA', 'NEWTYPE',
-    'MKANN', 'ANNCHECK', 'TUPLECHK', 'MODULE', 'ANNCHECKV', 'SELFTAIL', 'SETRET'
+    'MKANN', 'ANNCHECK', 'TUPLECHK', 'MODULE', 'ANNCHECKV', 'SELFTAIL', 'SETRET',
+    'APPFIELDS'
   ];
 
   var OP_MOVE = 0, OP_BOX = 1, OP_UNBOX = 2, OP_SETVAR = 3, OP_LETREC = 4,
@@ -62,7 +63,8 @@ define("pyret-base/js/pyret-vm", [], function() {
       OP_GETBANG = 22, OP_TUPLE = 23, OP_TUPLEGET = 24, OP_REF = 25,
       OP_CASES = 26, OP_CASESPRE = 27, OP_CASESBIND = 28, OP_DATA = 29,
       OP_NEWTYPE = 30, OP_MKANN = 31, OP_ANNCHECK = 32, OP_TUPLECHK = 33,
-      OP_MODULE = 34, OP_ANNCHECKV = 35, OP_SELFTAIL = 36, OP_SETRET = 37;
+      OP_MODULE = 34, OP_ANNCHECKV = 35, OP_SELFTAIL = 36, OP_SETRET = 37,
+      OP_APPFIELDS = 38;
 
   // value-source tags
   var VS_LOCAL = 0, VS_UPVAL = 1, VS_CONST = 2, VS_GLOBAL = 3;
@@ -686,6 +688,32 @@ define("pyret-base/js/pyret-vm", [], function() {
             // prim call written to the scratch slot, then RET): the cont
             // caller sits at its return label throughout.
             f.atRet = true;
+            continue;
+          }
+
+          case OP_APPFIELDS: {
+            // A lifted cases branch: the cont backend's
+            // `$ans = v.$app_fields(tempBranch, refmask)`. The branch
+            // function becomes an ordinary closure; $app_fields (runtime
+            // JS, no fuel) dereferences the variant's fields and calls it,
+            // so the entry fuel and frame come from the closure's enter.
+            var d = code[pc++];
+            var v = rd(code[pc++], f);
+            var funcIdx = code[pc++];
+            var lkOp = code[pc++];
+            var lk = lkOp >> 1;
+            var nmask = code[pc++];
+            f.locK = lk;
+            if ((lkOp & 1) !== 0) { f.locKS = lk; }
+            var mask = new Array(nmask);
+            for (var i = 0; i < nmask; i++) { mask[i] = code[pc++] === 1; }
+            var clo = makeClosure(R, mod, mod.funcs[funcIdx], locals, upvals);
+            f.pc = pc;
+            st.resumeDest = d;
+            ans = v.$app_fields.call(v, clo.app, mask);
+            if (isThenable(ans)) { return parkedOn(st, ans); }
+            st.resumeDest = -1;
+            locals[d] = ans;
             continue;
           }
 

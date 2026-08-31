@@ -41,7 +41,7 @@
 // $al at statically-flat call sites or maybeMethodCall sites). PRIMAPP,
 // DOT, CASES, ANNCHECK, ANNCHECKV and TUPLECHK carry unshifted locKs and
 // always update both, matching where generated code assigns $al.
-export const FORMAT_VERSION = 5;
+export const FORMAT_VERSION = 6;
 
 // The AMD module name the emitted stub pulls the machine in from.
 export const VM_MODULE_NAME = 'pyret-base/js/pyret-vm';
@@ -150,6 +150,10 @@ export const OPCODE_NAMES: readonly string[] = [
   // (method/prim call followed by RET): elided at capture events, as the
   // cont backend's step==retLabel stack-attach guard elides its frame.
   'SETRET',    // (no operands)
+  // A lifted cases branch (see casesBranchBodyCaseCount): build a closure
+  // for funcIdx and call v.$app_fields(closure.app, refmask), exactly the
+  // cont backend's lifted-branch shape.
+  'APPFIELDS', // d, v, funcIdx, lkOp, n, refmaskbit * n
 ] as const;
 
 const ops: Record<string, number> = {};
@@ -193,6 +197,7 @@ export const OP_MODULE = ops.MODULE;
 export const OP_ANNCHECKV = ops.ANNCHECKV;
 export const OP_SELFTAIL = ops.SELFTAIL;
 export const OP_SETRET = ops.SETRET;
+export const OP_APPFIELDS = ops.APPFIELDS;
 
 // ---------- emitted program shape ----------
 

@@ -111,6 +111,57 @@ Cont-side tracing needs a small runtime.js hook at the existing capture
 sites (no codegen change): record pause index + theOneTrueStack
 snapshot when a schedule is active and PYRET_PAUSE_TRACE is set.
 
+## Oracle findings so far (all fixed)
+
+The byte-identical-trace oracle (make vm-pause-oracle; PYRET_PAUSE_TRACE
+on both runtimes, diff as comparator) found, in order:
+
+1. st.fp staleness: the machine mirrored fp into st.fp on pushes but not
+   pops, so a capture during a crossing walked dead pool frames.
+2. Per-module nativeRequire: every vm module stub pulled the machine via
+   nativeRequires, costing a pauseStack per module load in runStandalone
+   that cont (zero nativeRequires on .arr modules) never performs. The
+   machine is now a dependency of vm-runtime.js itself (R.$vm).
+3. pauseStack refill parity: cont refills BOTH counters when a Pause
+   reaches iter (the general bounce refill) and again at resume; the vm
+   pauseStack only refilled at resume, desynchronizing stateful
+   schedules by one refill pair per pause.
+4. Epoch-guard fallacy: helper resume treatments were gated on "did a
+   capture happen while parked", snapshotting CAPTURE_EPOCH after the
+   callee returned its thenable -- but the capture happens synchronously
+   INSIDE the callee, so the snapshot was already post-capture and the
+   guard never fired. Correct rule: a thenable from a callee always
+   corresponds to an attached activation record on the cont side, so the
+   resume treatment (pop floors, plus the helper's own re-run entry
+   check where cont's AR path re-runs one) applies unconditionally.
+
+Also derived and implemented since the first draft: the $al update-site
+table (split apps yes, statically-flat call sites no, method-apps only
+on the getColonField path -- an a-id receiver goes through
+maybeMethodCall and does NOT update $al -- prims/dots/cases/ann checks
+always), carried per-frame as locKS via a flag bit in the call opcodes'
+locK operand (FORMAT_VERSION 5); cont's double-refund on tail calls
+(callee ++GAS plus the caller's ret-label ++GAS); and the cont self-TCO
+firing on appInfo alone, even at structurally non-tail sites under
+non-stateful return annotations, discarding the pending binding.
+
+## Open items
+
+- Lifted cases branches: cont lifts a branch into its own function when
+  its compiled body exceeds inline-case-body-limit (default 5) SWITCH
+  CASES -- a metric of the JS backend's own label minting. The vm
+  emitter must lift identically (entry fuel + frame + $app_fields call
+  shape). Plan: count labels with a mirror of the JS compiler's
+  case-minting rules, validated program-by-program against the real
+  compiler; fallback is compiling the branch body through the real
+  anf-loop-compiler just for the count. Until then, programs whose
+  cases branches exceed the limit will diverge under the oracle.
+- manualPause (schedulePause, CPO stop button): the vm records it as a
+  pause-trace event via pauseStack; cont's iter does not record it.
+  Node oracle runs never hit it.
+- PYRET_FUEL_DEBUG accessor logging remains in both runtimes as oracle
+  debug tooling (env-gated, off by default).
+
 ## Known deliberate deviations (documented, not silent)
 
 - The machine stays in pyret-vm.js (paired with vm-runtime.js) rather
