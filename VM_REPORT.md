@@ -63,6 +63,19 @@ section marked PENDING has not been measured/finished yet.*
 5. locKS attribution: statically-flat call sites, maybeMethodCall
    receivers, and flat prims do not update cont's $al.
 6. Cases-branch lifting parity (checker's 79 lifted branches).
+7. raw-array-build-opt's RUNGAS trip falls through (no break) and still
+   calls the callback once, whose entry check performs the capture --
+   the callback's frame is therefore on the captured stack. Replicated;
+   the cont version's sync-callback-after-trip path (which corrupts its
+   return value by attaching a frame to it) pauses cleanly on the vm
+   instead -- a latent cont bug worth an upstream look.
+
+Also learned: main2's executed-test COUNT and module load order depend
+on compile-cache warmth (both backends equally); oracle comparisons must
+build both sides cold. The pause-trace equality itself is robust to the
+trigger kind (GAS vs RUNGAS trip) because every capture consumes one
+refill pair from each schedule stream -- which is exactly why the stack
+contents, not just counts, are the oracle.
 
 ## Performance
 
