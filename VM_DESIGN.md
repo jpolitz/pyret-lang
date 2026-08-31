@@ -162,6 +162,26 @@ non-stateful return annotations, discarding the pending binding.
 - PYRET_FUEL_DEBUG accessor logging remains in both runtimes as oracle
   debug tooling (env-gated, off by default).
 
+## FLATCALL plan (the one carried optimization)
+
+Compile cont-flat functions to synchronous JS by calling the REAL
+compileFunBody(isFlat=true) from the vm backend -- byte-identical flat
+code to the cont backend, so performance, semantics, and (via the same
+JSourcenode -> source-map pipeline, by emitting theModule as a JS AST
+with the factories as real code) error-stack rendering all match by
+construction. Each flat function becomes a factory over its free
+variables (parameters named jsIdOf(freevar)); the vm emitter records a
+value-source list (fdef.fa) resolved with rd() at closure-creation time
+(covers locals, upvals, consts, and hoisted globals -- an a-id-modref
+free var passes the dep module object). Nested a-lam/a-method inside a
+flat body cannot use cont's nested codegen (it is cont-protocol code),
+so the flat compile runs with a visitor override that emits
+R.$vm.mkFun(mod, funcIdx, [freevals]) building the bytecode closure
+instead. The machine's CALL/TAILCALL check pvm.fast and call it
+directly (no frame, no fuel -- exactly cont's flat behavior); .app on a
+flat closure IS the fast form. Instantiation cost: factories are
+compiled once per module realm; closure creation is one plain call.
+
 ## Known deliberate deviations (documented, not silent)
 
 - The machine stays in pyret-vm.js (paired with vm-runtime.js) rather

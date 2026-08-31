@@ -25,6 +25,11 @@ requirejs.config({
   paths: {
     'pyret-base': './',
     'jglr': path.join(LANG_ROOT, 'lib', 'jglr'),
+    // The vm backend runs on the promise runtime (vm-runtime.js defines
+    // the same "pyret-base/js/runtime" module id).
+    ...(process.env.PYRET_TEST_BACKEND === 'vm'
+      ? { 'pyret-base/js/runtime': 'js/vm-runtime' }
+      : {}),
   },
   nodeRequire: require, // util / seedrandom / js-sha256 fall back to node
 });
