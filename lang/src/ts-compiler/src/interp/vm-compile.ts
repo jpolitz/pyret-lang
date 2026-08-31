@@ -467,127 +467,128 @@ export class VMCompiler {
 
   /**
    * Compile `expr`, leaving its value in slot `dest`, then transfer control
-   * to `cont` (RETURN meaning "return it"). The right-nested spine is walked
-   * with a loop; only genuinely nested constructs (lambda bodies, the taken
-   * arm of a conditional) recur.
+   * to `cont` (RETURN meaning "return it"). The statement spine (`heads`) is
+   * a flat array; only genuinely nested constructs (lambda bodies, the taken
+   * arm of a conditional) recur, and chained `cases`-in-else loops here.
    */
   compileAExpr(ctx: FuncCtx, expr0: N.AExpr, dest: number, cont: Label): void {
     let expr = expr0;
     for (;;) {
-      switch (expr.$name) {
-        case 'a-type-let': {
-          const bind = expr.bind;
-          switch (bind.$name) {
-            case 'a-type-bind': {
-              // optName only reaches makeRecordAnn/makeTupleAnn, which are
-              // exactly the cases annValueSource declines, so binding a
-              // directly-available annotation loses nothing.
-              const direct = this.annValueSource(ctx, bind.ann);
-              if (direct !== undefined) {
-                ctx.aliases.set(bind.name.key(), direct);
-                break;
-              }
-              const slot = ctx.slotFor(bind.name);
-              emit(ctx, OP.OP_MKANN, slot, this.annDesc(ctx, bind.ann, bind.name.toname()));
-              break;
-            }
-            case 'a-newtype-bind': {
-              const brander = ctx.slotFor(bind.namet);
-              const annSlot = ctx.slotFor(bind.name);
-              emit(ctx, OP.OP_NEWTYPE, brander, annSlot,
-                this.nameK(bind.name.toname()), this.locK(bind.l));
-              break;
-            }
-            default:
-              throw new InternalCompilerError('vm-compile: unknown ATypeBind');
-          }
-          expr = expr.body;
-          continue;
-        }
-        case 'a-let': {
-          // `x = <atomic>` needs no instruction and no slot: the binding is
-          // just another name for a value source that already exists, and
-          // ANF's single-assignment rule means it stays that way.
-          if (expr.e.$name === 'a-val') {
-            const src = this.valSource(ctx, expr.e.v);
-            ctx.aliases.set(expr.bind.id.key(), src);
-            this.compileAnnCheckAt(ctx, expr.bind, src);
-            expr = expr.body;
-            continue;
-          }
-          const slot = ctx.slotFor(expr.bind.id);
-          const next = newLabel();
-          this.compileLettable(ctx, expr.e, slot, next);
-          place(ctx, next);
-          this.compileAnnCheck(ctx, expr.bind);
-          expr = expr.body;
-          continue;
-        }
-        case 'a-arr-let': {
-          const arr = this.idSource(ctx, expr.bind.id);
-          if (expr.e.$name === 'a-val') {
-            emit(ctx, OP.OP_ARRSET, arr, expr.idx, this.valSource(ctx, expr.e.v));
-            expr = expr.body;
-            continue;
-          }
-          const tmp = ctx.newTemp();
-          const next = newLabel();
-          this.compileLettable(ctx, expr.e, tmp, next);
-          place(ctx, next);
-          emit(ctx, OP.OP_ARRSET, arr, expr.idx, OP.vsLocal(tmp));
-          ctx.freeTemp(tmp);
-          expr = expr.body;
-          continue;
-        }
-        case 'a-var': {
-          const slot = ctx.slotFor(expr.bind.id);
-          if (expr.e.$name === 'a-val') {
-            emit(ctx, OP.OP_BOX, slot, this.valSource(ctx, expr.e.v));
-            expr = expr.body;
-            continue;
-          }
-          const tmp = ctx.newTemp();
-          const next = newLabel();
-          this.compileLettable(ctx, expr.e, tmp, next);
-          place(ctx, next);
-          emit(ctx, OP.OP_BOX, slot, OP.vsLocal(tmp));
-          ctx.freeTemp(tmp);
-          expr = expr.body;
-          continue;
-        }
-        case 'a-seq': {
-          const tmp = ctx.newTemp();
-          const next = newLabel();
-          this.compileLettable(ctx, expr.e1, tmp, next);
-          place(ctx, next);
-          ctx.freeTemp(tmp);
-          expr = expr.e2;
-          continue;
-        }
-        case 'a-lettable': {
-          // Tail-position conditionals fold into this loop so that long
-          // `ask:` / `if ... else if ...` ladders do not nest the compiler.
-          const e = expr.e;
-          if (e.$name === 'a-if') {
-            const elseL = newLabel();
-            emit(ctx, OP.OP_IF, this.valSource(ctx, e.c));
-            emitRef(ctx, elseL);
-            this.compileAExpr(ctx, e.t, dest, cont);
-            place(ctx, elseL);
-            expr = e.e;
-            continue;
-          }
-          if (e.$name === 'a-cases') {
-            const elseExpr = this.compileCases(ctx, e, dest, cont);
-            expr = elseExpr;
-            continue;
-          }
-          this.compileLettable(ctx, e, dest, cont);
-          return;
-        }
-        default:
-          throw new InternalCompilerError('vm-compile: unknown AExpr ' + (expr as any).$name);
+      for (const head of expr.heads) {
+        this.compileHead(ctx, head);
       }
+      const e = expr.e;
+      if (e.$name === 'a-if') {
+        // A branch's heads are the lets its test needs, evaluated only once
+        // every earlier branch's test has failed.
+        for (const b of e.branches) {
+          for (const head of b.heads) {
+            this.compileHead(ctx, head);
+          }
+          const elseL = newLabel();
+          emit(ctx, OP.OP_IF, this.valSource(ctx, b.test));
+          emitRef(ctx, elseL);
+          this.compileAExpr(ctx, b.body, dest, cont);
+          place(ctx, elseL);
+        }
+        expr = e.elseBody;
+        continue;
+      }
+      if (e.$name === 'a-cases') {
+        expr = this.compileCases(ctx, e, dest, cont);
+        continue;
+      }
+      this.compileLettable(ctx, e, dest, cont);
+      return;
+    }
+  }
+
+  /** One statement of the spine: binds a name (or performs an effect); no result. */
+  private compileHead(ctx: FuncCtx, head: N.AExprHead): void {
+    switch (head.$name) {
+      case 'a-type-let': {
+        const bind = head.bind;
+        switch (bind.$name) {
+          case 'a-type-bind': {
+            // optName only reaches makeRecordAnn/makeTupleAnn, which are
+            // exactly the cases annValueSource declines, so binding a
+            // directly-available annotation loses nothing.
+            const direct = this.annValueSource(ctx, bind.ann);
+            if (direct !== undefined) {
+              ctx.aliases.set(bind.name.key(), direct);
+              break;
+            }
+            const slot = ctx.slotFor(bind.name);
+            emit(ctx, OP.OP_MKANN, slot, this.annDesc(ctx, bind.ann, bind.name.toname()));
+            break;
+          }
+          case 'a-newtype-bind': {
+            const brander = ctx.slotFor(bind.namet);
+            const annSlot = ctx.slotFor(bind.name);
+            emit(ctx, OP.OP_NEWTYPE, brander, annSlot,
+              this.nameK(bind.name.toname()), this.locK(bind.l));
+            break;
+          }
+          default:
+            throw new InternalCompilerError('vm-compile: unknown ATypeBind');
+        }
+        break;
+      }
+      case 'a-let': {
+        // `x = <atomic>` needs no instruction and no slot: the binding is
+        // just another name for a value source that already exists, and
+        // ANF's single-assignment rule means it stays that way.
+        if (head.e.$name === 'a-val') {
+          const src = this.valSource(ctx, head.e.v);
+          ctx.aliases.set(head.bind.id.key(), src);
+          this.compileAnnCheckAt(ctx, head.bind, src);
+          break;
+        }
+        const slot = ctx.slotFor(head.bind.id);
+        const next = newLabel();
+        this.compileLettable(ctx, head.e, slot, next);
+        place(ctx, next);
+        this.compileAnnCheck(ctx, head.bind);
+        break;
+      }
+      case 'a-arr-let': {
+        const arr = this.idSource(ctx, head.bind.id);
+        if (head.e.$name === 'a-val') {
+          emit(ctx, OP.OP_ARRSET, arr, head.idx, this.valSource(ctx, head.e.v));
+          break;
+        }
+        const tmp = ctx.newTemp();
+        const next = newLabel();
+        this.compileLettable(ctx, head.e, tmp, next);
+        place(ctx, next);
+        emit(ctx, OP.OP_ARRSET, arr, head.idx, OP.vsLocal(tmp));
+        ctx.freeTemp(tmp);
+        break;
+      }
+      case 'a-var': {
+        const slot = ctx.slotFor(head.bind.id);
+        if (head.e.$name === 'a-val') {
+          emit(ctx, OP.OP_BOX, slot, this.valSource(ctx, head.e.v));
+          break;
+        }
+        const tmp = ctx.newTemp();
+        const next = newLabel();
+        this.compileLettable(ctx, head.e, tmp, next);
+        place(ctx, next);
+        emit(ctx, OP.OP_BOX, slot, OP.vsLocal(tmp));
+        ctx.freeTemp(tmp);
+        break;
+      }
+      case 'a-seq': {
+        const tmp = ctx.newTemp();
+        const next = newLabel();
+        this.compileLettable(ctx, head.e1, tmp, next);
+        place(ctx, next);
+        ctx.freeTemp(tmp);
+        break;
+      }
+      default:
+        throw new InternalCompilerError('vm-compile: unknown AExprHead ' + (head as any).$name);
     }
   }
 
@@ -757,18 +758,11 @@ export class VMCompiler {
       case 'a-data-expr':
         emit(ctx, OP.OP_DATA, dest, this.dataDesc(ctx, e));
         break;
-      case 'a-if': {
-        const elseL = newLabel();
-        emit(ctx, OP.OP_IF, this.valSource(ctx, e.c));
-        emitRef(ctx, elseL);
-        this.compileAExpr(ctx, e.t, dest, cont);
-        place(ctx, elseL);
-        this.compileAExpr(ctx, e.e, dest, cont);
-        return;
-      }
+      case 'a-if':
       case 'a-cases': {
-        const elseExpr = this.compileCases(ctx, e, dest, cont);
-        this.compileAExpr(ctx, elseExpr, dest, cont);
+        // A conditional in a head's right-hand side: hand it back to the
+        // AExpr walker, which owns branch/dispatch emission.
+        this.compileAExpr(ctx, new N.AExpr([], e), dest, cont);
         return;
       }
       case 'a-module':
