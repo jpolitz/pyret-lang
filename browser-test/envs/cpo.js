@@ -10,8 +10,9 @@ const { findEditorFrame } = require("../shared/find-frame");
 const { resourceScope } = require("../shared/resource-scope");
 
 const BASE_URL = process.env.BASE_URL || "http://localhost:4999";
-// PYRET_COMPILER=ts loads the TypeScript-compiler flavor of the editor
-// (the ?compiler=ts opt-in); default is the stock Pyret-hosted compiler.
+// PYRET_COMPILER=ts loads the TypeScript-compiler flavor of the editor and
+// PYRET_COMPILER=interp loads its interpreter back end (the ?compiler=
+// opt-ins); default is the stock Pyret-hosted compiler.
 const COMPILER = process.env.PYRET_COMPILER || "pyret";
 
 async function setup() {

@@ -18,13 +18,26 @@
 # compiled-read-only dir (server.ts), which is how the npm installation
 # ships precompiled builtins.
 #
-# Run from the pyret-lang root (lang/): bash src/ts-compiler/tests/serve-test.sh
+# The same script covers `pyret --backend interp`: pass the back end as the
+# first argument (default js). That path differs in exactly two respects --
+# the compile option the client sends, and the requirejs config the server
+# defaults to (which has to bundle the Pyret VM) -- and both are exercised
+# end to end here, since step 2 RUNS the standalone the server produced.
+#
+# Run from the pyret-lang root (lang/):
+#   bash src/ts-compiler/tests/serve-test.sh [js|interp]
 
 set -u
 cd "$(dirname "$0")/../../.."   # lang/
 
+BACKEND="${1:-js}"
+if [ "$BACKEND" != "js" ] && [ "$BACKEND" != "interp" ]; then
+  echo "usage: serve-test.sh [js|interp]"
+  exit 2
+fi
+
 PYRET_TS=build/ts-compiler/pyret.js
-WORK=build/ts-compiler/serve-test
+WORK=build/ts-compiler/serve-test-$BACKEND
 SMOKE=src/ts-compiler/tests/serve-smoke.js
 SOCK="$PWD/$WORK/comm.sock"
 
@@ -62,6 +75,10 @@ fail=0
 step() { echo "--- $1"; }
 
 export SMOKE_COMPILED_DIR="$PWD/$WORK/compiled"
+export SMOKE_BACKEND="$BACKEND"
+if [ "$BACKEND" = "interp" ]; then
+  export SMOKE_REQUIRE_CONFIG="$PWD/src/scripts/standalone-config-interp.json"
+fi
 
 step "good compile"
 if node "$SMOKE" "$SOCK" "$WORK/good.arr" "$WORK/good.jarr" > "$WORK/good.out" 2>&1; then
@@ -114,9 +131,9 @@ fi
 
 echo
 if [ "$fail" -eq 0 ]; then
-  echo "serve test: all steps passed"
+  echo "serve test ($BACKEND): all steps passed"
 else
-  echo "serve test: FAILED (server.log tail below)"
+  echo "serve test ($BACKEND): FAILED (server.log tail below)"
   tail -10 "$WORK/server.log"
 fi
 exit "$fail"

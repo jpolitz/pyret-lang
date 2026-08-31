@@ -102,7 +102,11 @@ async function compile(options: { [key: string]: any }): Promise<void> {
       log: orElse(options, 'log', compileOpts.log),
       logError: orElse(options, 'log-error', compileOpts.logError),
       depsFile: orElse(options, 'deps-file', compileOpts.depsFile),
-      userAnnotations: orElse(options, 'user-annotations', compileOpts.userAnnotations)
+      userAnnotations: orElse(options, 'user-annotations', compileOpts.userAnnotations),
+      // The npm client puts `backend` in the compile-options group so the
+      // choice reaches here; each backend also keeps its own socket, so a
+      // server started for one is never reused for the other.
+      backend: orElse(options, 'backend', 'js') === 'interp' ? 'interp' : 'js'
     });
 }
 
@@ -276,8 +280,13 @@ export function serve(port: string, pyretDir: string): void {
     if ('perilous' in opts && opts['perilous']) {
       opts['user-annotations'] = false;
     }
+    // Interpreted modules name the machine as their nativeRequire, so the
+    // standalone has to bundle it: that is the only difference between the
+    // two shipped requirejs configs.
+    const defaultConfig = orElse(opts, 'backend', 'js') === 'interp'
+      ? 'config-interp.json' : 'config.json';
     opts['require-config'] = orElse(opts, 'require-config',
-      P.resolve(P.join(pyretDir, 'config.json')));
+      P.resolve(P.join(pyretDir, defaultConfig)));
     return compile(opts).then(() => {
       sendMessage(serializeMessage([['type', 'compile-success']]));
     }, (exn: any) => {

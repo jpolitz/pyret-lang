@@ -996,6 +996,13 @@ export interface CompileOptions {
   ignoreUnbound: boolean;
   properTailCalls: boolean;
   inlineCaseBodyLimit: number;
+  /**
+   * Which back end turns the shared ANF into a loadable module: "js" is
+   * the code generator (anf-loop-compiler), "interp" emits bytecode for
+   * the machine in src/js/base/pyret-vm.js. Both produce the same module
+   * format and run on the same runtime, so a program may mix them.
+   */
+  backend: 'js' | 'interp';
   moduleEval: boolean;
   userAnnotations: boolean;
   runtimeAnnotations: boolean;
@@ -1035,6 +1042,7 @@ export const defaultCompileOptions: CompileOptions = {
   ignoreUnbound: false,
   properTailCalls: true,
   inlineCaseBodyLimit: 5,
+  backend: 'js',
   moduleEval: true,
   userAnnotations: true,
   runtimeAnnotations: true,

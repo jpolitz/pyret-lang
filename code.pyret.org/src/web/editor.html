@@ -6,16 +6,20 @@
   {{^PYRET_GZIPPED}}<link crossorigin="anonymous" rel="preload" href="{{&PYRET}}" as="script">{{/PYRET_GZIPPED}}
   <script>
   window.PYRET = "{{&PYRET}}"; window.PYRET_GZIPPED = "{{ PYRET_GZIPPED }}" === "true"; window.APP_NAME = "{{APP_NAME}}"; window.APP_DOMAIN = "{{APP_DOMAIN}}";
-  // Opt-in TypeScript-compiler flavor: chosen by ?compiler=ts (or the
-  // server-side CPO_COMPILER env default). Swaps in the cpo-main-ts jarr
-  // and loads the TS compiler bundle; default behavior is unchanged.
+  // Opt-in alternative compiler flavors: chosen by ?compiler=ts or
+  // ?compiler=interp (or the server-side CPO_COMPILER env default). Both
+  // swap in the cpo-main-ts jarr and load the TS compiler bundle; they
+  // differ only in which back end that compiler uses for the user's
+  // program -- generated JavaScript for ts, bytecode for the Pyret VM for
+  // interp (see cpo-main-ts.js, which reads CPO_COMPILER back). Default
+  // behavior is unchanged.
   //
   // The ts asset URLs are never configured -- they are derived from PYRET's
   // directory plus canonical names, a contract every host satisfies by
   // publishing the three files side by side (deploys upload them together;
   // static/webview builds copy them together). Both ts assets are gzip bytes
-  // at rest everywhere. No PYRET means no ts flavor: ?compiler=ts silently
-  // serves the stock compiler.
+  // at rest everywhere. No PYRET means no alternative flavor: ?compiler=
+  // silently serves the stock compiler.
   window.CPO_COMPILER = "{{&CPO_COMPILER}}" || "pyret";
   (function() {
     var dir = window.PYRET ? window.PYRET.slice(0, window.PYRET.lastIndexOf("/") + 1) : "";
@@ -23,7 +27,9 @@
     window.PYRET_TS_COMPILER = window.PYRET ? dir + "ts-compiler.gz.js" : "";
     var m = /[?&]compiler=([^&]*)/.exec(window.location.search);
     if(m) { window.CPO_COMPILER = decodeURIComponent(m[1]); }
-    if(window.CPO_COMPILER === "ts" && window.PYRET_TS) {
+    window.CPO_USES_TS_ASSETS =
+      (window.CPO_COMPILER === "ts" || window.CPO_COMPILER === "interp");
+    if(window.CPO_USES_TS_ASSETS && window.PYRET_TS) {
       window.PYRET = window.PYRET_TS;
       // In gzipped mode the host may serve assets without an executable MIME
       // type (nosniff), which refuses a <script src> load outright --

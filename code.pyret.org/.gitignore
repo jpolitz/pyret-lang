@@ -6,6 +6,9 @@ build/
 **/.tern-port
 test/jasmine
 compiled/
+# The interpreter back end keeps its own module cache (a compiled module
+# records which back end built it only by which directory it is in).
+compiled-interp/
 program-deps.js
 program-require.js
 pyret

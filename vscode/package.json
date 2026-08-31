@@ -108,11 +108,13 @@
 					"scope": "resource",
 					"enum": [
 						"pyret",
-						"ts"
+						"ts",
+						"interp"
 					],
 					"markdownEnumDescriptions": [
 						"“Regular” Pyret. This is the default, pick this if you're not sure.",
-						"A version of the compiler implemented in TypeScript. No special features, just loads and runs faster. Currently an experiment."
+						"A version of the compiler implemented in TypeScript. No special features, just loads and runs faster. Currently an experiment.",
+						"The TypeScript compiler's interpreter back end: your program runs on the Pyret VM instead of being translated to JavaScript (same assets as `ts`)"
 					],
 					"description": "Which compiler implementation to use"
 				}

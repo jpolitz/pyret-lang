@@ -25,13 +25,14 @@ function start(config, onServerReady) {
 
   var defaultOpts = {
       PYRET: process.env.PYRET,
-      // TypeScript-compiler flavor (opt-in; see editor.html). The ts asset
-      // URLs are never configured: editor.html derives them client-side from
-      // PYRET's directory + canonical names (every host publishes the three
-      // files side by side). PYRET_TS below is the same rule applied early,
-      // so the /editor route can point the preload link and window.PYRET at
-      // the jarr that will actually load in ts mode. No PYRET -> no ts
-      // flavor: ?compiler=ts silently serves the stock compiler.
+      // Alternative compiler flavors (opt-in; see editor.html): ts and
+      // interp share these assets. The ts asset URLs are never configured:
+      // editor.html derives them client-side from PYRET's directory +
+      // canonical names (every host publishes the three files side by
+      // side). PYRET_TS below is the same rule applied early, so the
+      // /editor route can point the preload link and window.PYRET at the
+      // jarr that will actually load. No PYRET -> no alternative flavor:
+      // ?compiler= silently serves the stock compiler.
       PYRET_TS: process.env.PYRET
         ? process.env.PYRET.slice(0, process.env.PYRET.lastIndexOf("/") + 1) + "cpo-main-ts.jarr.gz.js"
         : "",
@@ -629,14 +630,17 @@ function start(config, onServerReady) {
   });
 
   app.get("/editor", function(req, res) {
-    // The compiler flavor can be chosen per request (?compiler=ts|pyret),
-    // falling back to the CPO_COMPILER env default. Resolving it here (in
-    // addition to the client-side check in editor.html) keeps the preload
-    // link and window.PYRET pointing at the jarr that will actually load,
-    // so the stock jarr isn't downloaded pointlessly in ts mode.
+    // The compiler flavor can be chosen per request
+    // (?compiler=ts|interp|pyret), falling back to the CPO_COMPILER env
+    // default. Resolving it here (in addition to the client-side check in
+    // editor.html) keeps the preload link and window.PYRET pointing at the
+    // jarr that will actually load, so the stock jarr isn't downloaded
+    // pointlessly. ts and interp load the same jarr and compiler bundle;
+    // the back end is chosen inside it.
     var compiler = req.query.compiler || defaultOpts.CPO_COMPILER;
-    var compilerOpts = (compiler === "ts" && defaultOpts.PYRET_TS)
-      ? { PYRET: defaultOpts.PYRET_TS, CPO_COMPILER: "ts" }
+    var usesTsAssets = (compiler === "ts" || compiler === "interp");
+    var compilerOpts = (usesTsAssets && defaultOpts.PYRET_TS)
+      ? { PYRET: defaultOpts.PYRET_TS, CPO_COMPILER: compiler }
       : {};
     res.render("editor.html", { ...defaultOpts,
       ...compilerOpts,

@@ -8,6 +8,16 @@ compiled by this compiler run on the **unchanged** `src/js/base/runtime.js`
 formats), and its on-disk compiled-module cache is interchangeable with the
 Pyret-hosted compiler's.
 
+## Back ends
+
+Two back ends share this front end. `--backend js` (the default) is the
+port of `anf-loop-compiler`: it generates JavaScript. `--backend interp`
+emits bytecode for a register machine instead, and is documented in
+`src/interp/README.md`. They diverge at exactly one line of
+`compile-lib.ts` and produce the same module format, so a program can mix
+modules built by either — which is what lets code.pyret.org run the
+interpreter over precompiled builtins.
+
 ## Layout
 
 - `src/*.ts` — one file per ported `.arr` file (same base name):
@@ -23,6 +33,9 @@ Pyret-hosted compiler's.
 - Runtime-independent JS is reused, not ported: `pyret-tokenizer.js`, the
   generated `pyret-parser.js`, `lib/jglr/*`, `js-numbers.js` (loaded via
   `src/interop/amd.ts`), plus the npm `source-map` and `ws` packages.
+- `src/interp/*.ts` — the interpreter back end (bytecode emitter,
+  disassembler, and the module wrapper); the machine it targets is
+  `src/js/base/pyret-vm.js`. See `src/interp/README.md`.
 - `CONVENTIONS.md` — the porting rules (data representation, visitors,
   Option/List/StringDict mappings, fidelity requirements).
 - `tests/` — unit tests, the parity harness, and its test programs.
@@ -42,6 +55,7 @@ Pyret-hosted compiler's.
 | `make ts-io-test` | The io-tests, pointed at this compiler. |
 | `make all-ts-pyret-test` | Builds `tests/all.arr` (main2 + type-check + regression + lib-test) with the TS compiler and runs it. The counterpart of `make all-pyret-test` on the .arr side. |
 | `make ts-test` | All of the above. |
+| `make interp-test` | The interpreter back end's suite (`interp-unit-test`, `interp-parity-test`, `interp-serve-test`, `all-interp-pyret-test`, `interp-io-test`); see `src/interp/README.md`. |
 | `make bootstrap-converge` | Builds both bootstrap chains and asserts all four standalones are one byte-identical fixpoint (see below). |
 | `make ts-clean` | Removes TS build outputs and caches. |
 

@@ -42,7 +42,10 @@ const pyretOptions = {
   'checks-format': 'text',
   'no-check-mode': true,
   'type-check': false,
-  'standalone-file': path.join(langDir, 'src/js/base/handalone.js')
+  'standalone-file': path.join(langDir, 'src/js/base/handalone.js'),
+  // The npm client puts the back end choice in this group so it reaches the
+  // server (npm/pyret.js); default 'js' matches an unset --backend.
+  'backend': process.env.SMOKE_BACKEND || 'js'
 };
 
 const shutdownMode = program === '--shutdown';

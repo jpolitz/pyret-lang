@@ -101,6 +101,8 @@ export async function main(args: string[]): Promise<number> {
       C.nextValDefault(C.Str, 'all-remote', undefined, C.once, 'How to handle url-file imports (all-remote, all-local, or local-if-present)')],
     ['pause-schedule',
       C.nextVal(C.Str, C.once, 'JS file computing initial GAS/RUNGAS for the runtime; its code is baked into the standalone')],
+    ['backend',
+      C.nextValDefault(C.Str, 'js', undefined, C.once, 'Which back end compiles modules: js (generate JavaScript) or interp (emit bytecode for the Pyret VM)')],
   ]);
 
   const paramsParsed = C.parseArgs(options, args);
@@ -122,6 +124,12 @@ export async function main(args: string[]): Promise<number> {
     const inlineCaseBodyLimit = r.get('inline-case-body-limit');
     const typeCheck = r.has('type-check');
     const tailCalls = !r.has('improper-tail-calls');
+    const backendStr = r.get('backend');
+    if (backendStr !== 'js' && backendStr !== 'interp') {
+      printError('--backend must be js or interp (got ' + backendStr + ')\n');
+      return failureCode;
+    }
+    const backend: 'js' | 'interp' = backendStr;
     const compiledDir = r.get('compiled-dir');
     const standaloneFile = r.get('standalone-file');
     const addProfiling = r.has('profile');
@@ -161,7 +169,8 @@ export async function main(args: string[]): Promise<number> {
         ...CS.defaultCompileOptions,
         standaloneFile: standaloneFile,
         displayProgress: displayProgress,
-        checks: checks
+        checks: checks,
+        backend: backend
       }, runArgs);
       print(result.message + '\n');
       return result.exitCode;
@@ -201,7 +210,8 @@ export async function main(args: string[]): Promise<number> {
           userAnnotations: userAnnotations,
           runtimeAnnotations: runtimeAnnotations,
           urlFileMode: urlFileMode,
-          pauseSchedule: pauseSchedule
+          pauseSchedule: pauseSchedule,
+          backend: backend
         });
       return successCode;
     } else if (r.has('serve')) {
@@ -226,7 +236,8 @@ export async function main(args: string[]): Promise<number> {
         ignoreUnbound: false,
         properTailCalls: tailCalls,
         compileModule: false,
-        displayProgress: displayProgress
+        displayProgress: displayProgress,
+        backend: backend
       });
       // NOTE: loadables are module-as-string values, so CS.is-err never
       // matches and `failures` is always empty — the Pyret CLI exhibits

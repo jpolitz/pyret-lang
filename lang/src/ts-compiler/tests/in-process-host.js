@@ -80,6 +80,9 @@ function makeHost(opts) {
     ...CS.defaultCompileOptions,
     checks: 'none',
     displayProgress: false,
+    // The host's own bootstrap program has to be built by the same back end
+    // as the code under test, since both land in one runtime and one cache.
+    backend: opts.backend || 'js',
   };
 
   // Load the runtime natives via requirejs and FULLY SETTLE that callback

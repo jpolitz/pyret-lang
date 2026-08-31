@@ -82,11 +82,13 @@ jobs:
       fail-fast: false
       matrix:
         env: [cpo, embed, embed-static, vscode, vscode-ovsx]
-        compiler: [pyret, ts]
+        compiler: [pyret, ts, interp]
         exclude:
           # editor.embed.html's flavor is baked at build time (pyret)
           - env: embed-static
             compiler: ts
+          - env: embed-static
+            compiler: interp
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6

@@ -16,12 +16,12 @@ const { findEditorFrame } = require("../shared/find-frame");
 const { resourceScope } = require("../shared/resource-scope");
 
 const VSCODE_DIR = path.resolve(__dirname, "..", "..", "vscode");
-// PYRET_COMPILER=ts opens the workspace whose .vscode/settings.json sets
-// "pyret-parley.compiler": "ts", so the webview boots the TS-compiler flavor
-// of the editor; the default workspace leaves the setting at its default.
+// PYRET_COMPILER=ts|interp opens the workspace whose .vscode/settings.json
+// sets "pyret-parley.compiler" to that value, so the webview boots that
+// flavor of the editor; the default workspace leaves the setting alone.
 const COMPILER = process.env.PYRET_COMPILER || "pyret";
 const WORKSPACE = path.resolve(__dirname, "..", "vscode",
-  COMPILER === "ts" ? "fixture-workspace-ts" : "fixture-workspace");
+  COMPILER === "pyret" ? "fixture-workspace" : "fixture-workspace-" + COMPILER);
 const PORT = parseInt(process.env.VSCODE_TEST_PORT || "3198", 10);
 
 // test-web serves `folderPath` as this virtual FS (see its mounts.js).

@@ -16,6 +16,7 @@ import * as DP from './desugar-post-tc';
 import * as G from './gensym';
 import * as J from './js-ast';
 import * as JSP from './js-of-pyret';
+import * as IP from './interp/interp-of-pyret';
 import * as P from './parse-pyret';
 import * as RS from './resolve-scope';
 import * as T from './type-check';
@@ -538,7 +539,9 @@ export function compileModule(
           if (!options.typeCheck) {
             provides = AU.getNamedProvides(namedResult, locator.uri(), env);
           }
-          const [finalProvides, cr] = JSP.traceMakeCompiledPyret(addPhase, cleaned!, env, namedResult.env, provides, options);
+          const [finalProvides, cr] = options.backend === 'interp'
+            ? IP.traceMakeInterpPyret(addPhase, cleaned!, env, namedResult.env, provides, options)
+            : JSP.traceMakeCompiledPyret(addPhase, cleaned!, env, namedResult.env, provides, options);
           cleaned = undefined;
           const canonicalProvides = AU.canonicalizeProvides(finalProvides, env);
           const modResult = new CS.ModuleAsString(canonicalProvides, env, namedResult.env, cr);
