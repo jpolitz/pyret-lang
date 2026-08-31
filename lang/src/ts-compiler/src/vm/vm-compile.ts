@@ -52,7 +52,8 @@ import * as N from '../ast-anf';
 import * as CS from '../compile-structs';
 import * as SL from '../srcloc';
 import * as AU from '../ast-util';
-import { jsIdOf, freshId, compilerName } from '../anf-loop-compiler';
+import { jsIdOf, freshId, compilerName, isFunctionFlat } from '../anf-loop-compiler';
+import * as FL from '../flatness';
 import { InternalCompilerError, mapGetValue } from '../shared';
 import * as OP from './opcodes';
 import {
@@ -72,6 +73,121 @@ interface Label {
 // once control leaves it. RETURN means "this function returns it".
 const RETURN: Label = { pc: -2, refs: [] };
 
+/**
+ * compileFunBody's allowTco scan, transplanted verbatim: true iff any
+ * formal parameter is referenced (as an a-id) anywhere inside a lambda or
+ * method nested in `body`. The cont backend disables loop-back TCO for
+ * the whole function in that case (the loop-back reassigns the formals'
+ * JS variables, observable through such a closure), and the machine must
+ * pay the same real frames cont pays.
+ */
+function argUsedInNestedLambda(args: N.ABind[], body: N.AExpr): boolean {
+  let argUsedInLambda = false;
+  const argNames = args.map((a) => a.id);
+  const pendingBodies: Array<{ body: N.AExpr; lam: boolean }> = [{ body, lam: false }];
+  function scanVal(v: N.AVal, lam: boolean): void {
+    if (lam && !argUsedInLambda && v.$name === 'a-id' && argNames.some((an) => an.key() === v.id.key())) {
+      argUsedInLambda = true;
+    }
+  }
+  function scanHead(h: N.AExprHead, lam: boolean): void {
+    switch (h.$name) {
+      case 'a-let':
+      case 'a-arr-let':
+      case 'a-var':
+        scanLettable(h.e, lam);
+        break;
+      case 'a-seq':
+        scanLettable(h.e1, lam);
+        break;
+      case 'a-type-let':
+        break;
+    }
+  }
+  function scanLettable(e: N.ALettable, lam: boolean): void {
+    switch (e.$name) {
+      case 'a-module':
+        scanVal(e.answer, lam);
+        scanVal(e.checks, lam);
+        break;
+      case 'a-cases':
+        scanVal(e.val, lam);
+        for (const b of e.branches) {
+          pendingBodies.push({ body: b.body, lam });
+        }
+        pendingBodies.push({ body: e._else, lam });
+        break;
+      case 'a-if':
+        for (const b of e.branches) {
+          for (const h of b.heads) {
+            scanHead(h, lam);
+          }
+          scanVal(b.test, lam);
+          pendingBodies.push({ body: b.body, lam });
+        }
+        pendingBodies.push({ body: e.elseBody, lam });
+        break;
+      case 'a-assign':
+        scanVal(e.value, lam);
+        break;
+      case 'a-app':
+        scanVal(e._fun, lam);
+        for (const a of e.args) { scanVal(a, lam); }
+        break;
+      case 'a-method-app':
+        scanVal(e.obj, lam);
+        for (const a of e.args) { scanVal(a, lam); }
+        break;
+      case 'a-prim-app':
+        for (const a of e.args) { scanVal(a, lam); }
+        break;
+      case 'a-tuple':
+        for (const f of e.fields) { scanVal(f, lam); }
+        break;
+      case 'a-tuple-get':
+        scanVal(e.tup, lam);
+        break;
+      case 'a-obj':
+        for (const f of e.fields) { scanVal(f.value, lam); }
+        break;
+      case 'a-update':
+      case 'a-extend':
+        scanVal(e.supe, lam);
+        for (const f of e.fields) { scanVal(f.value, lam); }
+        break;
+      case 'a-dot':
+      case 'a-colon':
+      case 'a-get-bang':
+        scanVal(e.obj, lam);
+        break;
+      case 'a-lam':
+      case 'a-method':
+        pendingBodies.push({ body: e.body, lam: true });
+        break;
+      case 'a-val':
+        scanVal(e.v, lam);
+        break;
+      case 'a-data-expr':
+        for (const v of e.variants) {
+          for (const wm of v.withMembers) { scanVal(wm.value, lam); }
+        }
+        for (const s of e.shared) { scanVal(s.value, lam); }
+        break;
+      default:
+        // a-ref, a-id-var, a-id-var-modref, a-id-letrec: no a-id values
+        break;
+    }
+  }
+  while (pendingBodies.length > 0 && !argUsedInLambda) {
+    const item = pendingBodies.pop()!;
+    for (const h of item.body.heads) {
+      scanHead(h, item.lam);
+    }
+    scanLettable(item.body.e, item.lam);
+  }
+  return argUsedInLambda;
+}
+
 class FuncCtx {
   code: number[] = [];
   slots: Map<string, number> = new Map();
@@ -87,6 +203,11 @@ class FuncCtx {
   /** Slot the machine lands a tail call's value in when the callee turns
       out to be a JS-land function (see OP_TAILCALL in pyret-vm.js). */
   scratch = 0;
+  /** Formal-parameter count, for the self-TCO arity-match condition. */
+  arity = 0;
+  /** The cont backend's allowTco: false for the toplevel and whenever a
+      formal parameter is referenced inside any nested lambda/method. */
+  allowTco = false;
   /** Scratch slots handed out by newTemp and recycled per statement. */
   private freeTemps: number[] = [];
 
@@ -126,7 +247,8 @@ export class VMCompiler {
     private typeBindings: Map<string, CS.TypeBind>,
     private moduleBindings: Map<string, CS.ModuleBind>,
     private env: CS.CompileEnvironment,
-    private properTailCalls: boolean
+    private properTailCalls: boolean,
+    private flatnessEnv: FL.FEnv
   ) {
     this.prog = {
       v: OP.FORMAT_VERSION,
@@ -414,9 +536,13 @@ export class VMCompiler {
     args: N.ABind[],
     arity: number,
     isMethod: boolean,
-    body: N.AExpr
+    body: N.AExpr,
+    allowTcoBase: boolean,
+    isFlat: boolean
   ): number {
     const ctx = new FuncCtx(parent, name, this.locK(l));
+    ctx.arity = args.length;
+    ctx.allowTco = allowTcoBase && !argUsedInNestedLambda(args, body);
     for (const a of args) { ctx.slotFor(a.id); }
     ctx.scratch = ctx.allocSlot();
     this.compileAnnChecks(ctx, args);
@@ -431,6 +557,7 @@ export class VMCompiler {
       u: ctx.upvals,
       c: ctx.code,
       l: ctx.loc,
+      fl: isFlat ? 1 : 0,
     };
     const idx = this.prog.funcs.length;
     this.prog.funcs.push(fn);
@@ -546,7 +673,9 @@ export class VMCompiler {
         }
         const slot = ctx.slotFor(head.bind.id);
         const next = newLabel();
-        this.compileLettable(ctx, head.e, slot, next);
+        // The binding's key travels along so a directly-let-bound lambda
+        // can be recognized as cont-flat (compileALam's isFlat condition).
+        this.compileLettable(ctx, head.e, slot, next, head.bind.id.key());
         place(ctx, next);
         this.compileAnnCheck(ctx, head.bind);
         break;
@@ -631,7 +760,7 @@ export class VMCompiler {
 
   // ---------- lettables ----------
 
-  compileLettable(ctx: FuncCtx, e: N.ALettable, dest: number, cont: Label): void {
+  compileLettable(ctx: FuncCtx, e: N.ALettable, dest: number, cont: Label, bindKey?: string): void {
     switch (e.$name) {
       case 'a-val': {
         const src = this.valSource(ctx, e.v);
@@ -665,7 +794,18 @@ export class VMCompiler {
       case 'a-app': {
         const f = this.valSource(ctx, e._fun);
         const args = this.valSources(ctx, e.args);
-        if (this.properTailCalls && e.appInfo.isTail && cont === RETURN) {
+        // The cont backend's loop-back TCO fires on appInfo alone
+        // (buildSplitApp) -- even at a structurally non-tail site, e.g.
+        // under a non-stateful return annotation, where it discards the
+        // pending binding exactly as `continue` does.
+        if (e.appInfo.isRecursive && e.appInfo.isTail && ctx.allowTco &&
+            this.properTailCalls && args.length === ctx.arity) {
+          emit(ctx, OP.OP_SELFTAIL, args.length, ...args);
+          return;
+        }
+        // Frame elision is structural: any call in return position leaves
+        // the frame at its return label (elided at captures).
+        if (this.properTailCalls && cont === RETURN) {
           emit(ctx, OP.OP_TAILCALL, f, this.locK(e.l), args.length, ...args);
           // Reached only when the callee was JS-land: the machine parks
           // its result in the scratch slot and falls through to here.
@@ -678,23 +818,29 @@ export class VMCompiler {
       case 'a-method-app': {
         const o = this.valSource(ctx, e.obj);
         const args = this.valSources(ctx, e.args);
+        if (this.properTailCalls && cont === RETURN) { emit(ctx, OP.OP_SETRET); }
         emit(ctx, OP.OP_METHCALL, dest, o, this.nameK(e.meth), this.locK(e.l),
           args.length, ...args);
         break;
       }
       case 'a-prim-app': {
         const args = this.valSources(ctx, e.args);
+        if (this.properTailCalls && cont === RETURN) { emit(ctx, OP.OP_SETRET); }
         emit(ctx, OP.OP_PRIMAPP, dest, this.nameK(e.f), this.locK(e.l),
           args.length, ...args);
         break;
       }
       case 'a-lam': {
-        const idx = this.compileFunc(ctx, e.name, e.l, e.args, e.args.length, false, e.body);
+        const isFlat = bindKey !== undefined &&
+          isFunctionFlat(this.flatnessEnv, bindKey);
+        const idx = this.compileFunc(ctx, e.name, e.l, e.args, e.args.length, false, e.body,
+          true, isFlat);
         emit(ctx, OP.OP_CLOSURE, dest, idx);
         break;
       }
       case 'a-method': {
-        const idx = this.compileFunc(ctx, e.name, e.l, e.args, e.args.length, true, e.body);
+        const idx = this.compileFunc(ctx, e.name, e.l, e.args, e.args.length, true, e.body,
+          true, false);
         emit(ctx, OP.OP_METHOD, dest, idx);
         break;
       }
@@ -956,7 +1102,9 @@ export class VMCompiler {
     this.prog.moduleId = freshId(compilerName((l as SL.Srcloc).source)).tosourcestring();
     // compileFunc appends children before their parent, so the toplevel is
     // whatever index it reports; the VM starts there.
-    this.prog.main = this.compileFunc(undefined, '$toplevel', l, [], -1, false, node.body);
+    // The toplevel matches the cont backend's: non-flat, allowTco false.
+    this.prog.main = this.compileFunc(undefined, '$toplevel', l, [], -1, false, node.body,
+      false, false);
     return this.prog;
   }
 }

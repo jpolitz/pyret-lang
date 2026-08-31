@@ -33,7 +33,7 @@
 
 // Bump when the bytecode format or opcode numbering changes; compiled
 // modules cached from an older VM are then rejected on load.
-export const FORMAT_VERSION = 3;
+export const FORMAT_VERSION = 4;
 
 // The AMD module name the emitted stub pulls the machine in from.
 export const VM_MODULE_NAME = 'pyret-base/js/pyret-vm';
@@ -135,6 +135,13 @@ export const OPCODE_NAMES: readonly string[] = [
   'TUPLECHK',  // v, n, locK
   'MODULE',    // d, moduleDescIdx
   'ANNCHECKV', // a, v, locK   -- annotation already available as a value
+  // The cont backend's loop-back TCO (self-recursive tail call with
+  // matching arity, allowTco): reuse the frame, --RUNGAS only.
+  'SELFTAIL',  // n, args...
+  // Marks the current frame at-return before a tail-position crossing
+  // (method/prim call followed by RET): elided at capture events, as the
+  // cont backend's step==retLabel stack-attach guard elides its frame.
+  'SETRET',    // (no operands)
 ] as const;
 
 const ops: Record<string, number> = {};
@@ -176,6 +183,8 @@ export const OP_ANNCHECK = ops.ANNCHECK;
 export const OP_TUPLECHK = ops.TUPLECHK;
 export const OP_MODULE = ops.MODULE;
 export const OP_ANNCHECKV = ops.ANNCHECKV;
+export const OP_SELFTAIL = ops.SELFTAIL;
+export const OP_SETRET = ops.SETRET;
 
 // ---------- emitted program shape ----------
 
@@ -196,6 +205,9 @@ export interface VMFunc {
   c: number[];
   /** Loc index of the function itself (arity errors, stack frames). */
   l: number;
+  /** 1 when the cont backend compiles this function FLAT (a-let-bound,
+      flatness <= 5): no entry fuel check, no ret refund, never captured. */
+  fl: number;
 }
 
 export interface VMVariantMember {

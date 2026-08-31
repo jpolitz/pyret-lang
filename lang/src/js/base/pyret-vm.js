@@ -1,55 +1,57 @@
 /*
-  pvm -- the Pyret virtual machine.
+  pvm -- the Pyret virtual machine, on the promise runtime.
 
-  This is the execution half of the interpreter backend. Its input is the
+  This is the execution half of the vm backend. Its input is the
   bytecode produced by src/ts-compiler/src/vm/vm-compile.ts from the
   same ANF the JS code generator consumes, and it runs that bytecode
-  against the unmodified runtime in this directory: identical value
+  against vm-runtime.js (the promise-based runtime): identical value
   representations (PFunction/PMethod/PObject, js-numbers, `{"$var": v}`
   cells), identical helper entry points (makeVariantConstructor, _checkAnn,
-  getFieldLoc, ...), identical module/Loadable protocol. A program can
-  therefore mix interpreted and compiled modules freely, which is exactly
-  what code.pyret.org does: its builtins ship precompiled and only the
-  user's modules are interpreted.
+  getFieldLoc, ...), identical module/Loadable protocol.
 
   Shape of the machine
   --------------------
   A register machine over an explicit array of frames. Each frame is
-    { fdef, code, pc, locals, upvals, mod, dest, locK }
+    { fdef, code, pc, locals, upvals, mod, dest, locK, atRet, captured }
   where `locals` is the flat slot array the compiler sized, `upvals` are
   the by-value captures of the closure being run, `dest` is the caller
   slot the result goes to, and `locK` indexes the call site currently
   being evaluated (used for stack traces). Calls between interpreted
-  functions push a frame and jump; they do not grow the JS stack, which is
-  what makes the two hard parts easy:
+  functions push a frame and jump; they do not grow the JS stack.
 
-    * Suspension. When the runtime's trampoline wants the program to
-      yield -- to service the event loop, or because a builtin called
-      pauseStack for I/O -- the machine's entire continuation is already
-      a heap object. It hands the state to one ActivationRecord and
-      returns the Cont; resuming re-enters `runMachine` with that state.
-      No per-function step-numbering, no saved-variable lists.
-    * Deep recursion. Frames live on the heap, so interpreted recursion
-      is bounded by memory, not by the JS stack, and proper tail calls
-      reuse the frame outright.
+  Suspension is a promise: when a JS callee hands back a thenable, or
+  fuel runs out, the machine parks its whole state and returns
+  `thenable.then(v => resume(state))` -- ONE promise stands for the
+  entire bytecode stack, however deep. A caller of `.app` on a bytecode
+  closure sees a value when nothing suspended, else a thenable
+  (maybe-promise), exactly like every other callable in the promise
+  runtime.
 
-  Crossing into JS-land (a builtin, or a module compiled by the JS
-  backend) is an ordinary `.app(...)` call. If it comes back a Cont, the
-  machine appends its own ActivationRecord and returns it, exactly as
-  generated code does -- so from the trampoline's point of view an
-  interpreted activation is just one more frame.
+  Fuel replicates the cont backend event for event (see VM_DESIGN.md at
+  the repo root): entering a non-flat function costs
+  `--GAS <= 0 || --RUNGAS <= 0` (short-circuit) and its return refunds
+  `++GAS`; a self-recursive tail call reuses the frame for `--RUNGAS`
+  only; every other tail call keeps its frame but marks it at-return, and
+  a capture event elides at-return frames from the machine stack (the
+  cont backend's step==retLabel stack-attach guard: lazy TCO at capture).
+  Functions the cont backend compiles flat (fdef.fl) charge nothing and
+  can never be live at a capture. Capture marking and the per-pop floor
+  refills on resume live in vm-runtime.js ($captureEventP/$popFloors);
+  the machine registers its live states on R.$vmStateChain so a capture
+  anywhere marks every live bytecode frame, exactly as the cont unwind
+  attaches every live activation.
 */
 define("pyret-base/js/pyret-vm", [], function() {
 
   // Must match src/ts-compiler/src/vm/opcodes.ts.
-  var FORMAT_VERSION = 3;
+  var FORMAT_VERSION = 4;
 
   var OPCODE_NAMES = [
     'MOVE', 'BOX', 'UNBOX', 'SETVAR', 'LETREC', 'MODREF', 'MODVARREF', 'ARRSET',
     'JMP', 'IF', 'RET', 'CALL', 'TAILCALL', 'METHCALL', 'PRIMAPP', 'CLOSURE',
     'METHOD', 'OBJ', 'EXTEND', 'UPDATE', 'DOT', 'COLON', 'GETBANG', 'TUPLE',
     'TUPLEGET', 'REF', 'CASES', 'CASESPRE', 'CASESBIND', 'DATA', 'NEWTYPE',
-    'MKANN', 'ANNCHECK', 'TUPLECHK', 'MODULE', 'ANNCHECKV'
+    'MKANN', 'ANNCHECK', 'TUPLECHK', 'MODULE', 'ANNCHECKV', 'SELFTAIL', 'SETRET'
   ];
 
   var OP_MOVE = 0, OP_BOX = 1, OP_UNBOX = 2, OP_SETVAR = 3, OP_LETREC = 4,
@@ -60,7 +62,7 @@ define("pyret-base/js/pyret-vm", [], function() {
       OP_GETBANG = 22, OP_TUPLE = 23, OP_TUPLEGET = 24, OP_REF = 25,
       OP_CASES = 26, OP_CASESPRE = 27, OP_CASESBIND = 28, OP_DATA = 29,
       OP_NEWTYPE = 30, OP_MKANN = 31, OP_ANNCHECK = 32, OP_TUPLECHK = 33,
-      OP_MODULE = 34, OP_ANNCHECKV = 35;
+      OP_MODULE = 34, OP_ANNCHECKV = 35, OP_SELFTAIL = 36, OP_SETRET = 37;
 
   // value-source tags
   var VS_LOCAL = 0, VS_UPVAL = 1, VS_CONST = 2, VS_GLOBAL = 3;
@@ -112,12 +114,7 @@ define("pyret-base/js/pyret-vm", [], function() {
       this.$pvmm = pvm;
     }
     PVMMethod.prototype = Object.getPrototypeOf(R.makeMethodN(function() {}, "$pvm"));
-    // The runtime's continuation class, borrowed the same way: the dispatch
-    // loop tests for one after every crossing into JS-land, and a direct
-    // `instanceof` against a cached constructor is what makes that test
-    // free on the overwhelmingly common non-continuation result.
-    // (Pause derives from Cont, so it is covered too.)
-    R.$pvmCtors = { fun: PVMFunction, meth: PVMMethod, cont: R.makeCont().constructor };
+    R.$pvmCtors = { fun: PVMFunction, meth: PVMMethod };
     return R.$pvmCtors;
   }
 
@@ -192,6 +189,14 @@ define("pyret-base/js/pyret-vm", [], function() {
     this.mod = null;
     this.dest = -1;
     this.locK = 0;
+    // Set when this frame's remaining work is only "return the pending
+    // call's value" -- the cont backend's step==retLabel. Elided at
+    // capture events.
+    this.atRet = false;
+    // Set at a capture event; a delivery into a captured frame first
+    // applies the trampoline pop floors and re-runs the entry fuel check,
+    // as the cont resume path does.
+    this.captured = false;
   }
 
   function setFrame(f, fdef, mod, upvals, locals, dest) {
@@ -203,6 +208,8 @@ define("pyret-base/js/pyret-vm", [], function() {
     f.mod = mod;
     f.dest = dest;
     f.locK = fdef.l;
+    f.atRet = false;
+    f.captured = false;
     return f;
   }
 
@@ -215,15 +222,59 @@ define("pyret-base/js/pyret-vm", [], function() {
     return f;
   }
 
-  function State(frame) {
+  function State(frame, R) {
     this.frames = [frame];
     this.fp = 0;
+    this.R = R;
     // Where the value handed back by a resumed activation goes: a slot
     // index in the top frame, or -1 to discard it (an annotation check,
     // whose result generated code discards too).
     this.resumeDest = -1;
     this.resumeVal = undefined;
   }
+
+  /*
+    Capture marking, called by the runtime's capture event for every state
+    on the chain: mark live frames captured and elide at-return frames --
+    the cont backend permanently drops step==retLabel frames from a Cont,
+    so the value of the pending call flows to the nearest surviving
+    caller, at the slot the LOWEST elided frame in the run would have
+    delivered to. Kept and elided frame objects are compacted so the pool
+    keeps unique objects.
+  */
+  State.prototype.$captureFrames = function() {
+    var frames = this.frames;
+    var fp = this.fp;
+    if (fp < 0) { return; }
+    var anyAtRet = false;
+    for (var i = 0; i <= fp; i++) {
+      if (frames[i].atRet) { anyAtRet = true; }
+      frames[i].captured = true;
+    }
+    if (!anyAtRet) { return; }
+    var kept = [];
+    var spare = [];
+    var inheritedDest = -2;
+    for (var i = 0; i <= fp; i++) {
+      var f = frames[i];
+      if (f.atRet) {
+        if (inheritedDest === -2) { inheritedDest = f.dest; }
+        f.locals = null;
+        spare.push(f);
+      } else {
+        if (inheritedDest !== -2) { f.dest = inheritedDest; inheritedDest = -2; }
+        kept.push(f);
+      }
+    }
+    if (inheritedDest !== -2) {
+      // The top frame(s) were elided while parked on a crossing: the
+      // resolved value now belongs to the new top frame at that slot.
+      this.resumeDest = inheritedDest;
+    }
+    for (var i = 0; i < kept.length; i++) { frames[i] = kept[i]; }
+    for (var i = 0; i < spare.length; i++) { frames[kept.length + i] = spare[i]; }
+    this.fp = kept.length - 1;
+  };
 
   // Slot arrays are built by pushing, never `new Array(n)`: an array made
   // with a length is HOLEY in V8, and every read of a holey element pays a
@@ -253,32 +304,87 @@ define("pyret-base/js/pyret-vm", [], function() {
     }
   }
 
-  // Suspend: hand the whole machine state to one ActivationRecord and let
-  // the trampoline resume us later. `dest` is the slot the resumed value
-  // belongs in, or -1 to discard it.
-  function suspend(st, f, fp, cont, dest, resumePc) {
-    var R = f.mod.R;
-    f.pc = resumePc;
-    st.fp = fp;
-    st.resumeDest = dest;
-    cont.stack[R.EXN_STACKHEIGHT++] =
-      R.makeActivationRecord(frameLoc(f), resumeMachine, 0, [st], [], 0);
-    return cont;
+  // Park the machine on a thenable a JS callee handed back. The state was
+  // already written (pc, fp, resumeDest) BEFORE the crossing, so a capture
+  // event that fired synchronously inside the callee found it walkable and
+  // may already have adjusted it. The rejection path attributes the
+  // failure to the machine's frames (they are not on the JS stack, so
+  // exn-stack-parser cannot see them) and unregisters the state.
+  function parkedOn(st, thenable) {
+    return thenable.then(function(v) {
+      st.resumeVal = v;
+      return resumeDelivery(st);
+    }, function(e) {
+      failMachine(st, e);
+    });
   }
 
-  // Yield to the trampoline at an instruction boundary so the event loop
-  // gets a turn. The instruction is re-executed on resume; only operand
-  // reads have happened, and those are pure.
-  function bounce(st, f, fp, retryPc) {
-    var R = f.mod.R;
-    f.pc = retryPc;
-    st.fp = fp;
-    st.resumeDest = -1;
+  function failMachine(st, e) {
+    var R = st.R;
+    if (R.isPyretException(e)) {
+      for (var i = st.fp; i >= 0; i--) {
+        e.pyretStack.push(frameLoc(st.frames[i]));
+      }
+    }
+    unchain(st);
+    throw e;
+  }
+
+  function unchain(st) {
+    var chain = st.R.$vmStateChain;
+    var idx = chain.lastIndexOf(st);
+    if (idx >= 0) { chain.splice(idx, 1); }
+  }
+
+  // Deliver a value (or just control) back into a parked state. A frame
+  // that was live at a capture gets the trampoline's per-pop treatment
+  // first: pop floors, then the re-run entry fuel check.
+  function resumeDelivery(st) {
+    if (st.fp < 0) {
+      // Every frame was an elided at-return frame: the resolved value IS
+      // the machine's result (the cont backend's dropped tail frames).
+      var v = st.resumeVal;
+      st.resumeVal = undefined;
+      unchain(st);
+      return v;
+    }
+    var f = st.frames[st.fp];
+    if (f.captured) {
+      f.captured = false;
+      return popTreatmentThen(st);
+    }
+    return runMachine(st);
+  }
+
+  // popFloors + the resumed frame's entry check, then run. Any stage can
+  // itself go async; the entry re-check firing loses no value (unlike the
+  // cont backend's clobber, which valid schedules never reach).
+  function popTreatmentThen(st) {
+    var R = st.R;
+    var fl = R.$popFloors();
+    if (fl !== null) { return fl.then(function() { return entryRecheckThen(st); }); }
+    return entryRecheckThen(st);
+  }
+  function entryRecheckThen(st) {
+    var R = st.R;
+    if (--R.GAS <= 0 || --R.RUNGAS <= 0) {
+      R.EXN_STACKHEIGHT = 0;
+      return R.$captureEventP().then(function() { return popTreatmentThen(st); });
+    }
+    return runMachine(st);
+  }
+
+  // A fuel trip at a call: the callee frame is already pushed (the cont
+  // backend captures the callee's activation at step 0), state is
+  // written; run one capture event, then resume with the pop treatment.
+  function fuelCaptureP(st) {
+    var R = st.R;
     R.EXN_STACKHEIGHT = 0;
-    var cont = R.makeCont();
-    cont.stack[R.EXN_STACKHEIGHT++] =
-      R.makeActivationRecord(frameLoc(f), resumeMachine, 0, [st], [], 0);
-    return cont;
+    return R.$captureEventP().then(function() {
+      var f = st.frames[st.fp];
+      f.captured = false;
+      return popTreatmentThen(st);
+    });
   }
 
   // Arity mismatch on a call to interpreted code. Cold, and kept out of
@@ -297,12 +403,13 @@ define("pyret-base/js/pyret-vm", [], function() {
     var frames = st.frames;
     var fp = st.fp;
     var f = frames[fp];
-    var R = f.mod.R;
-    var CONT = getCtors(R).cont;
+    var R = st.R;
+    var isThenable = R.isThenable;
     var code = f.code, pc = f.pc, locals = f.locals, upvals = f.upvals, mod = f.mod;
     var names = mod.names, locs = mod.locs;
     var ans;
 
+    f.captured = false;
     if (st.resumeDest >= 0) { locals[st.resumeDest] = st.resumeVal; }
     st.resumeDest = -1;
     st.resumeVal = undefined;
@@ -386,10 +493,31 @@ define("pyret-base/js/pyret-vm", [], function() {
           case OP_RET: {
             var rv = rd(code[pc++], f);
             var dest = f.dest;
+            // Every non-flat return refunds the entry's GAS, as the cont
+            // ret-case's ++R.GAS does; flat functions paid nothing.
+            if (f.fdef.fl !== 1) { ++R.GAS; }
             fp--;
-            if (fp < 0) { ++R.GAS; st.fp = -1; return rv; }
+            if (fp < 0) { st.fp = -1; unchain(st); return rv; }
             f.locals = null;   // don't pin the returning frame's values
             var callerF = frames[fp];
+            if (callerF.captured) {
+              // The caller was live at a capture: its activation pops
+              // through the trampoline's floors and re-runs its entry
+              // check before consuming the value (runtime.js iter).
+              callerF.captured = false;
+              var fl = R.$popFloors();
+              if (fl === null) {
+                if (--R.GAS <= 0 || --R.RUNGAS <= 0) {
+                  st.fp = fp; st.resumeDest = dest; st.resumeVal = rv;
+                  R.EXN_STACKHEIGHT = 0;
+                  return R.$captureEventP().then(function() { return popTreatmentThen(st); });
+                }
+                // Floors and re-check passed synchronously: deliver in-loop.
+              } else {
+                st.fp = fp; st.resumeDest = dest; st.resumeVal = rv;
+                return fl.then(function() { return entryRecheckThen(st); });
+              }
+            }
             callerF.locals[dest] = rv;
             f = callerF;
             code = f.code; pc = f.pc; locals = f.locals; upvals = f.upvals;
@@ -401,7 +529,6 @@ define("pyret-base/js/pyret-vm", [], function() {
           }
 
           case OP_CALL: {
-            var ipc = pc - 1;
             var d = code[pc++];
             var fnv = rd(code[pc++], f);
             var lk = code[pc++];
@@ -411,108 +538,146 @@ define("pyret-base/js/pyret-vm", [], function() {
             if (pvm !== undefined) {
               var callee = pvm.f;
               if (callee.a !== n) { arityFail(R, pvm, callee, code, pc, n, f); }
-              if (--R.RUNGAS <= 0) { return bounce(st, f, fp, ipc); }
               // The arguments are written straight into the callee's slot
               // array; there is no intermediate argument array on this path.
               var nlocals = [];
               for (var i = 0; i < n; i++) { nlocals.push(rd(code[pc++], f)); }
               for (var i = n; i < callee.s; i++) { nlocals.push(undefined); }
               f.pc = pc;
-              fp++;
+              st.fp = ++fp;
               f = setFrame(frameAt(frames, fp), callee, pvm.m, pvm.u, nlocals, d);
               code = f.code; pc = 0; locals = nlocals; upvals = f.upvals;
               if (mod !== f.mod) {
                 mod = f.mod;
                 names = mod.names; locs = mod.locs;
               }
+              // The callee's entry fuel check, exactly as the cont backend
+              // emits it (flat callees have none). A trip captures with
+              // the callee's frame at pc 0, as cont captures its
+              // activation at step 0.
+              if (callee.fl !== 1 && (--R.GAS <= 0 || --R.RUNGAS <= 0)) {
+                return fuelCaptureP(st);
+              }
               continue;
             }
             if (fnv === undefined || fnv === null || typeof fnv.app !== "function") {
               R.ffi.throwNonFunApp(locs[lk], fnv);
             }
+            // Park before crossing: a capture event can fire synchronously
+            // inside the callee and must find this state walkable.
+            f.pc = pc + n;
+            st.resumeDest = d;
             ans = applyJS(fnv, code, pc, n, f);
             pc += n;
-            if (ans instanceof CONT) { return suspend(st, f, fp, ans, d, pc); }
+            if (isThenable(ans)) { return parkedOn(st, ans); }
+            st.resumeDest = -1;
             locals[d] = ans;
             continue;
           }
 
           case OP_TAILCALL: {
-            var ipc = pc - 1;
             var fnv = rd(code[pc++], f);
             var lk = code[pc++];
             var n = code[pc++];
             f.locK = lk;
             var pvm = (fnv === undefined || fnv === null) ? undefined : fnv.$pvm;
             if (pvm !== undefined) {
+              // The cont backend compiles a non-self tail call as an
+              // ordinary call whose caller sits at its return label: the
+              // frame stays live (and shows in error stacks) until a
+              // capture event elides it.
               var callee = pvm.f;
               if (callee.a !== n) { arityFail(R, pvm, callee, code, pc, n, f); }
-              // Before anything is written: reusing the frame overwrites the
-              // slots a retried instruction would read its arguments from,
-              // so the yield has to happen while the frame is untouched.
-              if (--R.RUNGAS <= 0) { return bounce(st, f, fp, ipc); }
-              // Frame reuse is safe because ANF bindings are
-              // single-assignment and closures captured their upvalues by
-              // value: nothing can observe the outgoing slots. The slot
-              // array is reused too when it is large enough -- which is
-              // always the case for a self tail call, i.e. every loop --
-              // so an iteration allocates nothing.
-              var reuse = (locals.length >= callee.s);
-              var nlocals = reuse ? locals : [];
-              // Arguments are all read before any is written, because under
-              // frame reuse they are read out of the very array being
-              // overwritten.
-              if (n === 1) {
-                var a0 = rd(code[pc], f);
-                if (reuse) { nlocals[0] = a0; } else { nlocals.push(a0); }
-                pc += 1;
-              } else if (n === 2) {
-                var b0 = rd(code[pc], f), b1 = rd(code[pc + 1], f);
-                if (reuse) { nlocals[0] = b0; nlocals[1] = b1; }
-                else { nlocals.push(b0); nlocals.push(b1); }
-                pc += 2;
-              } else if (n === 3) {
-                var c0 = rd(code[pc], f), c1 = rd(code[pc + 1], f), c2 = rd(code[pc + 2], f);
-                if (reuse) { nlocals[0] = c0; nlocals[1] = c1; nlocals[2] = c2; }
-                else { nlocals.push(c0); nlocals.push(c1); nlocals.push(c2); }
-                pc += 3;
-              } else if (n > 0) {
-                var incoming = [];
-                for (var i = 0; i < n; i++) { incoming.push(rd(code[pc + i], f)); }
-                for (var i = 0; i < n; i++) {
-                  if (reuse) { nlocals[i] = incoming[i]; } else { nlocals.push(incoming[i]); }
-                }
-                pc += n;
-              }
-              if (!reuse) {
-                for (var i = n; i < callee.s; i++) { nlocals.push(undefined); }
-              }
-              f.fdef = callee;
-              f.code = code = callee.c;
-              f.upvals = upvals = pvm.u;
-              f.locals = locals = nlocals;
-              f.mod = pvm.m;
-              pc = 0;
+              var nlocals = [];
+              for (var i = 0; i < n; i++) { nlocals.push(rd(code[pc++], f)); }
+              for (var i = n; i < callee.s; i++) { nlocals.push(undefined); }
+              var scratch = f.fdef.k;
+              f.pc = pc;
+              f.atRet = true;
+              st.fp = ++fp;
+              f = setFrame(frameAt(frames, fp), callee, pvm.m, pvm.u, nlocals, scratch);
+              code = f.code; pc = 0; locals = nlocals; upvals = f.upvals;
               if (mod !== f.mod) {
                 mod = f.mod;
                 names = mod.names; locs = mod.locs;
               }
+              if (callee.fl !== 1 && (--R.GAS <= 0 || --R.RUNGAS <= 0)) {
+                return fuelCaptureP(st);
+              }
               continue;
             }
             // The callee turned out to be JS-land, so this is an ordinary
-            // call whose result the following RET hands back.
+            // call whose result the following RET hands back; the frame is
+            // at-return for the crossing's duration.
             if (fnv === undefined || fnv === null || typeof fnv.app !== "function") {
               R.ffi.throwNonFunApp(locs[lk], fnv);
             }
+            f.pc = pc + n;
+            f.atRet = true;
+            st.resumeDest = f.fdef.k;
             ans = applyJS(fnv, code, pc, n, f);
             pc += n;
-            if (ans instanceof CONT) { return suspend(st, f, fp, ans, f.fdef.k, pc); }
+            if (isThenable(ans)) { return parkedOn(st, ans); }
+            st.resumeDest = -1;
+            f.atRet = false;
             locals[f.fdef.k] = ans;
             continue;
           }
 
+          case OP_SELFTAIL: {
+            // The cont backend's loop-back TCO: reuse the frame and slot
+            // array, charge --RUNGAS only, leave locK stale (cont does not
+            // update $al here), resume at pc 0 with the NEW arguments if
+            // the check trips.
+            var n = code[pc++];
+            var reuse = (locals.length >= f.fdef.s);
+            var nlocals = reuse ? locals : [];
+            // Arguments are all read before any is written, because under
+            // frame reuse they are read out of the very array being
+            // overwritten.
+            if (n === 1) {
+              var a0 = rd(code[pc], f);
+              if (reuse) { nlocals[0] = a0; } else { nlocals.push(a0); }
+              pc += 1;
+            } else if (n === 2) {
+              var b0 = rd(code[pc], f), b1 = rd(code[pc + 1], f);
+              if (reuse) { nlocals[0] = b0; nlocals[1] = b1; }
+              else { nlocals.push(b0); nlocals.push(b1); }
+              pc += 2;
+            } else if (n === 3) {
+              var c0 = rd(code[pc], f), c1 = rd(code[pc + 1], f), c2 = rd(code[pc + 2], f);
+              if (reuse) { nlocals[0] = c0; nlocals[1] = c1; nlocals[2] = c2; }
+              else { nlocals.push(c0); nlocals.push(c1); nlocals.push(c2); }
+              pc += 3;
+            } else if (n > 0) {
+              var incoming = [];
+              for (var i = 0; i < n; i++) { incoming.push(rd(code[pc + i], f)); }
+              for (var i = 0; i < n; i++) {
+                if (reuse) { nlocals[i] = incoming[i]; } else { nlocals.push(incoming[i]); }
+              }
+              pc += n;
+            }
+            if (!reuse) {
+              for (var i = n; i < f.fdef.s; i++) { nlocals.push(undefined); }
+              f.locals = locals = nlocals;
+            }
+            pc = 0;
+            if (--R.RUNGAS <= 0) {
+              f.pc = 0;
+              return fuelCaptureP(st);
+            }
+            continue;
+          }
+
+          case OP_SETRET: {
+            // The next instruction is a tail-position crossing (method or
+            // prim call written to the scratch slot, then RET): the cont
+            // caller sits at its return label throughout.
+            f.atRet = true;
+            continue;
+          }
+
           case OP_METHCALL: {
-            var ipc = pc - 1;
             var d = code[pc++];
             var obj = rd(code[pc++], f);
             var nameK = code[pc++];
@@ -537,24 +702,29 @@ define("pyret-base/js/pyret-vm", [], function() {
                 for (var i = 0; i < n; i++) { badArgs[i + off] = rd(code[pc + i], f); }
                 R.checkArityC(pvm.m.locs[callee.l], callee.a, badArgs, callee.m);
               }
-              if (--R.RUNGAS <= 0) { return bounce(st, f, fp, ipc); }
               var nlocals = [];
               if (isMeth) { nlocals.push(obj); }
               for (var i = 0; i < n; i++) { nlocals.push(rd(code[pc++], f)); }
               for (var i = nAll; i < callee.s; i++) { nlocals.push(undefined); }
               f.pc = pc;
-              fp++;
+              st.fp = ++fp;
               f = setFrame(frameAt(frames, fp), callee, pvm.m, pvm.u, nlocals, d);
               code = f.code; pc = 0; locals = nlocals; upvals = f.upvals;
               if (mod !== f.mod) {
                 mod = f.mod;
                 names = mod.names; locs = mod.locs;
               }
+              if (callee.fl !== 1 && (--R.GAS <= 0 || --R.RUNGAS <= 0)) {
+                return fuelCaptureP(st);
+              }
               continue;
             }
+            f.pc = pc + n;
+            st.resumeDest = d;
             ans = applyField(R, obj, field, locs[lk], code, pc, n, f);
             pc += n;
-            if (ans instanceof CONT) { return suspend(st, f, fp, ans, d, pc); }
+            if (isThenable(ans)) { return parkedOn(st, ans); }
+            st.resumeDest = -1;
             locals[d] = ans;
             continue;
           }
@@ -565,9 +735,12 @@ define("pyret-base/js/pyret-vm", [], function() {
             var lk = code[pc++];
             var n = code[pc++];
             f.locK = lk;
+            f.pc = pc + n;
+            st.resumeDest = d;
             ans = applyPrim(R, prim, code, pc, n, f);
             pc += n;
-            if (ans instanceof CONT) { return suspend(st, f, fp, ans, d, pc); }
+            if (isThenable(ans)) { return parkedOn(st, ans); }
+            st.resumeDest = -1;
             locals[d] = ans;
             continue;
           }
@@ -623,8 +796,11 @@ define("pyret-base/js/pyret-vm", [], function() {
               fieldLocs[i] = locs[code[pc++]];
             }
             f.locK = lk;
+            f.pc = pc;
+            st.resumeDest = d;
             ans = R.checkRefAnns(obj, fieldNames, fieldVals, fieldLocs, locs[lk], locs[objLk]);
-            if (ans instanceof CONT) { return suspend(st, f, fp, ans, d, pc); }
+            if (isThenable(ans)) { return parkedOn(st, ans); }
+            st.resumeDest = -1;
             locals[d] = ans;
             continue;
           }
@@ -750,8 +926,10 @@ define("pyret-base/js/pyret-vm", [], function() {
             var v = rd(code[pc++], f);
             var lk = code[pc++];
             f.locK = lk;
+            f.pc = pc;
+            st.resumeDest = -1;
             ans = R._checkAnn(locs[lk], buildAnn(R, mod, annIdx, f), v);
-            if (ans instanceof CONT) { return suspend(st, f, fp, ans, -1, pc); }
+            if (isThenable(ans)) { return parkedOn(st, ans); }
             continue;
           }
 
@@ -760,8 +938,10 @@ define("pyret-base/js/pyret-vm", [], function() {
             var v = rd(code[pc++], f);
             var lk = code[pc++];
             f.locK = lk;
+            f.pc = pc;
+            st.resumeDest = -1;
             ans = R._checkAnn(locs[lk], annVal, v);
-            if (ans instanceof CONT) { return suspend(st, f, fp, ans, -1, pc); }
+            if (isThenable(ans)) { return parkedOn(st, ans); }
             continue;
           }
 
@@ -786,21 +966,16 @@ define("pyret-base/js/pyret-vm", [], function() {
     } catch (e) {
       if (R.isPyretException(e)) {
         // Attribute the failure to the interpreted frames it passed
-        // through, innermost first -- the same information the JS backend
-        // contributes from its ActivationRecords.
+        // through, innermost first -- live frames are not on the JS stack,
+        // so this is their only channel into a rendered Pyret stack.
         f.pc = pc;
         for (var i = fp; i >= 0; i--) {
           e.pyretStack.push(frameLoc(frames[i]));
         }
       }
+      unchain(st);
       throw e;
     }
-  }
-
-  function resumeMachine(ar) {
-    var st = ar.args[0];
-    st.resumeVal = ar.ans;
-    return runMachine(st);
   }
 
   // ---------------------------------------------------------------
@@ -889,13 +1064,10 @@ define("pyret-base/js/pyret-vm", [], function() {
       R.checkArityC(mod.locs[fdef.l], fdef.a, args, fdef.m);
     }
     var st = new State(setFrame(new Frame(), fdef, mod, captured,
-      newLocals(fdef, args, nargs), -1));
-    if (--R.GAS <= 0 || --R.RUNGAS <= 0) {
-      R.EXN_STACKHEIGHT = 0;
-      var cont = R.makeCont();
-      cont.stack[R.EXN_STACKHEIGHT++] =
-        R.makeActivationRecord(mod.locs[fdef.l], resumeMachine, 0, [st], [], 0);
-      return cont;
+      newLocals(fdef, args, nargs), -1), R);
+    R.$vmStateChain.push(st);
+    if (fdef.fl !== 1 && (--R.GAS <= 0 || --R.RUNGAS <= 0)) {
+      return fuelCaptureP(st);
     }
     return runMachine(st);
   }

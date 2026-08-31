@@ -67,6 +67,8 @@ const LAYOUTS: Record<string, Layout> = {
   TUPLECHK: L(3),
   MODULE: L(2),
   ANNCHECKV: L(3),
+  SELFTAIL: L(1, 0, 1),
+  SETRET: L(0),
 };
 
 export interface Instr {

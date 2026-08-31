@@ -103,7 +103,7 @@ export function makeVmPyret(
   const compiler = new VMCompiler(
     flatProvides.fromUri,
     computed.bindings, computed.typeBindings, computed.moduleBindings,
-    env, options.properTailCalls);
+    env, options.properTailCalls, flatnessEnv[0]);
   const prog = compiler.compileProgram(anfed);
   addPhase('Bytecode', prog);
 
