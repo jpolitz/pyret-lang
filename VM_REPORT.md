@@ -59,8 +59,13 @@ section marked PENDING has not been measured/finished yet.*
   cache-warmth-dependent in both compilers).
 - CPO: `make web-vm` builds the vm page bundle; the server serves
   /editor?compiler=vm with window.PYRET pointed at cpo-main-vm.jarr
-  and CPO_COMPILER="vm" (verified over HTTP against a running server).
-  Full in-browser editor run via the playwright suite: in flight.
+  and CPO_COMPILER="vm". The full in-browser playwright suite
+  (browser-test, --env=cpo --compiler=vm): 261/261 pass, including
+  the stop-button and rapid-rerun tests. Getting there surfaced two
+  real bugs, fixed below: a server routing gap (cpo-main-vm.jarr.gz.js
+  had no Content-Encoding route, so express.static served raw gzip
+  bytes to a script tag) and a genuine runtime bug in the vm's
+  breakAll handling (see "Browser-suite-found bug").
 
 ## Oracle-found bugs (all fixed; see VM_DESIGN.md for detail)
 
@@ -79,6 +84,51 @@ section marked PENDING has not been measured/finished yet.*
    the cont version's sync-callback-after-trip path (which corrupts its
    return value by attaching a frame to it) pauses cleanly on the vm
    instead -- a latent cont bug worth an upstream look.
+
+## Browser-suite-found bug (fixed): breakAll vs the promise backend
+
+The playwright stop-button test failed in a distinctive way: the run
+ended silently with no "stopped by user", and every later run on the
+page died with "Internal: run called while already running". The chain:
+
+1. CPO's stop calls runtime.breakAll() while the user program runs
+   inside load-lib's run-task (a nested run: the outer run is parked in
+   pauseStack). breakAll finished the outer run and marked BREAK_FLAG.
+2. The rendering runThunk started next and, per the cont run()'s
+   contract, cleared BREAK_FLAG -- so the broken program's parked chain
+   (the "zombie") woke and kept running forever.
+3. The zombie eventually finished its nested run; execThunk's
+   completion called the outer pauseStack restarter, which set
+   RUN_ACTIVE = true -- but the outer run had already finished, so its
+   finished-guard returned early and RUN_ACTIVE stayed true for good.
+
+The cont backend avoids all three by thread death: breakAll marks every
+active thread dead, iter() goes quiet on a dead thread at its next
+bounce, and resuming a dead thread's pause does nothing. The vm now
+mirrors that exactly: each run's thread token carries `dead`; every
+machine State is stamped with its owning token at creation (stamping at
+park time is wrong -- execThunk starts the nested run synchronously
+before the caller's state parks, so CURRENT_THREAD is the callee's
+token at that moment, which caused a first-cut regression in two io
+tests); a parked chain that wakes to a dead token dies with userBreak
+(same granularity as cont's per-bounce check), unwinding through
+failMachine so its states leave the capture chain; and a pauseStack
+restarter reaching a dead run goes quiet instead of resurrecting
+RUN_ACTIVE. Node-level repro (scratchpad breakrepro3): break during an
+infinite loop with a racing runThunk now behaves identically on both
+backends -- userBreak rejection, racing run succeeds, fresh definitions
+run returns 42, zero leaked chain states, no CPU churn.
+
+All gates rerun after the fix: parity 34/34, pause oracle 20/20 x 6,
+repl 6/6, io 13/13, serve pass, unit 5/5, main2 all-pass (12,531 on
+this cache state; the count is cache-warmth-dependent as noted below),
+browser suite 261/261.
+
+One more test-tool fix from this pass: disasm's extractProgram sliced
+the bytecode JSON out of the module text with lastIndexOf("))"), which
+truncates modules whose constant pool contains "))" (test-parse,
+test-s-exp, test-output in main2) -- replaced with an escape-aware
+string-literal match. Tool-only; no compiler or runtime behavior.
 
 Also learned: main2's executed-test COUNT and module load order depend
 on compile-cache warmth (both backends equally); oracle comparisons must
@@ -162,3 +212,16 @@ twice (bytecode + fast form).
   (shared file, both runtimes).
 - known manualPause trace asymmetry (CPO stop button; unreachable in
   node oracle runs) — see VM_DESIGN.md.
+- code.pyret.org/src/server.js gained the cpo-main-vm.jarr.gz.js route
+  (mirrors the cpo-main-ts route: gz-at-rest asset served with
+  Content-Encoding: gzip). Do NOT run this server with
+  PYRET_GZIPPED=true: beforePyret's fetch+DecompressionStream path
+  would double-decode assets these routes already label gzip (that
+  combination produced a misleading "Failed to fetch" blamed on the
+  jarr when ts-compiler.gz.js was the stream that aborted).
+- vm-unit-test's two bytecode-scanning tests read the shared
+  tests/vm-compiled cache and expect the parity/main2 population; a
+  fresh vm-io-test run leaves only io modules there and the scan
+  checks 0 functions (or trips on a mid-write file). Pre-existing
+  ordering wart, not new: run it after a main2/parity build, as its
+  own skip-note says.

@@ -3534,6 +3534,7 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
       are per-frame, not per-event).
     */
     function captureEventP() {
+      var tok = CURRENT_THREAD;
       CAPTURE_EPOCH++;
       thisRuntime.EXN_STACKHEIGHT = 0;
       for (var i = 0; i < VM_STATE_CHAIN.length; i++) {
@@ -3546,6 +3547,13 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
       thisRuntime.RUNGAS = nextInitialRunGas();
       var yieldP = CUR_SYNC ? Promise.resolve() : macroYieldP();
       return yieldP.then(function() {
+        // The cont trampoline's dead-thread check at iter: a chain whose
+        // run was breakAll'd while parked dies at its next wake, even if
+        // another run started (and cleared BREAK_FLAG) in between.
+        if (tok !== null && tok.dead) {
+          throw new PyretFailException(thisRuntime.ffi.userBreak);
+        }
+        CURRENT_THREAD = tok;
         if (BREAK_FLAG) {
           BREAK_FLAG = false;
           throw new PyretFailException(thisRuntime.ffi.userBreak);
@@ -3684,6 +3692,10 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
     }
 
     var RUN_ACTIVE = false;
+    // The thread whose chain is currently executing (or would be, between
+    // parks). Wake points restore it; capture events and pauseStack
+    // restarters consult its `dead` flag (the cont threadIsDead).
+    var CURRENT_THREAD = null;
     var currentThreadId = 0;
     var activeThreads = {};
 
@@ -3728,21 +3740,26 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
       var finished = false;
       var savedChainFloor = VM_CHAIN_FLOOR;
       var savedSync = CUR_SYNC;
+      var savedThread = CURRENT_THREAD;
       function finishFailure(exn) {
         if (finished) { return; }
         finished = true;
+        thisThread.dead = true;
         RUN_ACTIVE = false;
         VM_CHAIN_FLOOR = savedChainFloor;
         CUR_SYNC = savedSync;
+        CURRENT_THREAD = savedThread;
         delete activeThreads[thisThread.id];
         onDone(makeFailureResult(exn, getStats()));
       }
       function finishSuccess(answer) {
         if (finished) { return; }
         finished = true;
+        thisThread.dead = true;
         RUN_ACTIVE = false;
         VM_CHAIN_FLOOR = savedChainFloor;
         CUR_SYNC = savedSync;
+        CURRENT_THREAD = savedThread;
         delete activeThreads[thisThread.id];
         onDone(new SuccessResult(answer, getStats()));
       }
@@ -3771,6 +3788,7 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
         handlers: {
           resume: function() { throw new Error("resume is not supported by the promise backend's run"); },
           break: function() {
+            thisThread.dead = true;
             BREAK_FLAG = true;
             if (reportsBreak) {
               finishFailure(new PyretFailException(thisRuntime.ffi.userBreak));
@@ -3782,9 +3800,11 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
           }
         },
         pause: function() {},
+        dead: false,
         id: currentThreadId
       };
       activeThreads[currentThreadId] = thisThread;
+      CURRENT_THREAD = thisThread;
 
       function handleErr(e) {
         if (isPyretException(e)) {
@@ -3907,6 +3927,7 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
       cont thread's resume handler does.
     */
     function pauseStack(resumer) {
+      var pausedTok = CURRENT_THREAD;
       RUN_ACTIVE = false;
       thisRuntime.EXN_STACKHEIGHT = 0;
       CAPTURE_EPOCH++;
@@ -3921,11 +3942,15 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
       thisRuntime.RUNGAS = nextInitialRunGas();
       return new Promise(function(resolve, reject) {
         var settled = false;
+        // A restarter reaching a run that breakAll already finished goes
+        // quiet (the cont dead thread): it must not resurrect RUN_ACTIVE.
         resumer({
           resume: function(val) {
             if (settled) { return; }
             settled = true;
+            if (pausedTok !== null && pausedTok.dead) { return; }
             RUN_ACTIVE = true;
+            CURRENT_THREAD = pausedTok;
             thisRuntime.GAS = nextInitialGas();
             thisRuntime.RUNGAS = nextInitialRunGas();
             util.suspend(function() { resolve(val); });
@@ -3933,13 +3958,17 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
           error: function(err) {
             if (settled) { return; }
             settled = true;
+            if (pausedTok !== null && pausedTok.dead) { return; }
             RUN_ACTIVE = true;
+            CURRENT_THREAD = pausedTok;
             reject(isPyretException(err) ? err : new PyretFailException(err));
           },
           break: function() {
             if (settled) { return; }
             settled = true;
+            if (pausedTok !== null && pausedTok.dead) { return; }
             RUN_ACTIVE = true;
+            CURRENT_THREAD = pausedTok;
             reject(new PyretFailException(thisRuntime.ffi.userBreak));
           }
         });
@@ -6165,6 +6194,13 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, se
       '$nextInitialRunGas': nextInitialRunGas,
       '$setPauseTraceHook': function(h) { PAUSE_TRACE_HOOK = h; },
       '$captureEpoch': function() { return CAPTURE_EPOCH; },
+      '$vmToken': function() { return CURRENT_THREAD; },
+      '$vmWake': function(tok) {
+        if (tok !== null && tok.dead) {
+          throw new PyretFailException(thisRuntime.ffi.userBreak);
+        }
+        CURRENT_THREAD = tok;
+      },
 
       'jsnums': jsnums,
       'NumberErrbacks': NumberErrbacks,

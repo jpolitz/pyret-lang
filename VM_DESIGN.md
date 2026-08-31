@@ -162,6 +162,43 @@ non-stateful return annotations, discarding the pending binding.
 - PYRET_FUEL_DEBUG accessor logging remains in both runtimes as oracle
   debug tooling (env-gated, off by default).
 
+## Thread death (breakAll), added after the browser suite
+
+The cont run() kills threads, not flags: breakAll marks every active
+thread dead, iter() returns immediately for a dead thread at its next
+bounce, and a dead thread's pause restarter is inert. The vm's first
+break model (global BREAK_FLAG consumed at the next capture event) had
+three defects the CPO stop button exposed together: a new run clears
+BREAK_FLAG (cont contract), reviving the broken run's parked chain; the
+revived chain's nested-run completion drove the outer pauseStack
+restarter, which set RUN_ACTIVE on a run whose finished-guard had
+already returned -- wedging every future runThunk; and the dead chain's
+states stayed on VM_STATE_CHAIN.
+
+The vm now carries cont's model literally:
+
+- run()'s thisThread has `dead`; handlers.break and both finishers set
+  it. CURRENT_THREAD tracks the executing run's token, saved/restored
+  across nested runs like VM_CHAIN_FLOOR.
+- Every machine State is stamped `st.tok = R.$vmToken()` at creation.
+  The stamp must happen at creation, not at park: execThunk runs its
+  nested run synchronously inside pauseStack's resumer, so by the time
+  the CALLER's state parks on the returned promise, CURRENT_THREAD is
+  the callee's token (using it produced spurious userBreaks in the two
+  io library-import tests -- caught by vm-io-test, fixed by stamping).
+- Wake points check the token: captureEventP's continuation (the
+  analogue of iter's dead check, same per-bounce granularity) and
+  parkedOn's resume (R.$vmWake). A dead wake throws userBreak, which
+  unwinds through failMachine so every one of the chain's states
+  detaches from VM_STATE_CHAIN (st.failed makes the attribution
+  idempotent as the rejection cascades through nested parks).
+- pauseStack restarters go quiet when the paused run's token is dead:
+  settle nothing, touch neither RUN_ACTIVE nor the fuel counters.
+
+None of this runs in a break-free execution (tokens are stamped and
+restored, never dead), which is why the full oracle stayed
+byte-identical after the change.
+
 ## FLATCALL plan (the one carried optimization)
 
 Compile cont-flat functions to synchronous JS by calling the REAL

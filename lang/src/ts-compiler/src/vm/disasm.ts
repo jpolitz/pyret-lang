@@ -275,10 +275,12 @@ export function extractProgram(moduleFileText: string): VMProgram | undefined {
   const marker = 'JSON.parse(';
   const at = theModule.indexOf(marker);
   if (at < 0) { return undefined; }
-  const literalStart = at + marker.length;
-  const literalEnd = theModule.lastIndexOf('))');
-  if (literalEnd <= literalStart) { return undefined; }
-  const literal = theModule.slice(literalStart, literalEnd);
+  // The argument is one double-quoted JS string literal; match it with
+  // escape awareness (its content routinely contains quotes and parens).
+  const literalRe = /"(?:[^"\\]|\\[\s\S])*"/y;
+  literalRe.lastIndex = at + marker.length;
+  const m = literalRe.exec(theModule);
+  if (m === null) { return undefined; }
   // eslint-disable-next-line no-new-func
-  return JSON.parse(new Function('return ' + literal)());
+  return JSON.parse(new Function(`return ${m[0]}`)());
 }

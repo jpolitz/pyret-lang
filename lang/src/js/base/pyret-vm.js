@@ -242,6 +242,14 @@ define("pyret-base/js/pyret-vm", [], function() {
     // whose result generated code discards too).
     this.resumeDest = -1;
     this.resumeVal = undefined;
+    // Set once this state has attributed a failure and unchained itself,
+    // so a rejection cascading through several of its parks reports once.
+    this.failed = false;
+    // The run (thread token) this chain belongs to, stamped at creation.
+    // Parks consult its `dead` flag on wake: CURRENT_THREAD itself is the
+    // wrong witness at park time, because execThunk starts a nested run
+    // synchronously before the caller's state parks on its promise.
+    this.tok = R.$vmToken();
   }
 
   /*
@@ -323,14 +331,19 @@ define("pyret-base/js/pyret-vm", [], function() {
   // exn-stack-parser cannot see them) and unregisters the state.
   function parkedOn(st, thenable) {
     return thenable.then(function(v) {
+      st.R.$vmWake(st.tok);
       st.resumeVal = v;
       return resumeDelivery(st);
     }, function(e) {
+      failMachine(st, e);
+    }).catch(function(e) {
       failMachine(st, e);
     });
   }
 
   function failMachine(st, e) {
+    if (st.failed) { throw e; }
+    st.failed = true;
     var R = st.R;
     if (R.isPyretException(e)) {
       for (var i = st.fp; i >= 0; i--) {
@@ -373,14 +386,18 @@ define("pyret-base/js/pyret-vm", [], function() {
   function popTreatmentThen(st) {
     var R = st.R;
     var fl = R.$popFloors();
-    if (fl !== null) { return fl.then(function() { return entryRecheckThen(st); }); }
+    if (fl !== null) {
+      return fl.then(function() { return entryRecheckThen(st); },
+                     function(e) { failMachine(st, e); });
+    }
     return entryRecheckThen(st);
   }
   function entryRecheckThen(st) {
     var R = st.R;
     if (--R.GAS <= 0 || --R.RUNGAS <= 0) {
       R.EXN_STACKHEIGHT = 0;
-      return R.$captureEventP().then(function() { return popTreatmentThen(st); });
+      return R.$captureEventP().then(function() { return popTreatmentThen(st); },
+                                     function(e) { failMachine(st, e); });
     }
     return runMachine(st);
   }
@@ -388,6 +405,8 @@ define("pyret-base/js/pyret-vm", [], function() {
   // A fuel trip at a call: the callee frame is already pushed (the cont
   // backend captures the callee's activation at step 0), state is
   // written; run one capture event, then resume with the pop treatment.
+  // A capture event rejects only when this run died (breakAll) while
+  // parked; the state attributes and unchains itself like any failure.
   function fuelCaptureP(st) {
     var R = st.R;
     R.EXN_STACKHEIGHT = 0;
@@ -395,7 +414,7 @@ define("pyret-base/js/pyret-vm", [], function() {
       var f = st.frames[st.fp];
       f.captured = false;
       return popTreatmentThen(st);
-    });
+    }, function(e) { failMachine(st, e); });
   }
 
   // Arity mismatch on a call to interpreted code. Cold, and kept out of
@@ -1040,6 +1059,7 @@ define("pyret-base/js/pyret-vm", [], function() {
         }
       }
     } catch (e) {
+      st.failed = true;
       if (R.isPyretException(e)) {
         // Attribute the failure to the interpreted frames it passed
         // through, innermost first -- live frames are not on the JS stack,

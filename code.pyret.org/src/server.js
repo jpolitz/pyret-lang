@@ -126,6 +126,11 @@ function start(config, onServerReady) {
     res.set("Content-Type", "application/javascript");
     res.send(fs.readFileSync("build/web/js/cpo-main-ts.jarr.gz.js"));
   });
+  app.get("/js/cpo-main-vm.jarr.gz.js", function(req, res) {
+    res.set("Content-Encoding", "gzip");
+    res.set("Content-Type", "application/javascript");
+    res.send(fs.readFileSync("build/web/js/cpo-main-vm.jarr.gz.js"));
+  });
   app.get("/js/ts-compiler.gz.js", function(req, res) {
     res.set("Content-Encoding", "gzip");
     res.set("Content-Type", "application/javascript");
