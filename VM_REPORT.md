@@ -53,7 +53,10 @@ section marked PENDING has not been measured/finished yet.*
   with fast forms enabled.
 - `vm-bootstrap-converge` (the compiler as bytecode self-builds,
   byte-equal to the cont chain): PENDING.
-- CPO in-browser: PENDING.
+- CPO: `make web-vm` builds the vm page bundle; the server serves
+  /editor?compiler=vm with window.PYRET pointed at cpo-main-vm.jarr
+  and CPO_COMPILER="vm" (verified over HTTP against a running server).
+  Full in-browser editor run via the playwright suite: in flight.
 
 ## Oracle-found bugs (all fixed; see VM_DESIGN.md for detail)
 
@@ -120,6 +123,12 @@ dispatch cost (up to ~1.47x).
 | main2 standalone jarr | 28,586,370 / 4,120,094 | 14,859,082 / 2,043,087 | 1.9x / 2.0x |
 
 (The vm numbers include the flat fast-form factories.)
+
+Two more size datapoints: the COMPILER itself as a standalone --
+13,751,536 bytes as bytecode (phaseB-vm) vs 32,287,770 as generated JS
+(phaseB-ts), 2.3x smaller; and the CPO page bundle --
+cpo-main-vm.jarr.gz.js is 1,389,767 bytes vs cpo-main-ts.jarr.gz.js at
+2,903,792, 2.1x smaller (what a student downloads).
 
 ### Compile time (cold main2 build, single sample)
 
