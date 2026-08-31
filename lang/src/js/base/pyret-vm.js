@@ -2,7 +2,7 @@
   pvm -- the Pyret virtual machine.
 
   This is the execution half of the interpreter backend. Its input is the
-  bytecode produced by src/ts-compiler/src/interp/vm-compile.ts from the
+  bytecode produced by src/ts-compiler/src/vm/vm-compile.ts from the
   same ANF the JS code generator consumes, and it runs that bytecode
   against the unmodified runtime in this directory: identical value
   representations (PFunction/PMethod/PObject, js-numbers, `{"$var": v}`
@@ -41,7 +41,7 @@
 */
 define("pyret-base/js/pyret-vm", [], function() {
 
-  // Must match src/ts-compiler/src/interp/opcodes.ts.
+  // Must match src/ts-compiler/src/vm/opcodes.ts.
   var FORMAT_VERSION = 3;
 
   var OPCODE_NAMES = [
@@ -1175,7 +1175,7 @@ define("pyret-base/js/pyret-vm", [], function() {
   }
 
   // ---------------------------------------------------------------
-  // Entry point used by every compiled-by-interp module
+  // Entry point used by every compiled-by-vm module
   // ---------------------------------------------------------------
 
   function runModule(R, NS, uri, deps, prog) {

@@ -81,6 +81,6 @@ compiled-ts/
 # Interpreter back end: its own module cache, kept apart from the js one
 # because a compiled module records which back end built it only by which
 # directory it is in.
-tests/interp-compiled/
-compiled-interp/
-compiled-interp.jarr
+tests/vm-compiled/
+compiled-vm/
+compiled-vm.jarr

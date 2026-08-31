@@ -1,5 +1,5 @@
 Programs that exist to stress the interpreter back end specifically, run by
-`make interp-parity-test` alongside the shared `tests/programs/` corpus.
+`make vm-parity-test` alongside the shared `tests/programs/` corpus.
 
 Every program here must COMPILE AND RUN: matching compile errors would be
 parity that exercises no back end at all. The harness enforces this (only

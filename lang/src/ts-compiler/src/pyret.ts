@@ -102,7 +102,7 @@ export async function main(args: string[]): Promise<number> {
     ['pause-schedule',
       C.nextVal(C.Str, C.once, 'JS file computing initial GAS/RUNGAS for the runtime; its code is baked into the standalone')],
     ['backend',
-      C.nextValDefault(C.Str, 'js', undefined, C.once, 'Which back end compiles modules: js (generate JavaScript) or interp (emit bytecode for the Pyret VM)')],
+      C.nextValDefault(C.Str, 'js', undefined, C.once, 'Which back end compiles modules: js (generate JavaScript) or vm (emit bytecode for the Pyret VM)')],
   ]);
 
   const paramsParsed = C.parseArgs(options, args);
@@ -125,11 +125,11 @@ export async function main(args: string[]): Promise<number> {
     const typeCheck = r.has('type-check');
     const tailCalls = !r.has('improper-tail-calls');
     const backendStr = r.get('backend');
-    if (backendStr !== 'js' && backendStr !== 'interp') {
-      printError('--backend must be js or interp (got ' + backendStr + ')\n');
+    if (backendStr !== 'js' && backendStr !== 'vm') {
+      printError('--backend must be js or vm (got ' + backendStr + ')\n');
       return failureCode;
     }
-    const backend: 'js' | 'interp' = backendStr;
+    const backend: 'js' | 'vm' = backendStr;
     const compiledDir = r.get('compiled-dir');
     const standaloneFile = r.get('standalone-file');
     const addProfiling = r.has('profile');

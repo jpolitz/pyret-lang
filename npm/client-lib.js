@@ -202,8 +202,8 @@ function start(options) {
     // runtime's segmented stack), so give it the big stack up front;
     // that also keeps it from re-exec'ing itself for --stack-size, which
     // would sever this IPC channel and lose the startup success message.
-    // `interp` is that same binary, so it needs the same treatment.
-    const isTS = (options.client.backend === "ts" || options.client.backend === "interp");
+    // `vm` is that same binary, so it needs the same treatment.
+    const isTS = (options.client.backend === "ts" || options.client.backend === "vm");
     const child = childProcess.fork(
       serverModule,
       ["-serve", "--port", port],

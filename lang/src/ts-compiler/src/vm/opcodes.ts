@@ -3,7 +3,7 @@
 
   This is the *compiler* side of the contract; the machine side is
   src/js/base/pyret-vm.js, which repeats the same ordered opcode list.
-  The two are kept in lockstep by tests/interp/opcode-parity-test (which
+  The two are kept in lockstep by tests/vm/opcode-parity-test (which
   diffs OPCODE_NAMES against the VM's exported table) and, at run time, by
   the FORMAT_VERSION stamped into every emitted program: the VM refuses a
   program whose version it does not recognize, so a stale compiled-module

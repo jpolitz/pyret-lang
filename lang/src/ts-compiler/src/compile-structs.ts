@@ -998,11 +998,11 @@ export interface CompileOptions {
   inlineCaseBodyLimit: number;
   /**
    * Which back end turns the shared ANF into a loadable module: "js" is
-   * the code generator (anf-loop-compiler), "interp" emits bytecode for
+   * the code generator (anf-loop-compiler), "vm" emits bytecode for
    * the machine in src/js/base/pyret-vm.js. Both produce the same module
    * format and run on the same runtime, so a program may mix them.
    */
-  backend: 'js' | 'interp';
+  backend: 'js' | 'vm';
   moduleEval: boolean;
   userAnnotations: boolean;
   runtimeAnnotations: boolean;

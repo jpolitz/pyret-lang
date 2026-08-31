@@ -109,7 +109,7 @@
 					"enum": [
 						"pyret",
 						"ts",
-						"interp"
+						"vm"
 					],
 					"markdownEnumDescriptions": [
 						"“Regular” Pyret. This is the default, pick this if you're not sure.",

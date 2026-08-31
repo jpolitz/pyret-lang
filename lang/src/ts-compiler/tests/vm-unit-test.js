@@ -1,7 +1,7 @@
 // Unit tests for the interpreter back end.
 //
 // The opcode table and program format are written down twice on purpose --
-// once in src/ts-compiler/src/interp/opcodes.ts for the emitter, once in
+// once in src/ts-compiler/src/vm/opcodes.ts for the emitter, once in
 // src/js/base/pyret-vm.js for the machine -- so that neither file has to
 // import the other (the machine is a plain AMD module loaded by the
 // runtime; the emitter is TypeScript compiled into the compiler). These
@@ -9,7 +9,7 @@
 // emitted bytecode with the disassembler so that a malformed instruction
 // stream fails here rather than as a mystery at run time.
 //
-// Run from lang/: node --test src/ts-compiler/tests/interp-unit-test.js
+// Run from lang/: node --test src/ts-compiler/tests/vm-unit-test.js
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -18,8 +18,8 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
-const OP = require(path.join(ROOT, 'build/ts-compiler/interp/opcodes.js'));
-const DIS = require(path.join(ROOT, 'build/ts-compiler/interp/disasm.js'));
+const OP = require(path.join(ROOT, 'build/ts-compiler/vm/opcodes.js'));
+const DIS = require(path.join(ROOT, 'build/ts-compiler/vm/disasm.js'));
 
 // Load the machine the way a host would: it registers itself with define().
 function loadVM() {
@@ -42,7 +42,7 @@ test('the machine and the emitter agree on the opcode table', () => {
   // Array.from: the machine is loaded in its own vm context, so its
   // array has a different realm's prototype.
   assert.deepStrictEqual(Array.from(machine.OPCODE_NAMES), [...OP.OPCODE_NAMES],
-    'opcode order differs between pyret-vm.js and interp/opcodes.ts');
+    'opcode order differs between pyret-vm.js and vm/opcodes.ts');
 });
 
 test('the machine and the emitter agree on the bytecode format version', () => {
@@ -66,13 +66,13 @@ test('disassembly of every emitted function is well formed', () => {
   // Uses the module cache the parity/test targets already populate, so
   // this covers real trove bytecode (lists, sets, string-dict, ...) rather
   // than a toy program.
-  const cacheDir = path.join(ROOT, 'tests/interp-compiled');
+  const cacheDir = path.join(ROOT, 'tests/vm-compiled');
   if (!fs.existsSync(cacheDir)) {
-    console.log('  (skipped: no tests/interp-compiled cache; run make interp-pyret-test first)');
+    console.log('  (skipped: no tests/vm-compiled cache; run make vm-pyret-test first)');
     return;
   }
   const files = fs.readdirSync(cacheDir).filter((f) => f.endsWith('-module.js'));
-  assert.ok(files.length > 0, 'expected compiled interp modules in tests/interp-compiled');
+  assert.ok(files.length > 0, 'expected compiled vm modules in tests/vm-compiled');
   let checkedFuncs = 0;
   for (const f of files) {
     const text = fs.readFileSync(path.join(cacheDir, f), 'utf8');
@@ -95,9 +95,9 @@ test('no module reads a letrec cell before its straight-line assignment', () => 
   // See readsBeforeAssignment: this is the shape of the one bug that got
   // past every runtime test -- a `data` member's refinement compiled to a
   // read scheduled before the function it names was initialized.
-  const cacheDir = path.join(ROOT, 'tests/interp-compiled');
+  const cacheDir = path.join(ROOT, 'tests/vm-compiled');
   if (!fs.existsSync(cacheDir)) {
-    console.log('  (skipped: no tests/interp-compiled cache; run make interp-pyret-test first)');
+    console.log('  (skipped: no tests/vm-compiled cache; run make vm-pyret-test first)');
     return;
   }
   const problems = [];

@@ -1,5 +1,5 @@
 {
   "pyret-parley.urlFileMode": "local-if-present",
-  "pyret-parley.compiler": "interp",
+  "pyret-parley.compiler": "vm",
   "pyret-parley.diagnostics": true
 }

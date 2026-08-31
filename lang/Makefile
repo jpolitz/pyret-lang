@@ -350,7 +350,7 @@ $(TS_COMP_OUT)/pyret.js: $(TS_COMP_SRC) $(TS_COMP_DIR)/tsconfig.json $(TS_COMP_D
 
 
 # Runtime/support files for the TS compiler's output dir (mirrors PHASEA_ALL_DEPS)
-TS_COMP_ALL_DEPS := $(patsubst src/%,$(TS_COMP_OUT)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(TS_COMP_OUT)/js/%.js,$(COPY_LIB)) $(TS_COMP_OUT)/bundled-node-compile-deps.js $(TS_COMP_OUT)/bundled-node-deps.js $(TS_COMP_OUT)/config.json $(TS_COMP_OUT)/config-interp.json
+TS_COMP_ALL_DEPS := $(patsubst src/%,$(TS_COMP_OUT)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(TS_COMP_OUT)/js/%.js,$(COPY_LIB)) $(TS_COMP_OUT)/bundled-node-compile-deps.js $(TS_COMP_OUT)/bundled-node-deps.js $(TS_COMP_OUT)/config.json $(TS_COMP_OUT)/config-vm.json
 
 $(TS_COMP_OUT)/js/%.js: src/js/base/%.js
 	@$(call MKDIR,$(TS_COMP_OUT)/js)
@@ -369,9 +369,9 @@ $(TS_COMP_OUT)/bundled-node-deps.js: src/js/trove/require-node-dependencies.js
 $(TS_COMP_OUT)/config.json: src/scripts/node_modules-config.json
 	cp $< $@
 
-# Same config plus the machine's raw-js entry; the served interp backend
-# defaults to it (see server.ts) so `pyret --backend interp` bundles the VM.
-$(TS_COMP_OUT)/config-interp.json: src/scripts/node_modules-config-interp.json
+# Same config plus the machine's raw-js entry; the served vm backend
+# defaults to it (see server.ts) so `pyret --backend vm` bundles the VM.
+$(TS_COMP_OUT)/config-vm.json: src/scripts/node_modules-config-vm.json
 	cp $< $@
 
 .PHONY : ts-compiler
@@ -594,151 +594,151 @@ ts-stack-safety-test: ts-compiler
 	$(NODE) --test src/ts-compiler/tests/stack-safety-test.js
 
 # ============================================================
-# Interpreter back end (src/ts-compiler/src/interp + src/js/base/pyret-vm.js)
+# Interpreter back end (src/ts-compiler/src/vm + src/js/base/pyret-vm.js)
 #
 # Same compiler, same front end, same runtime, same module format --
-# `--backend interp` swaps the code generator for a bytecode emitter and
+# `--backend vm` swaps the code generator for a bytecode emitter and
 # runs the result on the Pyret VM. It is selected exactly the way the ts
-# compiler flavor is: a flag on the CLI (`pyret --backend interp` in npm/),
-# a query parameter at code.pyret.org startup (?compiler=interp).
+# compiler flavor is: a flag on the CLI (`pyret --backend vm` in npm/),
+# a query parameter at code.pyret.org startup (?compiler=vm).
 #
 # Two things differ from the js-backend targets and both are deliberate:
-#   * a separate compiled-module cache (compiled-interp/, tests/interp-compiled/),
+#   * a separate compiled-module cache (compiled-vm/, tests/vm-compiled/),
 #     since a cached module records which back end produced it only by
 #     living in that back end's directory;
-#   * a separate requirejs config (standalone-config-interp.json), which is
+#   * a separate requirejs config (standalone-config-vm.json), which is
 #     standalone-configA.json plus the one raw-js file the machine lives in.
 #     Interpreted modules name it as their single nativeRequire.
 # ============================================================
 
-INTERP_PYRET = $(TS_PYRET) --backend interp
-INTERP_CONFIG = src/scripts/standalone-config-interp.json
+INTERP_PYRET = $(TS_PYRET) --backend vm
+INTERP_CONFIG = src/scripts/standalone-config-vm.json
 
 INTERP_TEST_BUILD = $(INTERP_PYRET) \
 	  --builtin-js-dir src/js/trove/ \
 		--builtin-arr-dir src/arr/trove/ \
 		--require-config $(INTERP_CONFIG) \
-		--compiled-dir tests/interp-compiled/
+		--compiled-dir tests/vm-compiled/
 
-# `make path/to/foo.interp.jarr` builds path/to/foo.arr through the machine,
+# `make path/to/foo.vm.jarr` builds path/to/foo.arr through the machine,
 # mirroring the %.jarr and %.ts.jarr rules.
-%.interp.jarr: $(TS_COMP_OUT)/pyret.js %.arr $(CONFIGA_RUNTIME_FILES)
-	$(INTERP_PYRET) --outfile $*.interp.jarr \
+%.vm.jarr: $(TS_COMP_OUT)/pyret.js %.arr $(CONFIGA_RUNTIME_FILES)
+	$(INTERP_PYRET) --outfile $*.vm.jarr \
                       --build-runnable $*.arr \
                       --builtin-js-dir src/js/trove/ \
                       --builtin-arr-dir src/arr/trove/ \
-                      --compiled-dir compiled-interp/ \
+                      --compiled-dir compiled-vm/ \
                       $(EXTRA_FLAGS) \
                       --require-config $(INTERP_CONFIG)
 
 # Warming the interpreter's own module cache, the way tests/%/.ts-suite-warm
 # warms the js one: a cached module says which back end built it only by
 # which directory it is in.
-INTERP_COMPILED_CACHE_WARM=tests/interp-compiled/.interp-suite-warm
+INTERP_COMPILED_CACHE_WARM=tests/vm-compiled/.vm-suite-warm
 .SECONDARY: $(INTERP_COMPILED_CACHE_WARM)
 
-tests/%/.interp-suite-warm: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS) $(CONFIGA_RUNTIME_FILES)
+tests/%/.vm-suite-warm: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS) $(CONFIGA_RUNTIME_FILES)
 	@$(call MKDIR,tests/$*)
-	echo '"warm"' > $(TS_COMP_OUT)/interp-cache-warm-$*.arr
-	$(INTERP_PYRET) --build-runnable $(TS_COMP_OUT)/interp-cache-warm-$*.arr \
-                      --outfile $(TS_COMP_OUT)/interp-cache-warm-$*.jarr \
+	echo '"warm"' > $(TS_COMP_OUT)/vm-cache-warm-$*.arr
+	$(INTERP_PYRET) --build-runnable $(TS_COMP_OUT)/vm-cache-warm-$*.arr \
+                      --outfile $(TS_COMP_OUT)/vm-cache-warm-$*.jarr \
                       --builtin-js-dir src/js/trove/ \
                       --builtin-arr-dir src/arr/trove/ \
                       --compiled-dir tests/$*/ \
                       --deps-file $(TS_COMP_OUT)/bundled-node-compile-deps.js \
                       -no-check-mode -no-display-progress \
                       --require-config $(INTERP_CONFIG)
-	$(call RM,$(TS_COMP_OUT)/interp-cache-warm-$*.arr)
+	$(call RM,$(TS_COMP_OUT)/vm-cache-warm-$*.arr)
 	touch $@
 
 # repl.ts against a REAL in-process load-lib runtime, with interactions
 # compiled to bytecode: the same test ts-repl-test runs, on the machine.
-.PHONY : interp-repl-test
-interp-repl-test: ts-compiler $(INTERP_COMPILED_CACHE_WARM)
-	PYRET_TEST_BACKEND=interp $(NODE) --test src/ts-compiler/tests/repl-test.js
+.PHONY : vm-repl-test
+vm-repl-test: ts-compiler $(INTERP_COMPILED_CACHE_WARM)
+	PYRET_TEST_BACKEND=vm $(NODE) --test src/ts-compiler/tests/repl-test.js
 
 # The opcode table and program format are stated twice on purpose -- once
 # for the emitter, once for the machine -- so that neither has to import
 # the other. This asserts they still agree, and exercises the assembler.
-.PHONY : interp-unit-test
-interp-unit-test: ts-compiler
-	$(NODE) --test src/ts-compiler/tests/interp-unit-test.js
+.PHONY : vm-unit-test
+vm-unit-test: ts-compiler
+	$(NODE) --test src/ts-compiler/tests/vm-unit-test.js
 
 # Behavioral coverage for the back end: every parity program built both
 # ways with the same front end, requiring identical output. See the header
 # of the script for why this is the load-bearing interpreter test.
-.PHONY : interp-parity-test
-interp-parity-test: ts-compiler $(CONFIGA_RUNTIME_FILES)
-	bash $(TS_COMP_DIR)/tests/interp-parity.sh
+.PHONY : vm-parity-test
+vm-parity-test: ts-compiler $(CONFIGA_RUNTIME_FILES)
+	bash $(TS_COMP_DIR)/tests/vm-parity.sh
 
-tests/pyret/main2-interp.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/pyret/main2.arr $(TEST_FILES)
+tests/pyret/main2-vm.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/pyret/main2.arr $(TEST_FILES)
 	$(INTERP_TEST_BUILD) \
-		--outfile tests/pyret/main2-interp.jarr \
+		--outfile tests/pyret/main2-vm.jarr \
 		--build-runnable tests/pyret/main2.arr \
 		-check-all
 
 # The language/runtime suite, interpreted: pure machine coverage (main2 has
 # no compile-at-runtime tests, so nothing here re-enters the compiler).
-.PHONY : interp-pyret-test
-interp-pyret-test: tests/pyret/main2-interp.jarr
-	$(NODE) tests/pyret/main2-interp.jarr
+.PHONY : vm-pyret-test
+vm-pyret-test: tests/pyret/main2-vm.jarr
+	$(NODE) tests/pyret/main2-vm.jarr
 
-tests/pyret/regression-interp.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/pyret/regression.arr $(REG_TEST_FILES)
+tests/pyret/regression-vm.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/pyret/regression.arr $(REG_TEST_FILES)
 	$(INTERP_TEST_BUILD) \
-		--build-runnable tests/pyret/regression.arr --outfile tests/pyret/regression-interp.jarr
+		--build-runnable tests/pyret/regression.arr --outfile tests/pyret/regression-vm.jarr
 
-.PHONY : interp-regression-test
-interp-regression-test: tests/pyret/regression-interp.jarr
-	$(NODE) tests/pyret/regression-interp.jarr
+.PHONY : vm-regression-test
+vm-regression-test: tests/pyret/regression-vm.jarr
+	$(NODE) tests/pyret/regression-vm.jarr
 
-tests/type-check/main-interp.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/type-check/main.arr $(TYPE_TEST_FILES)
+tests/type-check/main-vm.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) tests/type-check/main.arr $(TYPE_TEST_FILES)
 	$(INTERP_TEST_BUILD) \
-		--build-runnable tests/type-check/main.arr --outfile tests/type-check/main-interp.jarr
+		--build-runnable tests/type-check/main.arr --outfile tests/type-check/main-vm.jarr
 
-.PHONY : interp-type-check-test
-interp-type-check-test: tests/type-check/main-interp.jarr
-	$(NODE) tests/type-check/main-interp.jarr
+.PHONY : vm-type-check-test
+vm-type-check-test: tests/type-check/main-vm.jarr
+	$(NODE) tests/type-check/main-vm.jarr
 
-.PHONY : interp-io-test
-interp-io-test: ts-compiler $(CONFIGA_RUNTIME_FILES)
-	$(NPM_EXEC) jest --detectOpenHandles --forceExit --verbose "src/ts-compiler/tests/io-interp.test.js"
+.PHONY : vm-io-test
+vm-io-test: ts-compiler $(CONFIGA_RUNTIME_FILES)
+	$(NPM_EXEC) jest --detectOpenHandles --forceExit --verbose "src/ts-compiler/tests/io-vm.test.js"
 
 # The counterpart of all-pyret-test / all-ts-pyret-test: the same
 # tests/all.arr, interpreted. That includes compiler-tests.arr, whose
 # modules invoke the compiler AT TEST RUNTIME -- so those run the .arr
 # compiler itself on the machine, and their compile cache in tests/compiled/
 # has to be warm for the same reason the ts target's does.
-tests/pyret/all-interp.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) $(MAIN_TEST_FILES)
+tests/pyret/all-vm.jarr: ts-compiler $(CONFIGA_RUNTIME_FILES) $(TEST_FILES) $(TYPE_TEST_FILES) $(REG_TEST_FILES) $(MAIN_TEST_FILES)
 	$(INTERP_TEST_BUILD) \
 		--build-runnable tests/all.arr \
-    --outfile tests/pyret/all-interp.jarr \
+    --outfile tests/pyret/all-vm.jarr \
 		-check-all
 
-.PHONY : all-interp-pyret-test
-all-interp-pyret-test: tests/pyret/all-interp.jarr $(TS_SUITE_CACHE_WARM)
-	$(NODE) tests/pyret/all-interp.jarr
+.PHONY : all-vm-pyret-test
+all-vm-pyret-test: tests/pyret/all-vm.jarr $(TS_SUITE_CACHE_WARM)
+	$(NODE) tests/pyret/all-vm.jarr
 
-# The npm CLI's `pyret --backend interp` path: same server smoke test, with
+# The npm CLI's `pyret --backend vm` path: same server smoke test, with
 # the back end the client asks for and the config the server then defaults
 # to. Step 2 runs the standalone, so the bundled machine is covered too.
-.PHONY : interp-serve-test
-interp-serve-test: ts-compiler $(TS_COMP_OUT)/libs.jarr $(CONFIGA_RUNTIME_FILES)
-	bash $(TS_COMP_DIR)/tests/serve-test.sh interp
+.PHONY : vm-serve-test
+vm-serve-test: ts-compiler $(TS_COMP_OUT)/libs.jarr $(CONFIGA_RUNTIME_FILES)
+	bash $(TS_COMP_DIR)/tests/serve-test.sh vm
 
-.PHONY : interp-test
-interp-test: interp-unit-test interp-parity-test interp-repl-test interp-serve-test all-interp-pyret-test interp-io-test
+.PHONY : vm-test
+vm-test: vm-unit-test vm-parity-test vm-repl-test vm-serve-test all-vm-pyret-test vm-io-test
 
-.PHONY : interp-clean
-interp-clean:
-	$(call RMDIR,compiled-interp)
-	$(call RMDIR,tests/interp-compiled)
-	$(call RM,tests/pyret/main2-interp.jarr)
-	$(call RM,tests/pyret/regression-interp.jarr)
-	$(call RM,tests/type-check/main-interp.jarr)
-	$(call RM,tests/pyret/all-interp.jarr)
-	$(call RMDIR,$(TS_COMP_OUT)/interp-parity)
-	$(call RMDIR,$(TS_COMP_OUT)/serve-test-interp)
-	$(call RMDIR,$(TS_COMP_OUT)/interp-bench)
+.PHONY : vm-clean
+vm-clean:
+	$(call RMDIR,compiled-vm)
+	$(call RMDIR,tests/vm-compiled)
+	$(call RM,tests/pyret/main2-vm.jarr)
+	$(call RM,tests/pyret/regression-vm.jarr)
+	$(call RM,tests/type-check/main-vm.jarr)
+	$(call RM,tests/pyret/all-vm.jarr)
+	$(call RMDIR,$(TS_COMP_OUT)/vm-parity)
+	$(call RMDIR,$(TS_COMP_OUT)/serve-test-vm)
+	$(call RMDIR,$(TS_COMP_OUT)/vm-bench)
 	$(call RM,$(INTERP_COMPILED_CACHE_WARM))
 
 # ============================================================

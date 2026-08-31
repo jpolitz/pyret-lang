@@ -205,13 +205,13 @@
       { "load-path": "." },
       tsLib.makeFinderFactory(builtinSupport, urlFileMode));
 
-    // ?compiler=interp keeps everything on this page the same -- same jarr,
+    // ?compiler=vm keeps everything on this page the same -- same jarr,
     // same compiler bundle, same finders, same executor -- and only changes
     // which back end turns the user's program into a module: bytecode for
     // the Pyret VM instead of generated JavaScript. Both produce the same
     // module format and run on this page's runtime, so the builtins loaded
     // from staticModules (which the stock compiler built) work unchanged.
-    var BACKEND = (window.CPO_COMPILER === "interp") ? "interp" : "js";
+    var BACKEND = (window.CPO_COMPILER === "vm") ? "vm" : "js";
 
     function tsOptions(options) {
       var o = Object.assign({}, T.compileStructs.defaultCompileOptions);

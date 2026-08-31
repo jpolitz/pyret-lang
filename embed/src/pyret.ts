@@ -51,10 +51,10 @@ export type EmbedConfig = {
   // Which compiler backend the embedded editor loads -- the same knob as
   // code.pyret.org's ?compiler= flag; it is appended to `src` as a query
   // parameter. 'ts' selects the TypeScript port of the compiler and
-  // 'interp' selects that compiler's interpreter back end (the Pyret VM);
+  // 'vm' selects that compiler's interpreter back end (the Pyret VM);
   // omitting it (or 'pyret') keeps the stock Pyret-hosted compiler. Self-hosted
   // builds have the ts artifacts when built via `npm run build:ts`.
-  compiler?: 'pyret' | 'ts' | 'interp',
+  compiler?: 'pyret' | 'ts' | 'vm',
   options: {
     footerStyle?: 'hide' | 'normal',
     warnOnExit?: boolean,

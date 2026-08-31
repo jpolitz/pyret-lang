@@ -6,9 +6,9 @@ executes Pyret directly. It is chosen with a flag and changes nothing else
 about the system —
 
 ```
-node build/ts-compiler/pyret.js --backend interp --build-runnable foo.arr ...
-pyret --backend interp foo.arr                    # the npm CLI
-https://code.pyret.org/editor?compiler=interp     # the editor
+node build/ts-compiler/pyret.js --backend vm --build-runnable foo.arr ...
+pyret --backend vm foo.arr                    # the npm CLI
+https://code.pyret.org/editor?compiler=vm     # the editor
 ```
 
 — because it produces the same thing the JavaScript back end produces: a
@@ -32,7 +32,7 @@ end, and starts up faster. See Testing and Speed below.
                                                                        │
                                     ┌──────────────────────────────────┴───────┐
                                     │                                          │
-                              anf-loop-compiler                        interp/vm-compile
+                              anf-loop-compiler                        vm/vm-compile
                               (JavaScript source)                      (bytecode)
                                     │                                          │
                                     └──────────────► compile-lib ◄─────────────┘
@@ -47,7 +47,7 @@ is made at one line in `compile-lib.ts`, on `CompileOptions.backend`.
 |---|---|
 | `opcodes.ts` | the instruction set, operand encodings, and program format |
 | `vm-compile.ts` | ANF → bytecode |
-| `interp-of-pyret.ts` | wraps the bytecode in the standard module record (`js-of-pyret`'s counterpart) |
+| `vm-of-pyret.ts` | wraps the bytecode in the standard module record (`js-of-pyret`'s counterpart) |
 | `disasm.ts` | disassembler and bytecode verifier |
 | `../../../js/base/pyret-vm.js` | the machine |
 
@@ -174,18 +174,18 @@ value fails the way generated code's `typeof f.app !== "function"` fails.
 
 | target | what it covers |
 |---|---|
-| `make interp-unit-test` | the opcode table and program format are stated once for the emitter and once for the machine; this asserts they agree, walks every function of the compiled trove with the verifier, and checks no module reads a letrec cell before its straight-line assignment |
-| `make interp-parity-test` | every program in `tests/programs/` and `tests/interp-programs/` built **both ways with the same front end**, requiring identical stdout/stderr and exit codes. Since parsing, scope resolution, desugaring, ANF and the type checker are shared, any difference is a back-end difference. A program that fails to compile never reaches a back end, so only the `err-*.arr` programs (which exist to pin error rendering) are allowed to take that path — anything else that stops at a compile error is reported as a failure rather than as matching error text |
-| `make interp-pyret-test` | `tests/pyret/main2.arr` — the language/runtime suite, interpreted |
-| `make all-interp-pyret-test` | `tests/all.arr`, the counterpart of `all-pyret-test` / `all-ts-pyret-test` |
-| `make interp-repl-test` | `repl.ts` against a real in-process load-lib runtime, with the interactions compiled to bytecode — the chaining across interactions is the point, since each one instantiates a fresh module into a shared realm |
-| `make interp-io-test` | the io tests: stdin, exit codes, network imports — i.e. the `pauseStack` path, which on the machine means suspending and resuming an interpreted stack |
-| `make interp-serve-test` | the npm CLI's `pyret --backend interp` compile server, including running the standalone it produces |
-| `make interp-test` | all of the above |
+| `make vm-unit-test` | the opcode table and program format are stated once for the emitter and once for the machine; this asserts they agree, walks every function of the compiled trove with the verifier, and checks no module reads a letrec cell before its straight-line assignment |
+| `make vm-parity-test` | every program in `tests/programs/` and `tests/vm-programs/` built **both ways with the same front end**, requiring identical stdout/stderr and exit codes. Since parsing, scope resolution, desugaring, ANF and the type checker are shared, any difference is a back-end difference. A program that fails to compile never reaches a back end, so only the `err-*.arr` programs (which exist to pin error rendering) are allowed to take that path — anything else that stops at a compile error is reported as a failure rather than as matching error text |
+| `make vm-pyret-test` | `tests/pyret/main2.arr` — the language/runtime suite, interpreted |
+| `make all-vm-pyret-test` | `tests/all.arr`, the counterpart of `all-pyret-test` / `all-ts-pyret-test` |
+| `make vm-repl-test` | `repl.ts` against a real in-process load-lib runtime, with the interactions compiled to bytecode — the chaining across interactions is the point, since each one instantiates a fresh module into a shared realm |
+| `make vm-io-test` | the io tests: stdin, exit codes, network imports — i.e. the `pauseStack` path, which on the machine means suspending and resuming an interpreted stack |
+| `make vm-serve-test` | the npm CLI's `pyret --backend vm` compile server, including running the standalone it produces |
+| `make vm-test` | all of the above |
 
 ## Speed
 
-`src/ts-compiler/tests/interp-bench.js` builds each `pitometer/programs`
+`src/ts-compiler/tests/vm-bench.js` builds each `pitometer/programs`
 benchmark with both back ends and times the two standalones alternately, so
 a noisy stretch of the machine hits both sides equally. On the benchmarks
 that run long enough for the measurement to mean anything (process startup
@@ -193,7 +193,7 @@ and module loading otherwise dominate, and are not even the same on both
 sides — bytecode loads *faster* than generated JavaScript, so the empty
 program starts ~25% quicker under the interpreter):
 
-| benchmark | js | interp | |
+| benchmark | js | vm | |
 |---|---:|---:|---:|
 | propcheck | 17.5s | 18.5s | ×1.06 |
 | recursion-triangle-annotated-2000000 | 1.29s | 1.37s | ×1.06 |
@@ -229,14 +229,14 @@ monomorphic (no measurable effect).
 
 ## Two things that differ, and why
 
-1. **A separate compiled-module cache** (`compiled-interp/`,
-   `tests/interp-compiled/`). A cached module records which back end
+1. **A separate compiled-module cache** (`compiled-vm/`,
+   `tests/vm-compiled/`). A cached module records which back end
    produced it only by which directory it lives in, so the two must not
    share one. Every emitted program also carries the bytecode format
    version, and the machine refuses one it does not recognize, so a stale
    cache fails loudly instead of being misread.
-2. **A separate requirejs config** (`standalone-config-interp.json`,
-   and `node_modules-config-interp.json` for the npm package). It is the
+2. **A separate requirejs config** (`standalone-config-vm.json`,
+   and `node_modules-config-vm.json` for the npm package). It is the
    ordinary one plus a single raw-js entry: the machine. Interpreted modules
    name it as their one `nativeRequire`, which is the long-standing way a
    compiled module asks for a JS dependency — and keeping it there rather

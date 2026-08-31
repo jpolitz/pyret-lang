@@ -2,7 +2,7 @@
 
 A handoff note for whoever picks this up next. It assumes no memory of the
 work that built the interpreter — start here, then read
-`src/ts-compiler/src/interp/README.md`.
+`src/ts-compiler/src/vm/README.md`.
 
 ## What exists
 
@@ -10,15 +10,15 @@ An interpreter back end for the Pyret compiler, selected with a flag and
 otherwise a drop-in for the JavaScript code generator:
 
 ```
-node build/ts-compiler/pyret.js --backend interp --build-runnable foo.arr ...
+node build/ts-compiler/pyret.js --backend vm --build-runnable foo.arr ...
 ```
 
 | file | role |
 |---|---|
-| `src/ts-compiler/src/interp/opcodes.ts` | instruction set, operand encoding, program format, `FORMAT_VERSION` |
-| `src/ts-compiler/src/interp/vm-compile.ts` | ANF → bytecode |
-| `src/ts-compiler/src/interp/interp-of-pyret.ts` | wraps bytecode in the standard module record |
-| `src/ts-compiler/src/interp/disasm.ts` | disassembler + bytecode verifier |
+| `src/ts-compiler/src/vm/opcodes.ts` | instruction set, operand encoding, program format, `FORMAT_VERSION` |
+| `src/ts-compiler/src/vm/vm-compile.ts` | ANF → bytecode |
+| `src/ts-compiler/src/vm/vm-of-pyret.ts` | wraps bytecode in the standard module record |
+| `src/ts-compiler/src/vm/disasm.ts` | disassembler + bytecode verifier |
 | `src/js/base/pyret-vm.js` | the machine (`runMachine` is the dispatch loop) |
 
 It is green: `tests/all.arr` passes in full (13,467 tests, same count as the
@@ -48,7 +48,7 @@ That megamorphic keyed load is `val.dict[field]` — object dicts have many
 shapes, so every field access and method lookup pays for it. Both back ends
 pay it; only the interpreter can memoize per site.
 
-Static opcode mix over the compiled trove (`tests/interp-compiled`, 6,935
+Static opcode mix over the compiled trove (`tests/vm-compiled`, 6,935
 functions, 101,341 instructions):
 
 ```
@@ -161,23 +161,23 @@ Run these, in this order. Everything below is expected to pass before and
 after; a change that reddens any of them is not done.
 
 ```
-make interp-unit-test        # opcode table agreement + bytecode verifier
-make interp-parity-test      # 33 programs built BOTH ways, output must match
-make interp-pyret-test       # main2.arr, interpreted
-make all-interp-pyret-test   # tests/all.arr — 13,467 tests
-make interp-io-test          # stdin / exit codes / network: the pauseStack path
-make interp-repl-test
-make interp-serve-test
+make vm-unit-test        # opcode table agreement + bytecode verifier
+make vm-parity-test      # 33 programs built BOTH ways, output must match
+make vm-pyret-test       # main2.arr, interpreted
+make all-vm-pyret-test   # tests/all.arr — 13,467 tests
+make vm-io-test          # stdin / exit codes / network: the pauseStack path
+make vm-repl-test
+make vm-serve-test
 ```
 
-`interp-parity-test` is the load-bearing one: it builds each program with
-`--backend js` and `--backend interp` through the *same* front end and
+`vm-parity-test` is the load-bearing one: it builds each program with
+`--backend js` and `--backend vm` through the *same* front end and
 requires identical output, so any difference is a back-end difference.
 
 ### Benchmarking
 
 ```
-node src/ts-compiler/tests/interp-bench.js --build --runs=3 \
+node src/ts-compiler/tests/vm-bench.js --build --runs=3 \
   --filter='0_empty|propcheck|tree-set-grow-10000|list-set-const-1000000|boids-loop|recursion-triangle-2000000|edits'
 ```
 
@@ -191,7 +191,7 @@ sides equally. **Baseline to beat: ×1.07 aggregate, ×1.09 median.**
 
 - **Delete the compiled caches after any bytecode change.** A cached module
   records which back end and format produced it only by which directory it
-  is in. `rm -rf compiled-interp tests/interp-compiled build/ts-compiler/interp-bench/compiled-interp build/ts-compiler/interp-parity`.
+  is in. `rm -rf compiled-vm tests/vm-compiled build/ts-compiler/vm-bench/compiled-vm build/ts-compiler/vm-parity`.
   The `FORMAT_VERSION` check will fail loudly rather than misinterpret, but
   only after you have wasted a build.
 - **After editing `src/js/base/pyret-vm.js` by hand, copy it to
@@ -212,20 +212,20 @@ Only needed if you touch anything outside the machine, but for reference:
 `code.pyret.org` must be built (`npm run build && make web-ts`, with a
 `pyret` symlink to `lang/`), a server started on 4999, then from
 `browser-test/`: `BASE_URL=http://localhost:4999 node run.js --env=cpo
---compiler=interp`. Note that in the browser the builtins are precompiled
+--compiler=vm`. Note that in the browser the builtins are precompiled
 JavaScript and only the user's program is interpreted — the mixed case.
 
 ## Reading bytecode
 
 ```js
-const DIS = require('build/ts-compiler/interp/disasm.js');
+const DIS = require('build/ts-compiler/vm/disasm.js');
 const prog = DIS.extractProgram(fs.readFileSync('<compiled>/foo-<sha>-module.js', 'utf8'));
 console.log(DIS.disassemble(prog));
 ```
 
 `DIS.checkFunc` verifies an instruction stream; `DIS.readsBeforeAssignment`
 catches letrec cells read before they are assigned (the shape of a real bug
-that got past every runtime test). Both run in `make interp-unit-test` over
+that got past every runtime test). Both run in `make vm-unit-test` over
 the whole compiled trove — extend them rather than adding one-off scripts.
 
 ## If you want more after this

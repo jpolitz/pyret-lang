@@ -26,7 +26,7 @@ function start(config, onServerReady) {
   var defaultOpts = {
       PYRET: process.env.PYRET,
       // Alternative compiler flavors (opt-in; see editor.html): ts and
-      // interp share these assets. The ts asset URLs are never configured:
+      // vm share these assets. The ts asset URLs are never configured:
       // editor.html derives them client-side from PYRET's directory +
       // canonical names (every host publishes the three files side by
       // side). PYRET_TS below is the same rule applied early, so the
@@ -631,14 +631,14 @@ function start(config, onServerReady) {
 
   app.get("/editor", function(req, res) {
     // The compiler flavor can be chosen per request
-    // (?compiler=ts|interp|pyret), falling back to the CPO_COMPILER env
+    // (?compiler=ts|vm|pyret), falling back to the CPO_COMPILER env
     // default. Resolving it here (in addition to the client-side check in
     // editor.html) keeps the preload link and window.PYRET pointing at the
     // jarr that will actually load, so the stock jarr isn't downloaded
-    // pointlessly. ts and interp load the same jarr and compiler bundle;
+    // pointlessly. ts and vm load the same jarr and compiler bundle;
     // the back end is chosen inside it.
     var compiler = req.query.compiler || defaultOpts.CPO_COMPILER;
-    var usesTsAssets = (compiler === "ts" || compiler === "interp");
+    var usesTsAssets = (compiler === "ts" || compiler === "vm");
     var compilerOpts = (usesTsAssets && defaultOpts.PYRET_TS)
       ? { PYRET: defaultOpts.PYRET_TS, CPO_COMPILER: compiler }
       : {};

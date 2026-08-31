@@ -2,14 +2,14 @@
 /*
  * run.js -- friendly CLI over the node:test suite.
  *
- *   node run.js --env=cpo|embed|embed-static|vscode|vscode-ovsx [--compiler=pyret|ts|interp] [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]
+ *   node run.js --env=cpo|embed|embed-static|vscode|vscode-ovsx [--compiler=pyret|ts|vm] [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]
  *
  * Examples:
  *   node run.js --env=embed --grep tables        # one feature, in the embed instance
  *   node run.js --env=cpo   --grep 'is-not'      # regex over test names
  *   node run.js --env=vscode                     # everything, in the vscode webview
  *   node run.js --env=cpo --compiler=ts          # same suite, on the TS-compiler flavor
- *   node run.js --env=cpo --compiler=interp      # same suite, on the interpreter
+ *   node run.js --env=cpo --compiler=vm      # same suite, on the interpreter
  *
  * --compiler selects which compiler backend the environment loads (the
  * editor's ?compiler= flavor; default pyret). It maps to PYRET_COMPILER,
@@ -26,7 +26,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const KNOWN_FLAGS = ["env", "grep", "suites", "reporter", "compiler"];
-const USAGE = "usage: node run.js --env=cpo|embed|embed-static|vscode|vscode-ovsx [--compiler=pyret|ts|interp] [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]";
+const USAGE = "usage: node run.js --env=cpo|embed|embed-static|vscode|vscode-ovsx [--compiler=pyret|ts|vm] [--grep=<regex>] [--suites=all|a,b] [--reporter=spec|tap|dot]";
 
 function die(msg) {
   console.error(msg);
@@ -70,8 +70,8 @@ const suitesArg = arg("suites");
 const suites = suitesArg === undefined ? "all" : suitesArg;
 const reporter = arg("reporter") || "spec";
 const compiler = arg("compiler") || process.env.PYRET_COMPILER || "pyret";
-if (!["pyret", "ts", "interp"].includes(compiler)) {
-  console.error("--compiler must be pyret, ts, or interp");
+if (!["pyret", "ts", "vm"].includes(compiler)) {
+  console.error("--compiler must be pyret, ts, or vm");
   process.exit(2);
 }
 

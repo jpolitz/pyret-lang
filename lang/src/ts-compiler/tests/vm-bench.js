@@ -1,16 +1,16 @@
 /*
- * interp-bench.js -- run the pitometer programs on both back ends and report
+ * vm-bench.js -- run the pitometer programs on both back ends and report
  * the ratio.
  *
  * The comparison that matters for the interpreter is against the stock
  * backend on the same machine, same runtime, same program, so this builds
  * each benchmark twice with the one compiler (--backend js vs
- * --backend interp) and times the standalones. Startup is measured
+ * --backend vm) and times the standalones. Startup is measured
  * separately (0_empty.arr) and subtracted, because for the short benchmarks
  * it dominates and is identical in both.
  *
  * Usage, from lang/:
- *   node src/ts-compiler/tests/interp-bench.js [--runs=3] [--filter=regex] [--build]
+ *   node src/ts-compiler/tests/vm-bench.js [--runs=3] [--filter=regex] [--build]
  *
  * --build rebuilds the standalones (needed the first time and after any
  * compiler or machine change); without it, existing ones are reused.
@@ -21,7 +21,7 @@ const cp = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..', '..', '..');
 const PROGRAMS = path.join(ROOT, 'pitometer', 'programs');
-const WORK = path.join(ROOT, 'build', 'ts-compiler', 'interp-bench');
+const WORK = path.join(ROOT, 'build', 'ts-compiler', 'vm-bench');
 const PYRET = path.join(ROOT, 'build', 'ts-compiler', 'pyret.js');
 
 function arg(name, dflt) {
@@ -43,9 +43,9 @@ const BACKENDS = {
     config: 'src/scripts/standalone-configA.json',
     compiled: path.join(WORK, 'compiled-js'),
   },
-  interp: {
-    config: 'src/scripts/standalone-config-interp.json',
-    compiled: path.join(WORK, 'compiled-interp'),
+  vm: {
+    config: 'src/scripts/standalone-config-vm.json',
+    compiled: path.join(WORK, 'compiled-vm'),
   },
 };
 
@@ -82,11 +82,11 @@ function once(jarr) {
 // The two builds are timed ALTERNATELY rather than in two blocks, so that a
 // noisy stretch of the machine hits both sides equally; the reported number
 // for each is the minimum over the reps.
-function timePair(jsJarr, interpJarr) {
+function timePair(jsJarr, vmJarr) {
   let bestJs = Infinity, bestIn = Infinity;
   for (let i = 0; i < RUNS; i++) {
     const j = once(jsJarr);
-    const n = once(interpJarr);
+    const n = once(vmJarr);
     if (j < bestJs) { bestJs = j; }
     if (n < bestIn) { bestIn = n; }
   }
@@ -109,43 +109,43 @@ const programs = all.filter((f) => FILTER.test(f));
 
 // Startup floor: an empty program, measured on both back ends.
 const floor = {};
-for (const backend of ['js', 'interp']) {
+for (const backend of ['js', 'vm']) {
   floor[backend] = timeRun(build(path.join(PROGRAMS, '0_empty.arr'), backend));
 }
-console.log(`startup floor: js ${floor.js.toFixed(0)}ms, interp ${floor.interp.toFixed(0)}ms\n`);
+console.log(`startup floor: js ${floor.js.toFixed(0)}ms, vm ${floor.vm.toFixed(0)}ms\n`);
 
 const rows = [];
 for (const f of programs) {
   if (f === '0_empty.arr') { continue; }
   const prog = path.join(PROGRAMS, f);
-  let jsJarr, interpJarr;
+  let jsJarr, vmJarr;
   try {
     jsJarr = build(prog, 'js');
-    interpJarr = build(prog, 'interp');
+    vmJarr = build(prog, 'vm');
   } catch (e) {
     console.log(`${f.padEnd(42)} SKIP (${String(e.message).split('\n')[0]})`);
     continue;
   }
-  const [jsRaw, inRaw] = timePair(jsJarr, interpJarr);
+  const [jsRaw, inRaw] = timePair(jsJarr, vmJarr);
   const jsMs = jsRaw - floor.js;
-  const inMs = inRaw - floor.interp;
+  const inMs = inRaw - floor.vm;
   // Below the noise floor the ratio is meaningless (both numbers are
   // startup jitter), so such programs are reported but not scored.
   const scored = jsMs >= NOISE_MS && inMs >= NOISE_MS;
   const ratio = inMs / jsMs;
-  if (scored) { rows.push({ name: f, js: jsMs, interp: inMs, ratio }); }
+  if (scored) { rows.push({ name: f, js: jsMs, vm: inMs, ratio }); }
   console.log(`${f.padEnd(42)} js ${jsMs.toFixed(0).padStart(7)}ms  ` +
-    `interp ${inMs.toFixed(0).padStart(7)}ms  ` +
+    `vm ${inMs.toFixed(0).padStart(7)}ms  ` +
     (scored ? `x${ratio.toFixed(2)}` : `(under ${NOISE_MS}ms; not scored)`));
 }
 
 if (rows.length > 0) {
   const totalJs = rows.reduce((a, r) => a + r.js, 0);
-  const totalIn = rows.reduce((a, r) => a + r.interp, 0);
+  const totalIn = rows.reduce((a, r) => a + r.vm, 0);
   const ratios = rows.map((r) => r.ratio).sort((a, b) => a - b);
   const median = ratios[Math.floor(ratios.length / 2)];
   console.log('');
-  console.log(`total: js ${totalJs.toFixed(0)}ms, interp ${totalIn.toFixed(0)}ms ` +
+  console.log(`total: js ${totalJs.toFixed(0)}ms, vm ${totalIn.toFixed(0)}ms ` +
     `(x${(totalIn / totalJs).toFixed(2)} aggregate, x${median.toFixed(2)} median)`);
   const worst = rows.slice().sort((a, b) => b.ratio - a.ratio).slice(0, 5);
   console.log('slowest relative: ' +

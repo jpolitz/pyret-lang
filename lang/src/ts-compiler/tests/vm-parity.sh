@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Back-end parity: build each program in tests/programs/ twice with the
 # SAME compiler front end -- once with `--backend js` (the code generator)
-# and once with `--backend interp` (bytecode for the Pyret VM) -- run both
+# and once with `--backend vm` (bytecode for the Pyret VM) -- run both
 # standalones, and require identical stdout/stderr and exit codes.
 #
 # This is the interpreter's direct behavioral coverage. Because both runs
@@ -10,7 +10,7 @@
 # machine: value representation, evaluation order, arity/annotation
 # checking, check-block results, error rendering, exit codes.
 #
-# Run from lang/: bash src/ts-compiler/tests/interp-parity.sh
+# Run from lang/: bash src/ts-compiler/tests/vm-parity.sh
 
 set -u
 cd "$(dirname "$0")/../../.."   # lang/
@@ -19,8 +19,8 @@ NODE="node --max-old-space-size=8192"
 PYRET=build/ts-compiler/pyret.js
 PROGRAMS_DIR=src/ts-compiler/tests/programs
 # Programs written for this test specifically; see that directory's README.
-INTERP_PROGRAMS_DIR=src/ts-compiler/tests/interp-programs
-WORK=build/ts-compiler/interp-parity
+INTERP_PROGRAMS_DIR=src/ts-compiler/tests/vm-programs
+WORK=build/ts-compiler/vm-parity
 COMMON_OPTS=(--builtin-js-dir src/js/trove/
              --builtin-arr-dir src/arr/trove/
              --deps-file build/phaseA/bundled-node-compile-deps.js
@@ -43,7 +43,7 @@ run_one() {
     done < "$opts_file"
   fi
 
-  local dir_j="$WORK/$base-js" dir_i="$WORK/$base-interp"
+  local dir_j="$WORK/$base-js" dir_i="$WORK/$base-vm"
   mkdir -p "$dir_j" "$dir_i"
 
   $NODE $PYRET "${COMMON_OPTS[@]}" ${extra_opts[@]+"${extra_opts[@]}"} \
@@ -54,15 +54,15 @@ run_one() {
         > "$dir_j/compile.out" 2>&1
   local cstat_j=$?
   $NODE $PYRET "${COMMON_OPTS[@]}" ${extra_opts[@]+"${extra_opts[@]}"} \
-        --backend interp \
-        --require-config src/scripts/standalone-config-interp.json \
+        --backend vm \
+        --require-config src/scripts/standalone-config-vm.json \
         --compiled-dir "$dir_i/compiled" \
         --build-runnable "$prog" --outfile "$dir_i/$base.jarr" \
         > "$dir_i/compile.out" 2>&1
   local cstat_i=$?
 
   if [ "$cstat_j" -ne "$cstat_i" ]; then
-    echo "FAIL $base: compile exit codes differ (js=$cstat_j interp=$cstat_i)"
+    echo "FAIL $base: compile exit codes differ (js=$cstat_j vm=$cstat_i)"
     return 1
   fi
 
@@ -99,7 +99,7 @@ run_one() {
   local rstat_i=$?
 
   if [ "$rstat_j" -ne "$rstat_i" ]; then
-    echo "FAIL $base: run exit codes differ (js=$rstat_j interp=$rstat_i)"
+    echo "FAIL $base: run exit codes differ (js=$rstat_j vm=$rstat_i)"
     return 1
   fi
   if ! diff -u "$dir_j/run.out" "$dir_i/run.out" > "$WORK/$base.run.diff"; then
@@ -130,7 +130,7 @@ for prog in "${programs[@]}"; do
 done
 
 echo
-echo "interp parity: $pass passed, $fail failed"
+echo "vm parity: $pass passed, $fail failed"
 if [ "$fail" -ne 0 ]; then
   echo "failed: ${failed_programs[*]}"
   exit 1

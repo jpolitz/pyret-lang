@@ -16,7 +16,7 @@ const { findEditorFrame } = require("../shared/find-frame");
 const { resourceScope } = require("../shared/resource-scope");
 
 const VSCODE_DIR = path.resolve(__dirname, "..", "..", "vscode");
-// PYRET_COMPILER=ts|interp opens the workspace whose .vscode/settings.json
+// PYRET_COMPILER=ts|vm opens the workspace whose .vscode/settings.json
 // sets "pyret-parley.compiler" to that value, so the webview boots that
 // flavor of the editor; the default workspace leaves the setting alone.
 const COMPILER = process.env.PYRET_COMPILER || "pyret";

@@ -456,10 +456,10 @@ $(CPOGZ): $(CPOMAIN)
 # interpreter flavor. Builds a second jarr (cpo-main-ts.jarr, no
 # Pyret-hosted compiler modules) plus a browser bundle of
 # lang/src/ts-compiler. The editor page selects between flavors via
-# ?compiler=ts / ?compiler=interp or CPO_COMPILER (see src/web/editor.html
+# ?compiler=ts / ?compiler=vm or CPO_COMPILER (see src/web/editor.html
 # and src/server.js).
 #
-# ts and interp share every artifact here: same jarr, same compiler bundle.
+# ts and vm share every artifact here: same jarr, same compiler bundle.
 # They differ only in the back end the bundled compiler uses, which
 # cpo-main-ts.js reads off CPO_COMPILER. That is why this jarr is built
 # with cpo-config-ts.json rather than cpo-config.json -- the one extra

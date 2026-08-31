@@ -62,7 +62,7 @@ jobs:
     - name: compile-server test
       run: make ts-serve-test
 
-  interp-suite:
+  vm-suite:
     name: Pyret test suite, run by the interpreter back end
 
     runs-on: ubuntu-latest
@@ -87,28 +87,28 @@ jobs:
     # and once for the machine; this asserts they agree, and verifies every
     # emitted instruction stream with the disassembler.
     - name: unit tests
-      run: make interp-unit-test
+      run: make vm-unit-test
 
     # Every parity program built BOTH ways with the same front end, output
     # required identical. Since parsing/scope/desugar/ANF/type-check are
     # shared, a difference here is a back-end difference.
     - name: back-end parity
-      run: make interp-parity-test
+      run: make vm-parity-test
 
     # The same tests/all.arr the `build` and `ts-suite` jobs run, this time
     # with every module -- trove included -- executed as bytecode.
     - name: run tests
-      run: make all-interp-pyret-test
+      run: make all-vm-pyret-test
 
     # stdin, exit codes and network imports: the pauseStack path, which on
     # the machine means suspending and resuming an interpreted stack.
     - name: io tests
-      run: make interp-io-test
+      run: make vm-io-test
 
-    # The npm CLI's `pyret --backend interp` compile server, including
+    # The npm CLI's `pyret --backend vm` compile server, including
     # running the standalone it produces.
     - name: compile-server test
-      run: make interp-serve-test
+      run: make vm-serve-test
 
   bootstrap-converge:
     name: bootstrap convergence (.arr == TS, byte-identical)

@@ -11,9 +11,9 @@ Pyret-hosted compiler's.
 ## Back ends
 
 Two back ends share this front end. `--backend js` (the default) is the
-port of `anf-loop-compiler`: it generates JavaScript. `--backend interp`
+port of `anf-loop-compiler`: it generates JavaScript. `--backend vm`
 emits bytecode for a register machine instead, and is documented in
-`src/interp/README.md`. They diverge at exactly one line of
+`src/vm/README.md`. They diverge at exactly one line of
 `compile-lib.ts` and produce the same module format, so a program can mix
 modules built by either — which is what lets code.pyret.org run the
 interpreter over precompiled builtins.
@@ -33,9 +33,9 @@ interpreter over precompiled builtins.
 - Runtime-independent JS is reused, not ported: `pyret-tokenizer.js`, the
   generated `pyret-parser.js`, `lib/jglr/*`, `js-numbers.js` (loaded via
   `src/interop/amd.ts`), plus the npm `source-map` and `ws` packages.
-- `src/interp/*.ts` — the interpreter back end (bytecode emitter,
+- `src/vm/*.ts` — the interpreter back end (bytecode emitter,
   disassembler, and the module wrapper); the machine it targets is
-  `src/js/base/pyret-vm.js`. See `src/interp/README.md`.
+  `src/js/base/pyret-vm.js`. See `src/vm/README.md`.
 - `CONVENTIONS.md` — the porting rules (data representation, visitors,
   Option/List/StringDict mappings, fidelity requirements).
 - `tests/` — unit tests, the parity harness, and its test programs.
@@ -55,7 +55,7 @@ interpreter over precompiled builtins.
 | `make ts-io-test` | The io-tests, pointed at this compiler. |
 | `make all-ts-pyret-test` | Builds `tests/all.arr` (main2 + type-check + regression + lib-test) with the TS compiler and runs it. The counterpart of `make all-pyret-test` on the .arr side. |
 | `make ts-test` | All of the above. |
-| `make interp-test` | The interpreter back end's suite (`interp-unit-test`, `interp-parity-test`, `interp-serve-test`, `all-interp-pyret-test`, `interp-io-test`); see `src/interp/README.md`. |
+| `make vm-test` | The interpreter back end's suite (`vm-unit-test`, `vm-parity-test`, `vm-serve-test`, `all-vm-pyret-test`, `vm-io-test`); see `src/vm/README.md`. |
 | `make bootstrap-converge` | Builds both bootstrap chains and asserts all four standalones are one byte-identical fixpoint (see below). |
 | `make ts-clean` | Removes TS build outputs and caches. |
 

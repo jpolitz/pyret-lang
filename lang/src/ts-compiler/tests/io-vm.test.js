@@ -1,10 +1,10 @@
 // Copy of tests/io-tests/io.test.js pointed at the interpreter back end
-// (--backend interp), with its own compiled cache and outfile so it can
+// (--backend vm), with its own compiled cache and outfile so it can
 // coexist with the js-backend suites. The io tests are where stdin/stdout,
 // process exit codes, and network imports are exercised end to end, which
 // on the machine means the pauseStack path: every one of those suspends
 // the interpreted stack and resumes it.
-// Run from lang/: npm exec --no -- jest src/ts-compiler/tests/io-interp.test.js
+// Run from lang/: npm exec --no -- jest src/ts-compiler/tests/io-vm.test.js
 const glob = require('glob');
 const fs = require('fs');
 const cp = require('child_process');
@@ -12,7 +12,7 @@ const assert = require('assert');
 
 const COMPILER_TIMEOUT = 60000; // ms, for each compiler run (including startup)
 const RUN_TIMEOUT = 60000; // ms, for each program execution
-const COMPILED_CODE_PATH = "compiled-interp.jarr";
+const COMPILED_CODE_PATH = "compiled-vm.jarr";
 const SUCCESS_EXIT_CODE = 0;
 const EMPTY_MESSAGE = "";
 
@@ -91,15 +91,15 @@ describe("IO Tests (interpreter back end)", () => {
       test(`it should return io that is expected: ${stdioExpected}`, () => {  
         const args = [
                         "build/ts-compiler/pyret.js",
-            "--backend", "interp",
+            "--backend", "vm",
             "--build-runnable", f, 
             "--outfile", COMPILED_CODE_PATH, 
             "--builtin-js-dir", "src/js/trove", 
             "--builtin-arr-dir","src/arr/trove", 
-            "--require-config","src/scripts/standalone-config-interp.json",
-            "--compiled-dir", "tests/interp-compiled/"
+            "--require-config","src/scripts/standalone-config-vm.json",
+            "--compiled-dir", "tests/vm-compiled/"
           ].concat(extraArgs);
-        cp.spawnSync("bash", ["-c", "rm -rf tests/interp-compiled/library-code* tests/interp-compiled/test-*"]);
+        cp.spawnSync("bash", ["-c", "rm -rf tests/vm-compiled/library-code* tests/vm-compiled/test-*"]);
         const compileProcess = cp.spawnSync(
           "node",
           args,

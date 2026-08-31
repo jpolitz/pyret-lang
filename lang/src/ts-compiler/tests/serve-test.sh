@@ -18,21 +18,21 @@
 # compiled-read-only dir (server.ts), which is how the npm installation
 # ships precompiled builtins.
 #
-# The same script covers `pyret --backend interp`: pass the back end as the
+# The same script covers `pyret --backend vm`: pass the back end as the
 # first argument (default js). That path differs in exactly two respects --
 # the compile option the client sends, and the requirejs config the server
 # defaults to (which has to bundle the Pyret VM) -- and both are exercised
 # end to end here, since step 2 RUNS the standalone the server produced.
 #
 # Run from the pyret-lang root (lang/):
-#   bash src/ts-compiler/tests/serve-test.sh [js|interp]
+#   bash src/ts-compiler/tests/serve-test.sh [js|vm]
 
 set -u
 cd "$(dirname "$0")/../../.."   # lang/
 
 BACKEND="${1:-js}"
-if [ "$BACKEND" != "js" ] && [ "$BACKEND" != "interp" ]; then
-  echo "usage: serve-test.sh [js|interp]"
+if [ "$BACKEND" != "js" ] && [ "$BACKEND" != "vm" ]; then
+  echo "usage: serve-test.sh [js|vm]"
   exit 2
 fi
 
@@ -76,8 +76,8 @@ step() { echo "--- $1"; }
 
 export SMOKE_COMPILED_DIR="$PWD/$WORK/compiled"
 export SMOKE_BACKEND="$BACKEND"
-if [ "$BACKEND" = "interp" ]; then
-  export SMOKE_REQUIRE_CONFIG="$PWD/src/scripts/standalone-config-interp.json"
+if [ "$BACKEND" = "vm" ]; then
+  export SMOKE_REQUIRE_CONFIG="$PWD/src/scripts/standalone-config-vm.json"
 fi
 
 step "good compile"

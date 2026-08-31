@@ -12,8 +12,8 @@ const compilerPath = path.join(__dirname, "pyret-lang", "build", "phaseA", "pyre
 // The TypeScript port of the compiler (pyret-lang/src/ts-compiler). Present
 // when the package was built with PYRET_NPM_TS=1 (see build.sh); selected by
 // --backend ts or PYRET_COMPILER=ts, the CLI analogue of code.pyret.org's
-// ?compiler=ts flag. --backend interp runs the same binary with its
-// interpreter back end (the CLI analogue of ?compiler=interp), so it needs
+// ?compiler=ts flag. --backend vm runs the same binary with its
+// interpreter back end (the CLI analogue of ?compiler=vm), so it needs
 // the same build.
 const tsCompilerPath = path.join(__dirname, "pyret-lang", "build", "ts-compiler", "pyret.js");
 
@@ -133,8 +133,8 @@ const usages = [
       },
       {
         name: 'backend',
-        typeLabel: "{underline pyret|ts|interp}",
-        description: "Which compiler backend to use (default pyret, or the PYRET_COMPILER environment variable). {bold ts} selects the TypeScript port of the compiler and {bold interp} selects that compiler's interpreter back end, which runs your program on the Pyret VM instead of generating JavaScript; both need an installation built with them. Each backend keeps its own compile server and socket. An explicit {bold --compiler} path overrides this choice."
+        typeLabel: "{underline pyret|ts|vm}",
+        description: "Which compiler backend to use (default pyret, or the PYRET_COMPILER environment variable). {bold ts} selects the TypeScript port of the compiler and {bold vm} selects that compiler's interpreter back end, which runs your program on the Pyret VM instead of generating JavaScript; both need an installation built with them. Each backend keeps its own compile server and socket. An explicit {bold --compiler} path overrides this choice."
       },
     ]
   },
@@ -284,14 +284,14 @@ catch(e) {
 }
 
 const backend = options.client.backend;
-if(backend !== "pyret" && backend !== "ts" && backend !== "interp") {
-  console.error("--backend must be pyret, ts, or interp (got " + backend + ")");
+if(backend !== "pyret" && backend !== "ts" && backend !== "vm") {
+  console.error("--backend must be pyret, ts, or vm (got " + backend + ")");
   process.exit(1);
 }
-// `interp` is the TypeScript compiler driving its interpreter back end, so
+// `vm` is the TypeScript compiler driving its interpreter back end, so
 // it resolves to the same binary; what distinguishes it is the option the
 // server is asked to compile with (below), and its own socket/cache.
-const usesTsBinary = (backend === "ts" || backend === "interp");
+const usesTsBinary = (backend === "ts" || backend === "vm");
 if(!options.client.compiler) {
   const resolved = usesTsBinary ? tsCompilerPath : compilerPath;
   options.client.compiler = resolved;
@@ -304,7 +304,7 @@ if(usesTsBinary && !fs.existsSync(options.client.compiler)) {
 }
 // The server reads its back end out of the compile options, which is the
 // only part of `options` that crosses the socket.
-options["pyret-options"]["backend"] = (backend === "interp") ? "interp" : "js";
+options["pyret-options"]["backend"] = (backend === "vm") ? "vm" : "js";
 
 // Default behavior: use ".jarr" to replace ".arr"
 if(!options["pyret-options"]["outfile"] && options["pyret-options"]["program"]) {

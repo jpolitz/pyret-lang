@@ -7,11 +7,11 @@
   <script>
   window.PYRET = "{{&PYRET}}"; window.PYRET_GZIPPED = "{{ PYRET_GZIPPED }}" === "true"; window.APP_NAME = "{{APP_NAME}}"; window.APP_DOMAIN = "{{APP_DOMAIN}}";
   // Opt-in alternative compiler flavors: chosen by ?compiler=ts or
-  // ?compiler=interp (or the server-side CPO_COMPILER env default). Both
+  // ?compiler=vm (or the server-side CPO_COMPILER env default). Both
   // swap in the cpo-main-ts jarr and load the TS compiler bundle; they
   // differ only in which back end that compiler uses for the user's
   // program -- generated JavaScript for ts, bytecode for the Pyret VM for
-  // interp (see cpo-main-ts.js, which reads CPO_COMPILER back). Default
+  // vm (see cpo-main-ts.js, which reads CPO_COMPILER back). Default
   // behavior is unchanged.
   //
   // The ts asset URLs are never configured -- they are derived from PYRET's
@@ -28,7 +28,7 @@
     var m = /[?&]compiler=([^&]*)/.exec(window.location.search);
     if(m) { window.CPO_COMPILER = decodeURIComponent(m[1]); }
     window.CPO_USES_TS_ASSETS =
-      (window.CPO_COMPILER === "ts" || window.CPO_COMPILER === "interp");
+      (window.CPO_COMPILER === "ts" || window.CPO_COMPILER === "vm");
     if(window.CPO_USES_TS_ASSETS && window.PYRET_TS) {
       window.PYRET = window.PYRET_TS;
       // In gzipped mode the host may serve assets without an executable MIME

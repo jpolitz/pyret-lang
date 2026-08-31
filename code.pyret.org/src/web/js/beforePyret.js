@@ -1522,7 +1522,7 @@ $(function() {
     // DecompressionStream, then run it from a Blob URL. The `error` handler
     // registered below (synchronously) fires before this async append resolves.
     //
-    // In the ts and interp flavors the compiler bundle has the same MIME
+    // In the ts and vm flavors the compiler bundle has the same MIME
     // problem (its <script src> in editor.html is skipped under
     // PYRET_GZIPPED) and, like the jarr, is gzip bytes at rest
     // (ts-compiler.gz.js) that this host serves without Content-Encoding --

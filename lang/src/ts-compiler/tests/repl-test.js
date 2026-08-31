@@ -1,7 +1,7 @@
 // REPL-library tests (node:test), driven by the REAL in-process load-lib runtime.
 //   node --test src/ts-compiler/tests/repl-test.js     (or `make ts-repl-test`)
-// PYRET_TEST_BACKEND=interp runs the same tests with the interpreter back end
-// (`make interp-repl-test`): same repl.ts, same load-lib realm, but the
+// PYRET_TEST_BACKEND=vm runs the same tests with the interpreter back end
+// (`make vm-repl-test`): same repl.ts, same load-lib realm, but the
 // interactions are bytecode. Chaining across interactions is where that
 // matters -- each one instantiates a fresh module into the same realm.
 // (node:test rather than jest because the in-process runtime needs requirejs,
@@ -21,8 +21,8 @@ const REPL = require(path.join(OUT, 'repl.js'));
 const CS = require(path.join(OUT, 'compile-structs.js'));
 const { makeHost } = require('./in-process-host.js');
 
-const BACKEND = process.env.PYRET_TEST_BACKEND === 'interp' ? 'interp' : 'js';
-const CACHE_DIR = BACKEND === 'interp' ? 'tests/interp-compiled' : 'tests/ts-compiled';
+const BACKEND = process.env.PYRET_TEST_BACKEND === 'vm' ? 'vm' : 'js';
+const CACHE_DIR = BACKEND === 'vm' ? 'tests/vm-compiled' : 'tests/ts-compiled';
 
 describe('repl (in-process load-lib, ' + BACKEND + ' back end)', () => {
   let host, X, repl, defs;

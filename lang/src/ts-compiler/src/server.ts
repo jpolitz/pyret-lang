@@ -106,7 +106,7 @@ async function compile(options: { [key: string]: any }): Promise<void> {
       // The npm client puts `backend` in the compile-options group so the
       // choice reaches here; each backend also keeps its own socket, so a
       // server started for one is never reused for the other.
-      backend: orElse(options, 'backend', 'js') === 'interp' ? 'interp' : 'js'
+      backend: orElse(options, 'backend', 'js') === 'vm' ? 'vm' : 'js'
     });
 }
 
@@ -283,8 +283,8 @@ export function serve(port: string, pyretDir: string): void {
     // Interpreted modules name the machine as their nativeRequire, so the
     // standalone has to bundle it: that is the only difference between the
     // two shipped requirejs configs.
-    const defaultConfig = orElse(opts, 'backend', 'js') === 'interp'
-      ? 'config-interp.json' : 'config.json';
+    const defaultConfig = orElse(opts, 'backend', 'js') === 'vm'
+      ? 'config-vm.json' : 'config.json';
     opts['require-config'] = orElse(opts, 'require-config',
       P.resolve(P.join(pyretDir, defaultConfig)));
     return compile(opts).then(() => {
