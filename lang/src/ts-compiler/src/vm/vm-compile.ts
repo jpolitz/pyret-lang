@@ -803,24 +803,34 @@ export class VMCompiler {
           emit(ctx, OP.OP_SELFTAIL, args.length, ...args);
           return;
         }
+        // The apploc flag: cont updates $al at split call sites but not at
+        // statically-flat ones (buildFlatApp) -- preLettable's condition.
+        const fv = e._fun;
+        const staticFlat =
+          (fv.$name === 'a-id' || fv.$name === 'a-id-safe-letrec') &&
+          isFunctionFlat(this.flatnessEnv, fv.id.key());
+        const lkOp = (this.locK(e.l) << 1) | (staticFlat ? 0 : 1);
         // Frame elision is structural: any call in return position leaves
         // the frame at its return label (elided at captures).
         if (this.properTailCalls && cont === RETURN) {
-          emit(ctx, OP.OP_TAILCALL, f, this.locK(e.l), args.length, ...args);
+          emit(ctx, OP.OP_TAILCALL, f, lkOp, args.length, ...args);
           // Reached only when the callee was JS-land: the machine parks
           // its result in the scratch slot and falls through to here.
           emit(ctx, OP.OP_RET, OP.vsLocal(ctx.scratch));
           return;
         }
-        emit(ctx, OP.OP_CALL, dest, f, this.locK(e.l), args.length, ...args);
+        emit(ctx, OP.OP_CALL, dest, f, lkOp, args.length, ...args);
         break;
       }
       case 'a-method-app': {
         const o = this.valSource(ctx, e.obj);
         const args = this.valSources(ctx, e.args);
         if (this.properTailCalls && cont === RETURN) { emit(ctx, OP.OP_SETRET); }
-        emit(ctx, OP.OP_METHCALL, dest, o, this.nameK(e.meth), this.locK(e.l),
-          args.length, ...args);
+        // cont updates $al only on the getColonField path (receiver not a
+        // plain identifier); the maybeMethodCall path leaves it stale.
+        const mflag = (e.obj.$name === 'a-id') ? 0 : 1;
+        emit(ctx, OP.OP_METHCALL, dest, o, this.nameK(e.meth),
+          (this.locK(e.l) << 1) | mflag, args.length, ...args);
         break;
       }
       case 'a-prim-app': {

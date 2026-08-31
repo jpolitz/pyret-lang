@@ -33,7 +33,15 @@
 
 // Bump when the bytecode format or opcode numbering changes; compiled
 // modules cached from an older VM are then rejected on load.
-export const FORMAT_VERSION = 4;
+//
+// Since version 5, the locK operand of CALL/TAILCALL/METHCALL is
+// (lk << 1) | alFlag: the machine always sets the frame's locK (error
+// attribution), and sets locKS -- the cont backend's stale $al shadow,
+// read by pause traces -- only when the flag is set (cont does not update
+// $al at statically-flat call sites or maybeMethodCall sites). PRIMAPP,
+// DOT, CASES, ANNCHECK, ANNCHECKV and TUPLECHK carry unshifted locKs and
+// always update both, matching where generated code assigns $al.
+export const FORMAT_VERSION = 5;
 
 // The AMD module name the emitted stub pulls the machine in from.
 export const VM_MODULE_NAME = 'pyret-base/js/pyret-vm';

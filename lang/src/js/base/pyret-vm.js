@@ -44,7 +44,7 @@
 define("pyret-base/js/pyret-vm", [], function() {
 
   // Must match src/ts-compiler/src/vm/opcodes.ts.
-  var FORMAT_VERSION = 4;
+  var FORMAT_VERSION = 5;
 
   var OPCODE_NAMES = [
     'MOVE', 'BOX', 'UNBOX', 'SETVAR', 'LETREC', 'MODREF', 'MODVARREF', 'ARRSET',
@@ -189,6 +189,11 @@ define("pyret-base/js/pyret-vm", [], function() {
     this.mod = null;
     this.dest = -1;
     this.locK = 0;
+    // The cont backend's $al shadow: updated only where generated code
+    // assigns its apploc (split calls, prims, dots, cases dispatch,
+    // annotation checks) -- deliberately staler than locK. Pause traces
+    // read this; error stacks read locK.
+    this.locKS = 0;
     // Set when this frame's remaining work is only "return the pending
     // call's value" -- the cont backend's step==retLabel. Elided at
     // capture events.
@@ -208,6 +213,7 @@ define("pyret-base/js/pyret-vm", [], function() {
     f.mod = mod;
     f.dest = dest;
     f.locK = fdef.l;
+    f.locKS = fdef.l;
     f.atRet = false;
     f.captured = false;
     return f;
@@ -533,9 +539,11 @@ define("pyret-base/js/pyret-vm", [], function() {
           case OP_CALL: {
             var d = code[pc++];
             var fnv = rd(code[pc++], f);
-            var lk = code[pc++];
+            var lkOp = code[pc++];
+            var lk = lkOp >> 1;
             var n = code[pc++];
             f.locK = lk;
+            if ((lkOp & 1) !== 0) { f.locKS = lk; }
             var pvm = (fnv === undefined || fnv === null) ? undefined : fnv.$pvm;
             if (pvm !== undefined) {
               var callee = pvm.f;
@@ -579,9 +587,11 @@ define("pyret-base/js/pyret-vm", [], function() {
 
           case OP_TAILCALL: {
             var fnv = rd(code[pc++], f);
-            var lk = code[pc++];
+            var lkOp = code[pc++];
+            var lk = lkOp >> 1;
             var n = code[pc++];
             f.locK = lk;
+            if ((lkOp & 1) !== 0) { f.locKS = lk; }
             var pvm = (fnv === undefined || fnv === null) ? undefined : fnv.$pvm;
             if (pvm !== undefined) {
               // The cont backend compiles a non-self tail call as an
@@ -683,9 +693,11 @@ define("pyret-base/js/pyret-vm", [], function() {
             var d = code[pc++];
             var obj = rd(code[pc++], f);
             var nameK = code[pc++];
-            var lk = code[pc++];
+            var lkOp = code[pc++];
+            var lk = lkOp >> 1;
             var n = code[pc++];
             f.locK = lk;
+            if ((lkOp & 1) !== 0) { f.locKS = lk; }
             var field = R.getColonFieldLoc(obj, names[nameK], locs[lk]);
             var isMeth = false;
             var pvm = undefined;
@@ -737,6 +749,7 @@ define("pyret-base/js/pyret-vm", [], function() {
             var lk = code[pc++];
             var n = code[pc++];
             f.locK = lk;
+            f.locKS = lk;
             f.pc = pc + n;
             st.resumeDest = d;
             ans = applyPrim(R, prim, code, pc, n, f);
@@ -813,6 +826,7 @@ define("pyret-base/js/pyret-vm", [], function() {
             var nameK = code[pc++];
             var lk = code[pc++];
             f.locK = lk;
+            f.locKS = lk;
             locals[d] = R.getFieldLoc(obj, names[nameK], locs[lk]);
             continue;
           }
@@ -863,6 +877,7 @@ define("pyret-base/js/pyret-vm", [], function() {
             var lk = code[pc++];
             var elseTarget = code[pc++];
             f.locK = lk;
+            f.locKS = lk;
             var target = table[v.$name];
             pc = (target === undefined) ? elseTarget : target;
             continue;
@@ -928,6 +943,7 @@ define("pyret-base/js/pyret-vm", [], function() {
             var v = rd(code[pc++], f);
             var lk = code[pc++];
             f.locK = lk;
+            f.locKS = lk;
             f.pc = pc;
             st.resumeDest = -1;
             ans = R._checkAnn(locs[lk], buildAnn(R, mod, annIdx, f), v);
@@ -940,6 +956,7 @@ define("pyret-base/js/pyret-vm", [], function() {
             var v = rd(code[pc++], f);
             var lk = code[pc++];
             f.locK = lk;
+            f.locKS = lk;
             f.pc = pc;
             st.resumeDest = -1;
             ans = R._checkAnn(locs[lk], annVal, v);
@@ -950,7 +967,10 @@ define("pyret-base/js/pyret-vm", [], function() {
           case OP_TUPLECHK: {
             var v = rd(code[pc++], f);
             var n = code[pc++];
-            R.checkTupleBind(v, n, locs[code[pc++]]);
+            var lk = code[pc++];
+            f.locK = lk;
+            f.locKS = lk;
+            R.checkTupleBind(v, n, locs[lk]);
             continue;
           }
 

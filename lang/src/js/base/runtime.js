@@ -3527,6 +3527,86 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
 
     var queuedRuns = [];
 
+    /*
+      Pause tracing (the vm correspondence oracle's data): when
+      PYRET_PAUSE_TRACE names a file, every capture reaching the
+      trampoline appends one line recording the captured stack --
+      innermost first, only 7-element srclocs, run-length compressed with
+      period <= 4. The emit logic is kept textually identical in
+      vm-runtime.js, so two runs correspond exactly when the two trace
+      files are byte-identical (diff is the comparator).
+    */
+    var PAUSE_TRACE_RECORD = null;
+    (function() {
+      if (typeof process === "undefined" || !process.env || !process.env.PYRET_PAUSE_TRACE) { return; }
+      var traceFile = process.env.PYRET_PAUSE_TRACE;
+      var capDepth = Number(process.env.PYRET_PAUSE_CAPTURE_DEPTH || 200000);
+      var pauses = 0;
+      var lines = [];
+      var fs = null;
+      function flush() {
+        if (lines.length === 0) { return; }
+        if (fs === null) { fs = require("fs"); fs.writeFileSync(traceFile, ""); }
+        fs.appendFileSync(traceFile, lines.join("\n") + "\n");
+        lines = [];
+      }
+      process.on("exit", function() {
+        lines.push("T pauses=" + pauses);
+        flush();
+      });
+      function fmtFrames(frames) {
+        var out = [];
+        var i = 0;
+        var n = frames.length;
+        while (i < n) {
+          var bestCover = 0, bestP = 1;
+          for (var p = 1; p <= 4 && i + 2 * p <= n; p++) {
+            var reps = 1;
+            while (i + (reps + 1) * p <= n) {
+              var same = true;
+              for (var k = 0; k < p; k++) {
+                if (frames[i + reps * p + k] !== frames[i + k]) { same = false; break; }
+              }
+              if (!same) { break; }
+              reps++;
+            }
+            if (reps > 1 && reps * p > bestCover) { bestCover = reps * p; bestP = p; }
+          }
+          if (bestCover > 0) {
+            var unit = frames.slice(i, i + bestP).join(" ~ ");
+            out.push(unit + " x" + (bestCover / bestP));
+            i += bestCover;
+          } else {
+            out.push(frames[i]);
+            i++;
+          }
+        }
+        return out.join(" ; ");
+      }
+      function recordPause(locsInnermostFirst) {
+        pauses++;
+        var frames = [];
+        var truncated = false;
+        for (var i = 0; i < locsInnermostFirst.length; i++) {
+          var l = locsInnermostFirst[i];
+          if (l instanceof Array && l.length === 7) {
+            if (frames.length < capDepth) { frames.push(l.join(":")); }
+            else { truncated = true; }
+          }
+        }
+        lines.push("P " + pauses + " n=" + frames.length + (truncated ? "!trunc" : "") +
+          " | " + fmtFrames(frames));
+        if (lines.length >= 5000) { flush(); }
+      }
+      PAUSE_TRACE_RECORD = function(theOneTrueStack, height) {
+        var out = [];
+        for (var i = height - 1; i >= 0; i--) {
+          out.push(theOneTrueStack[i].from);
+        }
+        recordPause(out);
+      };
+    })();
+
     function run(program, namespace, options, onDone) {
       // CONSOLE.log("In run2");
       if(RUN_ACTIVE) {
@@ -3729,6 +3809,7 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
     //              console.error(e.stack[i].vars.length + " width;" + e.stack[i].vars + "; from " + e.stack[i].from + "; frame " + theOneTrueStackHeight);
                   theOneTrueStack[theOneTrueStackHeight++] = val.stack[i];
                 }
+                if (PAUSE_TRACE_RECORD !== null) { PAUSE_TRACE_RECORD(theOneTrueStack, theOneTrueStackHeight); }
                 // console.log("The new stack height is ", theOneTrueStackHeight);
                 // console.log("theOneTrueStack = ", theOneTrueStack.slice(0, theOneTrueStackHeight).map(function(f) {
                 //   if (f && f.from) { return f.from.toString(); }
@@ -3766,6 +3847,7 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
               // CONSOLE.error(e.stack[i].vars.length + " width;" + e.stack[i].vars + "; from " + e.stack[i].from + "; frame " + theOneTrueStackHeight);
                 theOneTrueStack[theOneTrueStackHeight++] = e.stack[i];
               }
+              if (PAUSE_TRACE_RECORD !== null) { PAUSE_TRACE_RECORD(theOneTrueStack, theOneTrueStackHeight); }
               // CONSOLE.log("The new stack height is ", theOneTrueStackHeight);
               // CONSOLE.log("theOneTrueStack = ", theOneTrueStack.slice(0, theOneTrueStackHeight).map(function(f) {
               //   if (f && f.from) { return f.from.toString(); }
@@ -6582,6 +6664,35 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
             throw new Error("Method not in runtime already " + longName);
         }
         thisRuntime[nameMap[longName]] = thisRuntime[longName];
+    }
+
+
+    // Debug-only (PYRET_FUEL_DEBUG): turn GAS/RUNGAS into logging
+    // accessors so the two backends' fuel-event streams can be aligned
+    // while developing the pause-schedule oracle. Off unless set.
+    if (typeof process !== "undefined" && process.env && process.env.PYRET_FUEL_DEBUG) {
+      (function() {
+        var seq = 0;
+        function mk(name) {
+          var val = thisRuntime[name];
+          var lastGet = null;
+          Object.defineProperty(thisRuntime, name, {
+            get: function() { lastGet = val; return val; },
+            set: function(v) {
+              var kind = (lastGet !== null && v === lastGet - 1) ? "dec" : "set";
+              seq++;
+              var at = new Error().stack.split("\n").slice(2, 4).map(function(s) {
+                return s.replace(/.*at /, "").replace(/ \(.*\)/, "");
+              }).join("|");
+              process.stderr.write("FUEL " + seq + " " + name + " " + kind + " " + v + " @" + at + "\n");
+              lastGet = null;
+              val = v;
+            }
+          });
+        }
+        mk("GAS");
+        mk("RUNGAS");
+      })();
     }
 
     return thisRuntime;

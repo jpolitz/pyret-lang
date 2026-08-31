@@ -5,9 +5,10 @@ define("pyret-base/js/runtime",
    "pyret-base/js/runtime-util",
    "pyret-base/js/exn-stack-parser",
    "pyret-base/js/secure-loader",
+   "pyret-base/js/pyret-vm",
    "seedrandom",
    "js-sha256"],
-function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedrandom, sha) {
+function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, PVM, seedrandom, sha) {
   Error.stackTraceLimit = Infinity;
   var require = requirejs;
   var AsciiTable;
@@ -3432,12 +3433,96 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
     // pyret-vm.js across parks: at a capture event every live frame is
     // marked captured and at-return frames are elided, exactly as the cont
     // trampoline's stack-attach guard drops step==retLabel frames.
+    // VM_CHAIN_FLOOR is the current run()'s bottom: a nested run (execThunk)
+    // owns only the states above it, as the cont trampoline's nested run
+    // owns its own theOneTrueStack.
     var VM_STATE_CHAIN = [];
+    var VM_CHAIN_FLOOR = 0;
 
-    // Called at every pause, with a thunk enumerating the current logical
-    // stack; installed by the pause-trace infrastructure (M4), null
-    // otherwise.
+    /*
+      Pause tracing (the correspondence oracle's data): when
+      PYRET_PAUSE_TRACE names a file, every capture event and stack pause
+      appends one line recording the user-visible stack -- innermost
+      first, only 7-element srclocs (runtime helper frames elide on both
+      backends), run-length compressed with period <= 4. The emit logic is
+      kept textually identical in runtime.js, so two runs correspond
+      exactly when the two trace files are byte-identical (diff is the
+      comparator).
+    */
     var PAUSE_TRACE_HOOK = null;
+    (function() {
+      if (typeof process === "undefined" || !process.env || !process.env.PYRET_PAUSE_TRACE) { return; }
+      var traceFile = process.env.PYRET_PAUSE_TRACE;
+      var capDepth = Number(process.env.PYRET_PAUSE_CAPTURE_DEPTH || 200000);
+      var pauses = 0;
+      var lines = [];
+      var fs = null;
+      function flush() {
+        if (lines.length === 0) { return; }
+        if (fs === null) { fs = require("fs"); fs.writeFileSync(traceFile, ""); }
+        fs.appendFileSync(traceFile, lines.join("\n") + "\n");
+        lines = [];
+      }
+      process.on("exit", function() {
+        lines.push("T pauses=" + pauses);
+        flush();
+      });
+      function fmtFrames(frames) {
+        var out = [];
+        var i = 0;
+        var n = frames.length;
+        while (i < n) {
+          var bestCover = 0, bestP = 1;
+          for (var p = 1; p <= 4 && i + 2 * p <= n; p++) {
+            var reps = 1;
+            while (i + (reps + 1) * p <= n) {
+              var same = true;
+              for (var k = 0; k < p; k++) {
+                if (frames[i + reps * p + k] !== frames[i + k]) { same = false; break; }
+              }
+              if (!same) { break; }
+              reps++;
+            }
+            if (reps > 1 && reps * p > bestCover) { bestCover = reps * p; bestP = p; }
+          }
+          if (bestCover > 0) {
+            var unit = frames.slice(i, i + bestP).join(" ~ ");
+            out.push(unit + " x" + (bestCover / bestP));
+            i += bestCover;
+          } else {
+            out.push(frames[i]);
+            i++;
+          }
+        }
+        return out.join(" ; ");
+      }
+      function recordPause(locsInnermostFirst) {
+        pauses++;
+        var frames = [];
+        var truncated = false;
+        for (var i = 0; i < locsInnermostFirst.length; i++) {
+          var l = locsInnermostFirst[i];
+          if (l instanceof Array && l.length === 7) {
+            if (frames.length < capDepth) { frames.push(l.join(":")); }
+            else { truncated = true; }
+          }
+        }
+        lines.push("P " + pauses + " n=" + frames.length + (truncated ? "!trunc" : "") +
+          " | " + fmtFrames(frames));
+        if (lines.length >= 5000) { flush(); }
+      }
+      PAUSE_TRACE_HOOK = function() {
+        var out = [];
+        for (var i = VM_STATE_CHAIN.length - 1; i >= VM_CHAIN_FLOOR; i--) {
+          var st = VM_STATE_CHAIN[i];
+          for (var j = st.fp; j >= 0; j--) {
+            var f = st.frames[j];
+            out.push(f.mod.locs[f.locKS]);
+          }
+        }
+        recordPause(out);
+      };
+    })();
 
     /*
       One capture event: the promise counterpart of "a Cont reached iter".
@@ -3451,10 +3536,12 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
     function captureEventP() {
       CAPTURE_EPOCH++;
       thisRuntime.EXN_STACKHEIGHT = 0;
-      if (PAUSE_TRACE_HOOK !== null) { PAUSE_TRACE_HOOK(); }
       for (var i = 0; i < VM_STATE_CHAIN.length; i++) {
         VM_STATE_CHAIN[i].$captureFrames();
       }
+      // After the walk: the recorded stack must exclude the at-return
+      // frames the walk elided, as the cont backend's Cont does.
+      if (PAUSE_TRACE_HOOK !== null) { PAUSE_TRACE_HOOK(); }
       thisRuntime.GAS = nextInitialGas();
       thisRuntime.RUNGAS = nextInitialRunGas();
       var yieldP = CUR_SYNC ? Promise.resolve() : macroYieldP();
@@ -3517,36 +3604,34 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
       }
       var funRes = fun();
       if (isThenable(funRes)) {
-        var ep = CAPTURE_EPOCH;
-        return funRes.then(function(v) { return safeCallAfter(ep, after, v); });
+        // A suspended `fun` means the cont safeCall would have attached
+        // its activation record: the resume pops through the trampoline
+        // floors and re-runs the entry check before running `after`.
+        return funRes.then(function(v) { return safeCallResumed(after, v); });
       }
-      return safeCallAfter(-1, after, funRes);
+      return safeCallAfter(after, funRes);
     }
-    // The `after` half, shared by the sync path (ep === -1: no resume
-    // treatment) and the resumed path (pop floors + the re-run entry
-    // check the cont AR path performs).
-    function safeCallAfter(ep, after, v) {
-      if (ep >= 0 && ep !== CAPTURE_EPOCH) {
-        var fl = popFloors();
-        if (fl !== null) { return fl.then(function() { return safeCallAfter(CAPTURE_EPOCH, after, v); }); }
-        if (--thisRuntime.GAS <= 0 || --thisRuntime.RUNGAS <= 0) {
-          thisRuntime.EXN_STACKHEIGHT = 0;
-          return captureEventP().then(function() { return safeCallAfter(CAPTURE_EPOCH, after, v); });
-        }
+    function safeCallResumed(after, v) {
+      var fl = popFloors();
+      if (fl !== null) { return fl.then(function() { return safeCallRecheck(after, v); }); }
+      return safeCallRecheck(after, v);
+    }
+    function safeCallRecheck(after, v) {
+      if (--thisRuntime.GAS <= 0 || --thisRuntime.RUNGAS <= 0) {
+        thisRuntime.EXN_STACKHEIGHT = 0;
+        return captureEventP().then(function() { return safeCallResumed(after, v); });
       }
+      return safeCallAfter(after, v);
+    }
+    function safeCallAfter(after, v) {
       var afterRes = after(v);
       if (isThenable(afterRes)) {
         // A suspended `after` resumes through the cont safeCall's AR at
         // step 2: pop floors, the re-run entry check, then ++GAS/return.
-        var ep2 = CAPTURE_EPOCH;
         return afterRes.then(function(v2) {
-          if (ep2 !== CAPTURE_EPOCH) {
-            var fl2 = popFloors();
-            if (fl2 !== null) { return fl2.then(function() { return safeCallFinish(v2); }); }
-            return safeCallFinish(v2);
-          }
-          ++thisRuntime.GAS;
-          return v2;
+          var fl2 = popFloors();
+          if (fl2 !== null) { return fl2.then(function() { return safeCallFinish(v2); }); }
+          return safeCallFinish(v2);
         });
       }
       ++thisRuntime.GAS;
@@ -3586,14 +3671,7 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
           var res = fun.app(i);
           i = i + 1;
           if (isThenable(res)) {
-            var ep = CAPTURE_EPOCH;
-            return res.then(function(_) {
-              if (ep !== CAPTURE_EPOCH) {
-                var fl = popFloors();
-                if (fl !== null) { return fl.then(restart); }
-              }
-              return restart();
-            });
+            return res.then(function(_) { return resumeRestart(); });
           }
         }
       }
@@ -3648,10 +3726,14 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         return { bounces: 0, tos: 0, time: endTimer() };
       }
       var finished = false;
+      var savedChainFloor = VM_CHAIN_FLOOR;
+      var savedSync = CUR_SYNC;
       function finishFailure(exn) {
         if (finished) { return; }
         finished = true;
         RUN_ACTIVE = false;
+        VM_CHAIN_FLOOR = savedChainFloor;
+        CUR_SYNC = savedSync;
         delete activeThreads[thisThread.id];
         onDone(makeFailureResult(exn, getStats()));
       }
@@ -3659,12 +3741,15 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         if (finished) { return; }
         finished = true;
         RUN_ACTIVE = false;
+        VM_CHAIN_FLOOR = savedChainFloor;
+        CUR_SYNC = savedSync;
         delete activeThreads[thisThread.id];
         onDone(new SuccessResult(answer, getStats()));
       }
 
       startTimer();
 
+      VM_CHAIN_FLOOR = VM_STATE_CHAIN.length;
       var sync = options.sync || false;
       CUR_SYNC = sync;
       defaultInitialGas = options.initialGas || thisRuntime.INITIAL_GAS;
@@ -3828,6 +3913,12 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
       for (var i = 0; i < VM_STATE_CHAIN.length; i++) {
         VM_STATE_CHAIN[i].$captureFrames();
       }
+      if (PAUSE_TRACE_HOOK !== null) { PAUSE_TRACE_HOOK(); }
+      // The cont trampoline refills BOTH counters when the Pause reaches
+      // iter (the general bounce refill), and again at resume: consume the
+      // same two refill pairs from the schedule.
+      thisRuntime.GAS = nextInitialGas();
+      thisRuntime.RUNGAS = nextInitialRunGas();
       return new Promise(function(resolve, reject) {
         var settled = false;
         resumer({
@@ -6051,6 +6142,10 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
 
       // Promise-backend surface (see the fuel-model comment above safeCall).
       'stackBackend': 'promise',
+      // The machine, preloaded: vm module stubs read it here instead of
+      // carrying a nativeRequire (which would cost a pauseStack per module
+      // load that the cont backend does not perform).
+      '$vm': PVM,
       'isThenable': isThenable,
       '$captureEventP': captureEventP,
       '$popFloors': popFloors,
@@ -6487,6 +6582,35 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
             throw new Error("Method not in runtime already " + longName);
         }
         thisRuntime[nameMap[longName]] = thisRuntime[longName];
+    }
+
+
+    // Debug-only (PYRET_FUEL_DEBUG): turn GAS/RUNGAS into logging
+    // accessors so the two backends' fuel-event streams can be aligned
+    // while developing the pause-schedule oracle. Off unless set.
+    if (typeof process !== "undefined" && process.env && process.env.PYRET_FUEL_DEBUG) {
+      (function() {
+        var seq = 0;
+        function mk(name) {
+          var val = thisRuntime[name];
+          var lastGet = null;
+          Object.defineProperty(thisRuntime, name, {
+            get: function() { lastGet = val; return val; },
+            set: function(v) {
+              var kind = (lastGet !== null && v === lastGet - 1) ? "dec" : "set";
+              seq++;
+              var at = new Error().stack.split("\n").slice(2, 4).map(function(s) {
+                return s.replace(/.*at /, "").replace(/ \(.*\)/, "");
+              }).join("|");
+              process.stderr.write("FUEL " + seq + " " + name + " " + kind + " " + v + " @" + at + "\n");
+              lastGet = null;
+              val = v;
+            }
+          });
+        }
+        mk("GAS");
+        mk("RUNGAS");
+      })();
     }
 
     return thisRuntime;

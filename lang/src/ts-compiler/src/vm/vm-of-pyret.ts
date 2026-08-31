@@ -74,10 +74,10 @@ function requiresOf(imports: A.Import[]): J.JExprT {
 function moduleStub(prog: VMProgram, nDeps: number): string {
   const depNames: string[] = [];
   for (let i = 0; i < nDeps; i++) { depNames.push('$d' + i); }
-  const params = ['R', 'NS', 'U'].concat(depNames).concat(['VM']).join(',');
+  const params = ['R', 'NS', 'U'].concat(depNames).join(',');
   const json = JSON.stringify(JSON.stringify(prog));
   return 'function(' + params + '){\n'
-    + 'return VM.runModule(R,NS,U,[' + depNames.join(',') + '],JSON.parse(' + json + '));\n'
+    + 'return R.$vm.runModule(R,NS,U,[' + depNames.join(',') + '],JSON.parse(' + json + '));\n'
     + '}';
 }
 
@@ -111,7 +111,11 @@ export function makeVmPyret(
   const out = new Map<string, J.JExprT>();
   out.set('requires', requiresOf(anfed.imports));
   out.set('provides', AL.compileProvides(flatProvides));
-  out.set('nativeRequires', new J.JList(true, clist<J.JExprT>(new J.JStr(VM_MODULE_NAME))));
+  // No nativeRequires: the machine is a dependency of vm-runtime.js itself
+  // (R.$vm). A per-module nativeRequire would cost a pauseStack in
+  // runStandalone per module load, which the cont backend does not do --
+  // observable under pause schedules.
+  out.set('nativeRequires', new J.JList(true, clist<J.JExprT>()));
   const stub = moduleStub(prog, nDeps);
   out.set('theModule', options.moduleEval === false ? new J.JRawCode(stub) : new J.JStr(stub));
   // There is no generated JS to map back to source, and nothing consumes a
