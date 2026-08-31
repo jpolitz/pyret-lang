@@ -3536,10 +3536,29 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
       }
       var afterRes = after(v);
       if (isThenable(afterRes)) {
-        return afterRes.then(function(v2) { ++thisRuntime.GAS; return v2; });
+        // A suspended `after` resumes through the cont safeCall's AR at
+        // step 2: pop floors, the re-run entry check, then ++GAS/return.
+        var ep2 = CAPTURE_EPOCH;
+        return afterRes.then(function(v2) {
+          if (ep2 !== CAPTURE_EPOCH) {
+            var fl2 = popFloors();
+            if (fl2 !== null) { return fl2.then(function() { return safeCallFinish(v2); }); }
+            return safeCallFinish(v2);
+          }
+          ++thisRuntime.GAS;
+          return v2;
+        });
       }
       ++thisRuntime.GAS;
       return afterRes;
+    }
+    function safeCallFinish(v2) {
+      if (--thisRuntime.GAS <= 0 || --thisRuntime.RUNGAS <= 0) {
+        thisRuntime.EXN_STACKHEIGHT = 0;
+        return captureEventP().then(function() { return safeCallFinish(v2); });
+      }
+      ++thisRuntime.GAS;
+      return v2;
     }
 
     /*

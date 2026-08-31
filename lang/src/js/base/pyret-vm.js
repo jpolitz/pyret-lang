@@ -496,8 +496,10 @@ define("pyret-base/js/pyret-vm", [], function() {
             // Every non-flat return refunds the entry's GAS, as the cont
             // ret-case's ++R.GAS does; flat functions paid nothing.
             if (f.fdef.fl !== 1) { ++R.GAS; }
-            fp--;
-            if (fp < 0) { st.fp = -1; unchain(st); return rv; }
+            // st.fp mirrors fp at every push AND pop: a capture event can
+            // fire inside any crossing and walks frames[0..st.fp].
+            st.fp = --fp;
+            if (fp < 0) { unchain(st); return rv; }
             f.locals = null;   // don't pin the returning frame's values
             var callerF = frames[fp];
             if (callerF.captured) {

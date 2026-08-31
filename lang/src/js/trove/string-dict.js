@@ -732,33 +732,46 @@
         var $step = 0;
         var $ans = undefined;
       }
-      while(true) {
-        switch($step) {
-        case 0:
-          if (curIdx == selfKeys.length)
-            return curEq;
-          $step = 1;
-          if (!hasKey.full_meth(other, selfKeys[curIdx])) {
-            return runtime.ffi.notEqual.app("", self, other);
+      function drive() {
+        while(true) {
+          switch($step) {
+          case 0:
+            if (curIdx == selfKeys.length)
+              return curEq;
+            $step = 1;
+            if (!hasKey.full_meth(other, selfKeys[curIdx])) {
+              return runtime.ffi.notEqual.app("", self, other);
+            }
+            $ans = recEq.app(getValue.full_meth(self, selfKeys[curIdx]), getValue.full_meth(other, selfKeys[curIdx]));
+            // On the promise runtime a suspended recursive equality comes
+            // back as a thenable; on the cont runtime, as a Cont.
+            if (runtime.isThenable && runtime.isThenable($ans)) {
+              return $ans.then(function(v) {
+                var fl = runtime.$popFloors ? runtime.$popFloors() : null;
+                $ans = v;
+                if (fl !== null) { return fl.then(drive); }
+                return drive();
+              });
+            }
+            if (runtime.isContinuation($ans)) {
+              $ans.stack[runtime.EXN_STACKHEIGHT++] = runtime.makeActivationRecord(
+                ["string-dict equality"],
+                eqHelp,
+                $step,
+                [self, other, selfKeys, hasKey, getValue, recEq],
+                [curIdx, curEq]);
+              return $ans;
+            }
+            break;
+          case 1:
+            curEq = runtime.combineEquality(curEq, $ans);
+            curIdx++;
+            $step = 0;
+            break;
           }
-          $ans = recEq.app(getValue.full_meth(self, selfKeys[curIdx]), getValue.full_meth(other, selfKeys[curIdx]));
-          if (runtime.isContinuation($ans)) {
-            $ans.stack[runtime.EXN_STACKHEIGHT++] = runtime.makeActivationRecord(
-              ["string-dict equality"],
-              eqHelp,
-              $step,
-              [self, other, selfKeys, hasKey, getValue, recEq],
-              [curIdx, curEq]);
-            return $ans;
-          }
-          break;
-        case 1:
-          curEq = runtime.combineEquality(curEq, $ans);
-          curIdx++;
-          $step = 0;
-          break;
         }
       }
+      return drive();
     }
 
 
