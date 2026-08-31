@@ -248,8 +248,12 @@ check:
   color-at-position(logo, 250, 280) is color(238, 30, 16, 1)
 end
 
-save-image(logo, "pyret-logo-copy.png")
-logo2 = image-file("pyret-logo-copy.png")
+# Written into tests/scratch/, which is gitignored, so a test run doesn't
+# leave a stray file in the tree. Paths are relative to lang/, the directory
+# the suite runs from.
+logo-copy-path = "tests/scratch/pyret-logo-copy.png"
+save-image(logo, logo-copy-path)
+logo2 = image-file(logo-copy-path)
 check:
   logo is logo2
 end
