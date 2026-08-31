@@ -51,8 +51,12 @@ section marked PENDING has not been measured/finished yet.*
 - FLATCALL validation: unit 5/5, parity 34/34, pause oracle 20/20 x 6
   schedules, main2 12,522/12,522, and the main2 oracle above -- all
   with fast forms enabled.
-- `vm-bootstrap-converge` (the compiler as bytecode self-builds,
-  byte-equal to the cont chain): PENDING.
+- `vm-bootstrap-converge`: PASS. phaseB-vm (the .arr compiler compiled
+  to bytecode by --backend vm, 13.7MB standalone) self-builds the full
+  compiler on the promise runtime; its output is byte-identical to
+  phaseC-ts (both chains built cold -- the comparison requires equal
+  cache states, since worklist order and gensym numbering are
+  cache-warmth-dependent in both compilers).
 - CPO: `make web-vm` builds the vm page bundle; the server serves
   /editor?compiler=vm with window.PYRET pointed at cpo-main-vm.jarr
   and CPO_COMPILER="vm" (verified over HTTP against a running server).
