@@ -880,6 +880,100 @@ bootstrap-converge: phaseB phaseC phaseB-ts phaseC-ts
 	 exit $$fail
 
 # ============================================================
+# Interpreter-flavored bootstrap: the TS compiler emits the compiler
+# itself as BYTECODE (phaseB-vm, linked against vm-runtime.js), and that
+# bytecode compiler -- the .arr compiler running on the Pyret VM --
+# self-builds (phaseC-vm). Its output is ordinary .arr-compiler output,
+# so convergence is byte-equality with the ts chain's phaseC-ts.
+# ============================================================
+
+PHASEBVM         = build/phaseB-vm
+PHASECVM         = build/phaseC-vm
+
+PHASEBVM_ALL_DEPS := $(patsubst src/%,$(PHASEBVM)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(PHASEBVM)/js/%.js,$(COPY_LIB)) $(PHASEBVM)/bundled-node-compile-deps.js $(PHASEBVM)/bundled-node-deps.js $(PHASEBVM)/config.json
+PHASECVM_ALL_DEPS := $(patsubst src/%,$(PHASECVM)/%,$(COPY_JS)) $(patsubst lib/jglr/%.js,$(PHASECVM)/js/%.js,$(COPY_LIB)) $(PHASECVM)/bundled-node-compile-deps.js $(PHASECVM)/bundled-node-deps.js $(PHASECVM)/config.json
+
+PHASEBVM_DIRS    := $(sort $(dir $(PHASEBVM_ALL_DEPS)))
+PHASECVM_DIRS    := $(sort $(dir $(PHASECVM_ALL_DEPS)))
+
+.PHONY : phaseB-vm
+phaseB-vm: $(PHASEBVM)/pyret.jarr
+
+$(PHASEBVM)/pyret.jarr: $(TS_COMP_OUT)/pyret.js $(TS_COMP_ALL_DEPS) $(PHASEBVM_ALL_DEPS) $(patsubst src/%,$(PHASEBVM)/%,$(PARSERS))
+	$(TS_PYRET) --backend vm --outfile $(PHASEBVM)/pyret.jarr \
+                      --build-runnable src/arr/compiler/pyret.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir $(PHASEBVM)/compiled/ \
+                      --deps-file $(PHASEBVM)/bundled-node-compile-deps.js \
+                      -no-check-mode $(EF) \
+                      --require-config $(PHASEBVM)/config.json
+
+.PHONY : phaseC-vm
+phaseC-vm: $(PHASECVM)/pyret.jarr
+
+# The bytecode compiler self-builds with the same flags as phaseC-ts;
+# its OUTPUT is a cont-runtime standalone (the .arr compiler has one
+# back end), so it uses the ordinary cont config.
+$(PHASECVM)/pyret.jarr: $(PHASEBVM)/pyret.jarr $(PHASECVM_ALL_DEPS) $(patsubst src/%,$(PHASECVM)/%,$(PARSERS))
+	$(NODE) $(PHASEBVM)/pyret.jarr --outfile $(PHASECVM)/pyret.jarr \
+                      --build-runnable src/arr/compiler/pyret.arr \
+                      --builtin-js-dir src/js/trove/ \
+                      --builtin-arr-dir src/arr/trove/ \
+                      --compiled-dir $(PHASECVM)/compiled/ \
+                      --deps-file $(PHASECVM)/bundled-node-compile-deps.js \
+                      -no-check-mode $(EF) \
+                      --require-config $(PHASECVM)/config.json
+
+$(PHASEBVM_ALL_DEPS): | $(PHASEBVM)
+$(PHASECVM_ALL_DEPS): | $(PHASECVM) phaseB-vm
+
+$(PHASEBVM):
+	@$(call MKDIR,$(PHASEBVM_DIRS))
+$(PHASECVM):
+	@$(call MKDIR,$(PHASECVM_DIRS))
+
+$(PHASEBVM)/$(JS)/%-parser.js: src/$(JSBASE)/%-grammar.bnf src/$(JSBASE)/%-tokenizer.js $(wildcard lib/jglr/*.js)
+	$(NODE) lib/jglr/parser-generator.js src/$(JSBASE)/$*-grammar.bnf $(PHASEBVM)/$(JS)/$*-grammar.js "../../../lib/jglr" "jglr/jglr" "pyret-base/js/$*-parser"
+	$(NODE) $(PHASEBVM)/$(JS)/$*-grammar.js $(PHASEBVM)/$(JS)/$*-parser.js
+$(PHASECVM)/$(JS)/%-parser.js: src/$(JSBASE)/%-grammar.bnf src/$(JSBASE)/%-tokenizer.js $(wildcard lib/jglr/*.js)
+	$(NODE) lib/jglr/parser-generator.js src/$(JSBASE)/$*-grammar.bnf $(PHASECVM)/$(JS)/$*-grammar.js "../../../lib/jglr" "jglr/jglr" "pyret-base/js/$*-parser"
+	$(NODE) $(PHASECVM)/$(JS)/$*-grammar.js $(PHASECVM)/$(JS)/$*-parser.js
+
+$(PHASEBVM)/$(JS)/%.js : src/$(JSBASE)/%.js
+	cp $< $@
+$(PHASEBVM)/$(JS)/%.js : lib/jglr/%.js
+	cp $< $@
+$(PHASECVM)/$(JS)/%.js : src/$(JSBASE)/%.js
+	cp $< $@
+$(PHASECVM)/$(JS)/%.js : lib/jglr/%.js
+	cp $< $@
+
+$(PHASEBVM)/bundled-node-compile-deps.js: src/js/trove/require-node-compile-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-compile-dependencies.js -o $@
+$(PHASEBVM)/bundled-node-deps.js: src/js/trove/require-node-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-dependencies.js -o $@
+$(PHASECVM)/bundled-node-compile-deps.js: src/js/trove/require-node-compile-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-compile-dependencies.js -o $@
+$(PHASECVM)/bundled-node-deps.js: src/js/trove/require-node-dependencies.js
+	$(NPM_EXEC) browserify src/js/trove/require-node-dependencies.js -o $@
+
+# The bytecode compiler's own standalone embeds the promise runtime; its
+# self-build output embeds the ordinary one.
+$(PHASEBVM)/config.json: src/scripts/node_modules-config-vm.json
+	cp $< $@
+$(PHASECVM)/config.json: src/scripts/node_modules-config.json
+	cp $< $@
+
+.PHONY : vm-bootstrap-converge
+vm-bootstrap-converge: phaseB-vm phaseC-vm phaseB-ts phaseC-ts
+	@CV=$(PHASECVM)/pyret.jarr; CT=$(PHASECTS)/pyret.jarr; \
+	 echo "=== vm bootstrap convergence ==="; \
+	 sha256sum $$CV $$CT; \
+	 if cmp -s $$CV $$CT; then echo "PASS  vm self-build       phaseC-vm == phaseC-ts"; \
+	 else echo "FAIL  vm self-build       phaseC-vm != phaseC-ts"; exit 1; fi
+
+# ============================================================
 # Pause schedules: run the main2 suite with varied initial GAS/RUNGAS
 # (see tests/pause-schedules/). Each scheduled run's output must match
 # the unscheduled baseline run, and the rand-small build is repeated

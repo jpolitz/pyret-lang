@@ -68,17 +68,33 @@ function requiresOf(imports: A.Import[]): J.JExprT {
 }
 
 /**
- * The module stub. Kept deliberately tiny: everything interesting is in
- * the bytecode, and a small stub is cheap for the host to eval.
+ * The module function as a JS AST: hand the bytecode to the machine, and
+ * carry the flat functions' synchronous fast-form factories ($F) as REAL
+ * code so they ride the same JSourcenode -> source-map pipeline the JS
+ * backend uses (error frames inside fast-called flat functions render
+ * exactly as cont's).
  */
-function moduleStub(prog: VMProgram, nDeps: number): string {
-  const depNames: string[] = [];
-  for (let i = 0; i < nDeps; i++) { depNames.push('$d' + i); }
-  const params = ['R', 'NS', 'U'].concat(depNames).join(',');
-  const json = JSON.stringify(JSON.stringify(prog));
-  return 'function(' + params + '){\n'
-    + 'return R.$vm.runModule(R,NS,U,[' + depNames.join(',') + '],JSON.parse(' + json + '));\n'
-    + '}';
+function moduleFun(prog: VMProgram, nDeps: number, factories: J.JExprT[]): J.JFun {
+  const R = AL.constId('R');
+  const NS = AL.constId('NS');
+  const U = AL.constId('U');
+  const F = AL.constId('$F');
+  const depIds: A.Name[] = [];
+  for (let i = 0; i < nDeps; i++) { depIds.push(AL.constId('$d' + i)); }
+  const json = JSON.stringify(prog);
+  const runCall = new J.JApp(
+    new J.JDot(new J.JDot(new J.JId(R), '$vm'), 'runModule'),
+    clist<J.JExprT>(
+      new J.JId(R), new J.JId(NS), new J.JId(U),
+      new J.JList(false, CL.from_list(depIds.map((d) => new J.JId(d) as J.JExprT))),
+      new J.JApp(new J.JDot(new J.JId(AL.constId('JSON')), 'parse'),
+        clist<J.JExprT>(new J.JStr(json))),
+      new J.JId(F)));
+  const body = new J.JBlock(clist<J.JStmt>(
+    new J.JVar(F, new J.JList(true, CL.from_list(factories))),
+    new J.JReturn(runCall)));
+  const params = CL.from_list<A.Name>(([R, NS, U] as A.Name[]).concat(depIds));
+  return new J.JFun(J.nextJFunId(), '', params, body);
 }
 
 export function makeVmPyret(
@@ -103,11 +119,45 @@ export function makeVmPyret(
   const liftCaseCount = (body: import('../ast-anf').AExpr, numArgs: number, allowTco: boolean) =>
     AL.casesBranchBodyCaseCount(env, flatnessEnv, flatProvides, postEnv,
       options as AL.SplitCompileOptions, body, numArgs, allowTco);
+
+  // Fast-form factories for flat functions, in $F order (see moduleFun).
+  const factories: J.JExprT[] = [];
+  const modParam = AL.constId('$m');
+  let compilerRef: VMCompiler | undefined;
+  type NestedRec = { idx: number; upvalNames: A.Name[] };
+  const makeFlatFactory = (
+    name: string,
+    l: import('../srcloc').Loc,
+    args: import('../ast-anf').ABind[],
+    body: import('../ast-anf').AExpr,
+    freeNames: A.Name[],
+    getNested: (bodyKey: import('../ast-anf').AExpr, isMethod: boolean) => NestedRec
+  ): number => {
+    const nestedHook = (bodyKey: import('../ast-anf').AExpr, isMethod: boolean): J.JExprT | undefined => {
+      const rec = getNested(bodyKey, isMethod);
+      // R.$vm.mkClo($m, idx, [<free values by name, in upval order>])
+      return new J.JApp(
+        new J.JDot(new J.JDot(new J.JId(AL.constId('R')), '$vm'), isMethod ? 'mkMeth' : 'mkClo'),
+        clist<J.JExprT>(
+          new J.JId(modParam),
+          new J.JNum(rec.idx),
+          new J.JList(false, CL.from_list(rec.upvalNames.map((n) => new J.JId(AL.jsIdOf(n)) as J.JExprT)))));
+    };
+    const fac = AL.compileVmFlatFactory(env, flatnessEnv, flatProvides, postEnv,
+      options as AL.SplitCompileOptions, (loc) => compilerRef!.locK(loc),
+      name, l, args, body, freeNames, modParam, nestedHook);
+    const idx = factories.length;
+    factories.push(fac);
+    return idx;
+  };
+
   const compiler = new VMCompiler(
     flatProvides.fromUri,
     computed.bindings, computed.typeBindings, computed.moduleBindings,
     env, options.properTailCalls, flatnessEnv[0],
-    liftCaseCount, options.inlineCaseBodyLimit);
+    liftCaseCount, options.inlineCaseBodyLimit,
+    makeFlatFactory);
+  compilerRef = compiler;
   const prog = compiler.compileProgram(anfed);
   addPhase('Bytecode', prog);
 
@@ -120,15 +170,13 @@ export function makeVmPyret(
   // runStandalone per module load, which the cont backend does not do --
   // observable under pause schedules.
   out.set('nativeRequires', new J.JList(true, clist<J.JExprT>()));
-  const stub = moduleStub(prog, nDeps);
-  out.set('theModule', options.moduleEval === false ? new J.JRawCode(stub) : new J.JStr(stub));
-  // There is no generated JS to map back to source, and nothing consumes a
-  // map for interpreted modules: locations come from the bytecode's own
-  // srcloc table. An empty-but-well-formed map keeps the record's shape.
-  out.set('theMap', new J.JStr(JSON.stringify({
-    version: 3, sources: [flatProvides.fromUri], names: [], mappings: '',
-    file: flatProvides.fromUri,
-  })));
+  const theModule = moduleFun(prog, nDeps, factories);
+  const moduleAndMap = theModule.toUglySourcemap(
+    flatProvides.fromUri, 1, 1, flatProvides.fromUri);
+  out.set('theModule', options.moduleEval === false
+    ? new J.JRawCode(moduleAndMap.code)
+    : new J.JStr(moduleAndMap.code));
+  out.set('theMap', new J.JStr(moduleAndMap.map));
   return [flatProvides, new CCPDict(out)];
 }
 

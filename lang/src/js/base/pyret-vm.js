@@ -124,11 +124,14 @@ define("pyret-base/js/pyret-vm", [], function() {
   // Loading a program
   // ---------------------------------------------------------------
 
-  function Mod(R, NS, uri, prog) {
+  function Mod(R, NS, uri, prog, flatFns) {
     this.R = R;
     this.NS = NS;
     this.uri = uri;
     this.prog = prog;
+    // Fast-form factories ($F): one per flat function with a synchronous
+    // JS form; invoked at closure creation with (mod, R, ...freevals).
+    this.flatFns = flatFns || null;
     this.locs = prog.locs;
     this.names = prog.names;
     this.funcs = prog.funcs;
@@ -548,6 +551,14 @@ define("pyret-base/js/pyret-vm", [], function() {
             if ((lkOp & 1) !== 0) { f.locKS = lk; }
             var pvm = (fnv === undefined || fnv === null) ? undefined : fnv.$pvm;
             if (pvm !== undefined) {
+              if (pvm.fast !== null && pvm.fast !== undefined) {
+                // Flat callee with a fast form: a direct synchronous call,
+                // no frame, no fuel -- the cont backend's flat call. The
+                // fast form performs its own arity check.
+                locals[d] = applyJS(fnv, code, pc, n, f);
+                pc += n;
+                continue;
+              }
               var callee = pvm.f;
               if (callee.a !== n) { arityFail(R, pvm, callee, code, pc, n, f); }
               // The arguments are written straight into the callee's slot
@@ -595,6 +606,13 @@ define("pyret-base/js/pyret-vm", [], function() {
             f.locK = lk;
             if ((lkOp & 1) !== 0) { f.locKS = lk; }
             var pvm = (fnv === undefined || fnv === null) ? undefined : fnv.$pvm;
+            if (pvm !== undefined && pvm.fast !== null && pvm.fast !== undefined) {
+              // Flat callee: direct synchronous call; the following RET
+              // returns its value (cont's tail flat call is inline too).
+              locals[f.fdef.k] = applyJS(fnv, code, pc, n, f);
+              pc += n;
+              continue;
+            }
             if (pvm !== undefined) {
               // The cont backend compiles a non-self tail call as an
               // ordinary call whose caller sits at its return label: the
@@ -733,6 +751,13 @@ define("pyret-base/js/pyret-vm", [], function() {
               pvm = field.$pvmm;
               if (pvm !== undefined) { isMeth = true; }
               else { pvm = field.$pvm; }
+            }
+            if (pvm !== undefined && !isMeth && pvm.fast !== null && pvm.fast !== undefined) {
+              // Method-syntax call of a flat function field: direct
+              // synchronous call, as cont's maybeMethodCall does.
+              locals[d] = applyJS(field, code, pc, n, f);
+              pc += n;
+              continue;
             }
             if (pvm !== undefined) {
               var callee = pvm.f;
@@ -1125,13 +1150,72 @@ define("pyret-base/js/pyret-vm", [], function() {
 
   function makeClosure(R, mod, fdef, locals, upvals) {
     var captured = captureUpvals(fdef, locals, upvals);
-    var pvm = { f: fdef, u: captured, m: mod };
+    var pvm = { f: fdef, u: captured, m: mod, fast: null };
+    if (fdef.ff >= 0 && mod.flatFns !== null) {
+      // Flat function with a synchronous fast form: instantiate it over
+      // the free values the creating frame supplies. The fast form IS
+      // .app -- exactly the cont backend's flat function -- and the
+      // machine's call opcodes dispatch to it directly.
+      var fa = fdef.fa;
+      var fargs = new Array(fa.length + 2);
+      fargs[0] = mod;
+      fargs[1] = R;
+      for (var i = 0; i < fa.length; i++) {
+        var vs = fa[i];
+        var vi = vs >> 2;
+        switch (vs & 3) {
+          case 0: fargs[i + 2] = locals[vi]; break;
+          case 1: fargs[i + 2] = upvals[vi]; break;
+          case 2: fargs[i + 2] = mod.consts[vi]; break;
+          default: fargs[i + 2] = mod.globals[vi]; break;
+        }
+      }
+      var fast = mod.flatFns[fdef.ff].apply(null, fargs);
+      pvm.fast = fast;
+      return new (getCtors(R).fun)(fast, fdef.n, pvm);
+    }
     return new (getCtors(R).fun)(function() {
       var n = arguments.length;
       var args = new Array(n);
       for (var i = 0; i < n; i++) { args[i] = arguments[i]; }
       return enter(R, mod, fdef, captured, args, n);
     }, fdef.n, pvm);
+  }
+
+  // Building a bytecode closure/method from inside a fast form (a nested
+  // lambda in a flat function's synchronous JS): upvals arrive by value,
+  // in the target function's upval order.
+  function mkClo(mod, funcIdx, upvals) {
+    var fdef = mod.funcs[funcIdx];
+    var R = mod.R;
+    var pvm = { f: fdef, u: upvals, m: mod, fast: null };
+    return new (getCtors(R).fun)(function() {
+      var n = arguments.length;
+      var args = new Array(n);
+      for (var i = 0; i < n; i++) { args[i] = arguments[i]; }
+      return enter(R, mod, fdef, upvals, args, n);
+    }, fdef.n, pvm);
+  }
+  function mkMeth(mod, funcIdx, upvals) {
+    var fdef = mod.funcs[funcIdx];
+    var R = mod.R;
+    var pvm = { f: fdef, u: upvals, m: mod, fast: null };
+    var full = function() {
+      var n = arguments.length;
+      var args = new Array(n);
+      for (var i = 0; i < n; i++) { args[i] = arguments[i]; }
+      return enter(R, mod, fdef, upvals, args, n);
+    };
+    var curried = function(obj) {
+      return function() {
+        var n = arguments.length;
+        var args = new Array(n + 1);
+        args[0] = obj;
+        for (var i = 0; i < n; i++) { args[i + 1] = arguments[i]; }
+        return enter(R, mod, fdef, upvals, args, n + 1);
+      };
+    };
+    return new (getCtors(R).meth)(curried, full, fdef.n, pvm);
   }
 
   function makeMethodClosure(R, mod, fdef, locals, upvals) {
@@ -1401,14 +1485,14 @@ define("pyret-base/js/pyret-vm", [], function() {
   // Entry point used by every compiled-by-vm module
   // ---------------------------------------------------------------
 
-  function runModule(R, NS, uri, deps, prog) {
+  function runModule(R, NS, uri, deps, prog, flatFns) {
     if (prog.v !== FORMAT_VERSION) {
       throw new Error(
         "pvm: module " + uri + " was compiled for bytecode format " + prog.v +
         " but this machine speaks " + FORMAT_VERSION +
         " (delete the interpreter's compiled-module cache and rebuild)");
     }
-    var mod = new Mod(R, NS, uri, prog);
+    var mod = new Mod(R, NS, uri, prog, flatFns);
     resolveConsts(mod);
     resolveGlobals(mod, deps);
     var main = prog.funcs[prog.main];
@@ -1423,6 +1507,8 @@ define("pyret-base/js/pyret-vm", [], function() {
 
   return {
     runModule: runModule,
+    mkClo: mkClo,
+    mkMeth: mkMeth,
     FORMAT_VERSION: FORMAT_VERSION,
     OPCODE_NAMES: OPCODE_NAMES
   };

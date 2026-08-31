@@ -36,6 +36,12 @@ function start(config, onServerReady) {
       PYRET_TS: process.env.PYRET
         ? process.env.PYRET.slice(0, process.env.PYRET.lastIndexOf("/") + 1) + "cpo-main-ts.jarr.gz.js"
         : "",
+      // The vm flavor runs on the promise runtime, so it needs its own
+      // page jarr (bytecode builtins + vm-runtime); the compiler bundle
+      // is shared with ts.
+      PYRET_VM: process.env.PYRET
+        ? process.env.PYRET.slice(0, process.env.PYRET.lastIndexOf("/") + 1) + "cpo-main-vm.jarr.gz.js"
+        : "",
       CPO_COMPILER: process.env.CPO_COMPILER || "pyret",
       BASE_URL: config.baseUrl,
       GOOGLE_API_KEY: config.google.apiKey,
@@ -638,9 +644,11 @@ function start(config, onServerReady) {
     // pointlessly. ts and vm load the same jarr and compiler bundle;
     // the back end is chosen inside it.
     var compiler = req.query.compiler || defaultOpts.CPO_COMPILER;
-    var usesTsAssets = (compiler === "ts" || compiler === "vm");
-    var compilerOpts = (usesTsAssets && defaultOpts.PYRET_TS)
-      ? { PYRET: defaultOpts.PYRET_TS, CPO_COMPILER: compiler }
+    var compilerOpts =
+      (compiler === "ts" && defaultOpts.PYRET_TS)
+        ? { PYRET: defaultOpts.PYRET_TS, CPO_COMPILER: compiler }
+      : (compiler === "vm" && defaultOpts.PYRET_VM)
+        ? { PYRET: defaultOpts.PYRET_VM, CPO_COMPILER: compiler }
       : {};
     res.render("editor.html", { ...defaultOpts,
       ...compilerOpts,

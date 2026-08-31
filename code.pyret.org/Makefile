@@ -516,6 +516,40 @@ $(TS_CPOGZ): $(TS_CPOMAIN)
 .PHONY: web-ts
 web-ts: $(TS_CPOMAIN) $(TS_CPOGZ) $(TS_COMPILER_GZ)
 
+# ============================================================
+# vm flavor (?compiler=vm): the page jarr where every .arr module is
+# BYTECODE and the runtime is the promise runtime (vm-runtime.js, via
+# cpo-config-vm.json). Shares the ts compiler bundle; built by the TS
+# compiler with --backend vm into its own compiled-vm/ cache.
+# ============================================================
+
+VM_CPOMAIN=build/web/js/cpo-main-vm.jarr
+VM_CPOGZ=build/web/js/cpo-main-vm.jarr.gz.js
+
+$(VM_CPOMAIN): $(BUNDLED_DEPS) $(TROVE_JS) $(TROVE_ARR) $(WEBJS) src/web/js/*.js src/web/arr/*.arr cpo-standalone.js cpo-config-vm.json src/web/arr/cpo-main-ts.arr ts-libpyret
+	mkdir -p compiled-vm/;
+	node pyret/build/ts-compiler/pyret.js \
+    --backend vm \
+    --builtin-js-dir src/web/js/trove/ \
+    --builtin-js-dir pyret/src/js/trove/ \
+    -allow-builtin-overrides \
+    --builtin-arr-dir src/web/arr/trove/ \
+    --builtin-arr-dir pyret/src/arr/trove/ \
+    --require-config cpo-config-vm.json \
+    --build-runnable src/web/arr/cpo-main-ts.arr \
+    --standalone-file cpo-standalone.js \
+    --compiled-dir ./compiled-vm \
+    --deps-file $(BUNDLED_DEPS) \
+    --outfile $(VM_CPOMAIN) -no-check-mode
+
+$(VM_CPOGZ): $(VM_CPOMAIN)
+	cp $(VM_CPOMAIN) $(VM_CPOMAIN).js
+	npx uglifyjs --compress -o $(VM_CPOMAIN).min -- $(VM_CPOMAIN)
+	gzip -c -f $(VM_CPOMAIN).min > $(VM_CPOGZ)
+
+.PHONY: web-vm
+web-vm: web-ts $(VM_CPOMAIN) $(VM_CPOGZ)
+
 clean:
 	rm -rf build/
 	rm -rf compiled/
