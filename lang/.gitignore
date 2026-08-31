@@ -38,6 +38,8 @@ build/phaseB-ts
 build/phaseC
 build/phaseB-ts
 build/phaseC-ts
+build/phaseB-vm
+build/phaseC-vm
 build/phase1
 build/phase2
 build/phase3
