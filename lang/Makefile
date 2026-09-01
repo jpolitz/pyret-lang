@@ -318,10 +318,6 @@ clean:
 .PHONY : test-clean
 test-clean:
 	$(call RMDIR, tests/compiled)
-# Clears the run-time scratch outputs but keeps tests/scratch/.gitignore, which
-# is tracked so the directory exists on a fresh checkout. -X removes exactly the
-# ignored files, so the tracked .gitignore survives on every platform; leading
-# `-` keeps the target working in a checkout that isn't a git repo.
 	-git clean -fdX tests/scratch
 
 # Written this way because cmd.exe complains about && in command lines
