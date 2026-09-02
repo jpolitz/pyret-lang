@@ -4,6 +4,7 @@ const usage = require('command-line-usage');
 const commandLineArgs = require('command-line-args');
 const pyretClient = require('./client-lib');
 const pyretRepl = require('./repl-client');
+const pyretReplLocal = require('./repl-local');
 const path = require('path');
 const fs = require('fs');
 const stripAnsi = require('strip-ansi');
@@ -131,6 +132,17 @@ const usages = [
         description: "Specify the path to a socket file to use to communicate with the server. Defaults to {underline /tmp/parley-<username>/comm.sock}."
       },
       {
+        name: 'repl',
+        alias: 'r',
+        type: Boolean,
+        description: "Start an interactive REPL instead of running a program. Uses the compile server by default; add {bold --no-server} to run the compiler in this process instead."
+      },
+      {
+        name: 'no-server',
+        type: Boolean,
+        description: "For {bold --repl}: run the compiler and the program in this process, with no background compile server and no socket. Requires the {bold ts} backend (selects it automatically)."
+      },
+      {
         name: 'backend',
         typeLabel: "{underline pyret|ts}",
         description: "Which compiler backend to use (defaults to {bold pyret} or the PYRET_COMPILER environment variable if set). {bold ts} selects the TypeScript port of the compiler. An explicit {bold --compiler} path overrides this choice."
@@ -230,6 +242,7 @@ const optionDefinitions = [
   { name: 'local-parley', type: String, defaultValue: ".pyret" },
 
   { name: 'repl', alias: 'r', type: Boolean, group: "meta", defaultValue: false },
+  { name: 'no-server', type: Boolean, group: "client", defaultValue: false },
 
   { name: 'program', alias: 'p', type: String, group: "pyret-options", defaultOption: true },
 
@@ -284,7 +297,24 @@ catch(e) {
   process.exit(1);
 }
 
+// The in-process REPL is built on the TypeScript compiler (there is no
+// in-process host for the Pyret-hosted one), so --no-server selects it.
+if(options.meta.repl && options.client["no-server"] && !process.env.PYRET_COMPILER
+   && options.client.backend === "pyret") {
+  options.client.backend = "ts";
+  options["_all"]["backend"] = "ts";
+}
+
 const backend = options.client.backend;
+if(options.meta.repl && options.client["no-server"] && backend !== "ts") {
+  console.error("--repl --no-server requires --backend ts");
+  process.exit(1);
+}
+// The ts compile server has no repl-* commands (see server.ts), so --repl on
+// the ts backend is always the in-process path.
+if(options.meta.repl && backend === "ts") {
+  options.client["no-server"] = true;
+}
 if(backend !== "pyret" && backend !== "ts") {
   console.error("--backend must be pyret or ts (got " + backend + ")");
   process.exit(1);
@@ -311,7 +341,11 @@ if(!options["pyret-options"]["outfile"] && options["pyret-options"]["program"]) 
 }
 
 if(options.meta.repl) {
-  pyretRepl.start(options);
+  if(options.client["no-server"]) {
+    pyretReplLocal.start(options);
+  } else {
+    pyretRepl.start(options);
+  }
 } else {
   pyretClient.start(options);
 }

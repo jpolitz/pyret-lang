@@ -5,7 +5,9 @@
   "files": [
     "pyret.js",
     "client-lib.js",
+    "repl-ui.js",
     "repl-client.js",
+    "repl-local.js",
     "pyret-lang/build/phaseA/*",
     "pyret-lang/build/ts-compiler/*",
     "pyret-lang/src/js/base/*",
