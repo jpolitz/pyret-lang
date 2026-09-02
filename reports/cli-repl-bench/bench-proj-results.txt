@@ -1,0 +1,17 @@
+### LOCAL: first session in a fresh project (helper.arr not yet compiled)
+{"mode":"local","startupMs":707.01556,"exprs":[{"expr":"import file(\"helper.arr\") as H","ms":59.208525},{"expr":"H.total-area(H.shapes)","ms":8.870941},{"expr":"H.area(H.circ(10))","ms":6.650164}],"totalMs":793.599665}
+### LOCAL: second session, same project (.pyret/compiled warm)
+{"mode":"local","startupMs":725.697588,"exprs":[{"expr":"import file(\"helper.arr\") as H","ms":59.210535},{"expr":"H.total-area(H.shapes)","ms":7.840397},{"expr":"H.area(H.circ(10))","ms":8.328234}],"totalMs":813.919044}
+### LOCAL: third session, same project
+{"mode":"local","startupMs":775.052128,"exprs":[{"expr":"import file(\"helper.arr\") as H","ms":72.345293},{"expr":"H.total-area(H.shapes)","ms":12.228983},{"expr":"H.area(H.circ(10))","ms":8.754662}],"totalMs":882.360209}
+### .pyret/compiled contents (local):
+0
+### SERVER: first session in a fresh project (server just started)
+{"mode":"server","startupMs":1563.248135,"exprs":[{"expr":"import file(\"helper.arr\") as H","ms":317.941419},{"expr":"H.total-area(H.shapes)","ms":48.859672},{"expr":"H.area(H.circ(10))","ms":40.756817}],"totalMs":1979.332927}
+### SERVER: second session, same project, same server
+{"mode":"server","startupMs":508.930564,"exprs":[{"expr":"import file(\"helper.arr\") as H","ms":233.567491},{"expr":"H.total-area(H.shapes)","ms":43.120864},{"expr":"H.area(H.circ(10))","ms":42.478598}],"totalMs":835.440847}
+### SERVER: third session, same project, same server
+{"mode":"server","startupMs":403.958219,"exprs":[{"expr":"import file(\"helper.arr\") as H","ms":176.987092},{"expr":"H.total-area(H.shapes)","ms":29.799027},{"expr":"H.area(H.circ(10))","ms":24.471476}],"totalMs":645.399818}
+### .pyret/compiled contents (server):
+0
+### PROJ DONE
