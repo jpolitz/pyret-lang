@@ -83,7 +83,8 @@ Measured consequences, all on the pre-fix code:
 
 ### What I changed
 
-Only in `repl-client.js` (the branch's own file):
+In `repl-client.js` and, after the evidence below forced my hand, in
+`client-lib.js`:
 
 ```js
 { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], ... }
@@ -106,19 +107,61 @@ Time:  3.272 s
 
 181 s → 3.3 s.
 
-## Two things I did not change, and think you should
+### Why `client-lib.js` got the same change after all
 
-1. **`client-lib.js` has the identical `stdio: [0, 1, 2, 'ipc']`.** It is
-   pre-existing on drydock, outside this branch's scope, and it is what costs
-   `cli.test.js` its 60 seconds and wedges `pyret prog.arr` in any shell
-   pipeline on a cold machine. The fix is the same one-line change. I left it
-   alone because it is not this PR's code, but it is a real user-facing bug
-   (first run of the CLI in a script or a Makefile appears to hang), not just a
-   test-timing annoyance.
+I intended to leave `client-lib.js` alone — it is pre-existing on drydock and
+not this PR's code. Then the full suite failed:
 
-2. **`npm/package.json`'s `files` list.** I did change this one, because the
-   branch is broken without it: it listed only `pyret.js` and `client-lib.js`,
-   so `repl-client.js` would not have shipped in the published tarball and
-   `pyret --repl` would have died with `Cannot find module './repl-client'` for
-   anyone installing from npm. `repl-ui.js`, `repl-client.js` and
-   `repl-local.js` are now listed.
+```
+FAIL test/cli.test.js (122.163 s)
+  ● IO Tests (ts backend) › test-unbound-error.arr
+    Expected substring: "is unbound. It is used but not previously defined."
+    Received string:    ""
+```
+
+That test asserts on **stderr**, and whether stderr arrives before
+`spawnSync`'s `SIGTERM` at `COMPILER_TIMEOUT` is a race. Two runs of the same
+unmodified code, one pass and one fail. It is not just slow, it is
+nondeterministic, so the fix went in.
+
+Measured, full `npm test`, from a fully cold state (no servers, no sockets, no
+`.pyret/`):
+
+| | before | after |
+| --- | --- | --- |
+| `npm test` | 126 s, `cli.test.js` intermittently fails | **7.9 s, 44/44** (twice) |
+
+This is a real user-facing bug quite apart from the tests: the first `pyret
+prog.arr` in a shell pipeline, a Makefile, or any script that captures output
+appears to hang after printing its results.
+
+## Also changed: `npm/package.json`'s `files` list
+
+The branch is broken without it. It listed only `pyret.js` and
+`client-lib.js`, so `repl-client.js` would not have shipped in the published
+tarball and `pyret --repl` would have died with
+`Cannot find module './repl-client'` for anyone installing from npm.
+`repl-ui.js`, `repl-client.js` and `repl-local.js` are now listed.
+
+## One bug I found and did **not** fix
+
+If a compile server is killed without running its exit handler — `kill -9`, an
+OOM, a machine reboot — its socket file survives in `/tmp/parley-<user>/`. The
+next CLI invocation sees the file, tries to connect, gets `ECONNREFUSED`, and
+then, measured:
+
+```
+$ node pyret.js --backend ts test/tests/test-unbound-error.arr
+[client] Connection error: Error: connect ECONNREFUSED /tmp/parley-exedev/comm-ts.sock.
+[client] You can try again, and the Pyret server may restart
+$ echo $?
+0
+```
+
+**Exit code 0, on stdout, having compiled nothing.** A grading script or a
+Makefile would read that as success. This is pre-existing on drydock and
+unrelated to the REPL, but it is nastier than the hang: the right behaviour is
+to unlink the stale socket and start a server, and failing that to exit
+non-zero. (It is also how I initially misdiagnosed the `cli.test.js` failure
+above — my own `kill -9` cleanup between benchmark runs was leaving stale
+sockets behind.)

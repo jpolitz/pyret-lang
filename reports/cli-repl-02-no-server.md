@@ -241,11 +241,13 @@ Three things the server *does* still buy that this work doesn't touch:
    server, not your terminal. In-process it takes down the REPL. In practice
    both mean "start over", so I don't weight this heavily.
 
-And what it costs, beyond the latency: `--shutdown`, `--port`, the stale-socket
-dance, the "compiler is newer than the socket, restart the server" branch, a
-second process holding half a gigabyte, servers shared across unrelated project
-directories, and the `stdio: [0,1,2,'ipc']` fd-inheritance bug documented in
-report 01. The `--help` text is already candid about this — *"This server is
+And what it costs, beyond the latency: `--shutdown`, `--port`, the "compiler is
+newer than the socket, restart the server" branch, a second process holding
+half a gigabyte, servers shared across unrelated project directories, and two
+bugs that exist only because there is a daemon at all — the
+`stdio: [0,1,2,'ipc']` fd inheritance documented in report 01, and a stale
+socket file (any `kill -9`, OOM or reboot) making the CLI exit **0** without
+compiling anything, also in report 01. The `--help` text is already candid about this — *"This server is
 experimental, and likely can get stuck running, or lose track of its
 connection"* — and every one of those failure modes simply does not exist on the
 in-process path.
