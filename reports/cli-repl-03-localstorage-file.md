@@ -87,11 +87,14 @@ further.
   That is the only cross-invocation state outside the project directory.
 * `~/.parley/` — the default value of `--global-parley`. Measured:
   `grep -rn "global-parley\|globalParley" npm/*.js` returns exactly one hit, the
-  option definition itself. **Nothing reads it.** It is a dead option, and along
-  with `--local-parley` it is one of the two options declared without a `group:`,
-  which is why neither shows up in `--help`. If a storage flag ever gets added,
-  `--global-parley` is the natural place for it to live, and it should either be
-  wired up or deleted.
+  option definition itself. **Nothing reads it.** It is a dead option. (It and
+  `--local-parley` are also the only two entries in `optionDefinitions`
+  declared without a `group:`, so they land in `options._all` and nowhere else.
+  That is unrelated to why they are absent from `--help` — the help text is a
+  separate, hand-maintained `optionList` in `usages`, so *every* flag has to be
+  documented twice and several already aren't.) If a storage flag ever gets
+  added, `--global-parley` is the natural place for it to live, and it should
+  either be wired up or deleted.
 * **The REPL persists nothing at all.** Measured: I ran three consecutive
   `pyret --repl` sessions in the same project directory, each importing a local
   `helper.arr`, on both the server-backed and the in-process back end. In both

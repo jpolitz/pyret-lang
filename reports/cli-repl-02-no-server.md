@@ -47,7 +47,11 @@ Three files in `npm/`:
 * **`repl-local.js`** — the new in-process back end.
 
 `pyret.js` gains `--no-server` (client group). `--no-server` selects the `ts`
-backend automatically; conversely `--repl --backend ts` now routes to the
+backend automatically *when no backend was named on the command line* —
+`--repl --no-server --backend pyret` reports the conflict rather than quietly
+switching. (`commandLineArgs`' `defaultValue` makes an explicit
+`--backend pyret` indistinguishable from the default, so that check reads
+`process.argv` directly.) Conversely `--repl --backend ts` now routes to the
 in-process path, because `server.ts` has no `repl-*` commands at all and that
 combination would otherwise hang.
 
