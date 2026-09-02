@@ -298,16 +298,21 @@ catch(e) {
 }
 
 // The in-process REPL is built on the TypeScript compiler (there is no
-// in-process host for the Pyret-hosted one), so --no-server selects it.
-if(options.meta.repl && options.client["no-server"] && !process.env.PYRET_COMPILER
-   && options.client.backend === "pyret") {
+// in-process host for the Pyret-hosted one), so --no-server selects it -- but
+// only when the backend wasn't asked for by name, so `--no-server --backend
+// pyret` reports the conflict instead of quietly ignoring the request.
+// commandLineArgs' defaultValue makes an explicit `--backend pyret`
+// indistinguishable from the default, hence the argv check.
+const backendWasExplicit = process.argv.some((a) => a === "--backend" || a.startsWith("--backend="));
+if(options.meta.repl && options.client["no-server"] && !backendWasExplicit
+   && !process.env.PYRET_COMPILER) {
   options.client.backend = "ts";
   options["_all"]["backend"] = "ts";
 }
 
 const backend = options.client.backend;
 if(options.meta.repl && options.client["no-server"] && backend !== "ts") {
-  console.error("--repl --no-server requires --backend ts");
+  console.error("--repl --no-server runs the TypeScript compiler in this process; it cannot use --backend " + backend + ".");
   process.exit(1);
 }
 // The ts compile server has no repl-* commands (see server.ts), so --repl on
