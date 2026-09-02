@@ -207,7 +207,12 @@ function start(options) {
       serverModule,
       ["-serve", "--port", port],
       {
-        stdio: [0, 1, 2, 'ipc'],
+        // The server outlives this process, so inheriting fds 1/2 would leave
+        // it holding the write end of our stdout/stderr: anything reading them
+        // (a shell pipeline, spawnSync in a test) then blocks until the server
+        // dies rather than until the CLI finishes. Inheriting fd 0 would also
+        // let it consume input meant for us.
+        stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
         execArgv: isTS
           ? ["--max-old-space-size=8192", "--stack-size=8192"]
           : ["-max-old-space-size=8192"]
