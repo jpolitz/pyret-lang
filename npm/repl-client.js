@@ -82,7 +82,11 @@ function startupServer(serverModule, portFile) {
     const child = childProcess.fork(
       serverModule,
       ['-serve', '--port', portFile],
-      { stdio: [0, 1, 2, 'ipc'], execArgv: ['-max-old-space-size=8192'] }
+      // The server outlives this process. Inheriting fds 1/2 would leave it
+      // holding the write end of our stdout/stderr, so anything reading them
+      // (a shell pipeline, spawnSync in a test) blocks until the server dies.
+      // Inheriting fd 0 would also let it steal the REPL's own input.
+      { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], execArgv: ['-max-old-space-size=8192'] }
     );
     child.on('message', function(msg) {
       if (msg.type === 'success') {
