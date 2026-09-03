@@ -238,3 +238,85 @@ package's guts in a student's project directory.
 * Do not build anything new on the current protocol. If a batch/grade mode
   happens, it wants the in-process host from report 02, not another command on
   the websocket.
+
+## Addendum: can you browserify with the browser field off, and does it need a CLI-specific mode?
+
+Joe asked. Short answer: the option is real, and **it does not need to be a
+CLI-specific build mode** — but it is not a drop-in replacement either.
+
+**The option exists.** `browserify --no-browser-field` (alias `--bf false`),
+plumbed through `opts.browserField` into the resolver
+(`node_modules/browserify/index.js:87–98`: when `browserField === false` it uses
+plain `resolve` instead of `browser-resolve`). There is also `--node`, which is
+a preset for `bare: true` + `browserField: false` (`index.js:49–51`).
+
+**Why no separate mode is needed.** The two bundles in question are already
+node-only artifacts. `bundled-node-deps.js` and
+`bundled-node-compile-deps.js` are built by `lang/Makefile` (PHASEA/B/C plus
+`TS_COMP_OUT`) and baked into `.jarr` files that are run by `node`.
+code.pyret.org builds a **separate** bundle for the browser —
+`BUNDLED_DEPS=build/web/js/bundled-npm-deps.js` (`code.pyret.org/Makefile:50`,
+consumed at `:444` and `:499`) — from its own recipe. So turning the browser
+field off on the node bundles cannot affect the browser build. It is not adding
+a mode; it is correcting a default that was always wrong for these files.
+
+**But it fails immediately as things stand.** Measured, both variants:
+
+```
+$ npx browserify --no-browser-field src/js/trove/require-node-dependencies.js -o /tmp/x.js
+Error: Can't walk dependency graph: ENOENT: no such file or directory, lstat '.../lang/buffer'
+    required by .../src/js/trove/require-node-dependencies.js
+```
+
+`require-node-dependencies.js` has `buffer = require("buffer")`. That resolves
+today *only because* browser resolution maps the `buffer` core module to the npm
+shim. With the field off, `resolve` hands back the bare id for a core module and
+browserify tries to `lstat` it. Same for the compile-deps file. So the core
+module requires have to move to `nodeRequire` first — which is where they belong
+for a node target anyway.
+
+**And canvas cannot come along.** Measured, bundling `require("canvas")` alone
+from inside `lang/`:
+
+| | result |
+| --- | --- |
+| with the browser field (today) | succeeds — **1601 bytes**, i.e. the DOM shim |
+| with `--no-browser-field` | `ENOENT: lstat '.../lang/fs'` required by `node_modules/canvas/index.js` |
+
+With the field off, browserify walks canvas's real `index.js`, hits its
+`require('fs')`, and would hit the `.node` binary after that. Exactly Joe's
+point. So `canvas` has to be externalised to `nodeRequire` regardless of the
+flag — which is independently the right call, because it turns the
+`document is not defined` landmine into an honest `Cannot find module 'canvas'`.
+
+### The sequence, if you want it
+
+1. `buffer` → `nodeRequire("buffer")` in both entry files. Core module; it only
+   worked by accident.
+2. `canvas` → `nodeRequire("canvas")`. Native, unbundlable, already a
+   `pyret-npm` dependency, and this fixes the bad error message.
+3. *Then* add `--no-browser-field` to the browserify recipes in `lang/Makefile`
+   — four of them (PHASEA, PHASEB, PHASEC, TS_COMP_OUT), so a variable rather
+   than four edits.
+4. Step 3 is what fixes `cross-fetch` and, importantly, `util-deprecate` — the
+   one behind Shriram's warning. **That one cannot be fixed per-module**, because
+   `util-deprecate` is a transitive dependency (via two copies of
+   `readable-stream`); there is no line in our source to change. The flag is the
+   only tool for it.
+
+Expected blast radius, from checking all ten bundled deps: `canvas` and
+`cross-fetch` are the only two with a substituting `browser` field, plus
+`util-deprecate` transitively; `js-md5`'s browser field only stubs out
+`crypto`/`buffer`, so it would gain the real ones. Everything else resolves
+identically either way.
+
+**What I have not done:** built the full bundle successfully with the flag, since
+steps 1 and 2 are prerequisites. So I cannot yet report the resulting bundle size
+or swear nothing else moves. Validating it properly means a phaseA rebuild and
+`make no-diff-standalone`, since the PHASEA/B/C bundles feed the compiler's own
+bootstrap and phaseB must stay byte-identical to phaseC.
+
+A cheaper proof is available: do steps 1–3 for the `TS_COMP_OUT` recipe only,
+which is independent of the bootstrap, and check the REPL and a generated
+`.jarr`. That is a few minutes and risks nothing, and it would settle whether
+the warning actually goes away before anyone touches the bootstrap bundles.
