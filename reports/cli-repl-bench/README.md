@@ -23,4 +23,10 @@ CLI invocation exits 0 without compiling (see `../cli-repl-01-rebase.md`).
                         N rounds of start-REPL / use / Ctrl-C / start again
                         against one surviving server; reports restart time and
                         the server's RSS after each round.
+    test-concurrent.js  autograder shape: N submissions compiled+run at a given
+                        parallelism against one warm server, each checked
+                        against its own expected output.  See ../cli-repl-05-*.
+    bench-autograder.sh sequential throughput per submission, both backends.
+                        Its 4-way-parallel figure is meaningless on a 2-core
+                        box; ignore it.
     summarize.py        medians from run-bench.sh / bench-proj.sh output.

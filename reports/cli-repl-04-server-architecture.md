@@ -268,5 +268,12 @@ So, revised:
   a concurrency pattern you have just said you do not have, and would not
   encourage.
 
+**Correction (see `cli-repl-05-autograding.md`):** Joe's follow-up is that the
+tight loop does matter, for autograders — which is exactly where `-j` shows up,
+so bugs 1 and 2 go straight back to the top. Measured: parallel grading against
+a shared server on the pyret backend makes submissions that do not compile exit
+**0**. Bug 1 is also worse than "LIFO vs FIFO": `tryQueue` has no in-flight
+guard at all, so the queue never queues.
+
 Either way I would not spend effort defending or replacing the websocket. It is
 the part of this that is merely unnecessary.
