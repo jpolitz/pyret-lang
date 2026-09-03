@@ -19,4 +19,8 @@ CLI invocation exits 0 without compiling (see `../cli-repl-01-rebase.md`).
     measure-rss.sh      resident memory of each back end, idle at the prompt.
     test-interrupt.js   sends SIGINT during a runaway loop, reports whether the
                         session answers afterwards.
+    test-restart-cycle.js
+                        N rounds of start-REPL / use / Ctrl-C / start again
+                        against one surviving server; reports restart time and
+                        the server's RSS after each round.
     summarize.py        medians from run-bench.sh / bench-proj.sh output.

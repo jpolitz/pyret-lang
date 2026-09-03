@@ -144,6 +144,94 @@ ws does not make the protocol right.
 7. *Then*, if you like: drop `ws` and `http` for NDJSON. Cheap once (4) exists,
    removes a dependency, and loses nothing you are using.
 
+## Addendum: what the actual workflow does to it
+
+Joe's correction to my framing: the real pattern is **one long-running client,
+plus Ctrl-C and restart of the CLI in the same terminal session** — not five
+terminals at once, and "logically it's better if the 5 terminals are 5
+different things anyway."
+
+That reprioritises everything above. Bugs 1, 2 and 3 are all *multi-client*
+bugs. They are real, but on this workflow they never fire. Meanwhile the thing
+that does fire is the session leak, and it is much worse than "not a bug yet".
+
+Measured (`reports/cli-repl-bench/test-restart-cycle.js`): start
+`pyret --repl --server`, run two interactions, SIGINT the client, start it
+again — sixteen times, against one surviving server.
+
+```
+cycle  startup_ms  server_RSS_MB  delta
+    1        1766          465.8
+    2         572          514.7  +48.9
+    3         510          558.5  +43.8
+    4         465          574.3  +15.8
+    5         458          584.3  +10.0
+    6         465          590.7   +6.4
+    7         461          602.6  +11.9
+    8         437          625.0  +22.4
+    9         442          648.5  +23.5
+   10         457          673.4  +24.9
+   11         407          699.7  +26.3
+   12         407          725.7  +26.0
+   13         450          752.4  +26.7
+   14         411          780.1  +27.7
+   15         409          806.7  +26.6
+   16         406          833.7  +27.0
+still works afterwards: True
+```
+
+**466 MB → 834 MB over sixteen Ctrl-C restarts**, settling into a steady
+**~27 MB per abandoned session** with no plateau. Nothing is reclaimed. It keeps
+working, so you never see an error — you see the machine get slower. Forty
+restarts in a working day is about a gigabyte of leaked realms.
+
+The same sixteen cycles in-process (now the default): **790 ms median restart**,
+zero server processes, `/tmp/parley-<user>/` empty afterwards, nothing to leak
+because the process that held it exited.
+
+### The leak and connection-per-request are the same bug
+
+`repl-start` puts the session — and its realm, which is the 27 MB — into a
+`MutableStringDict` keyed by id, and only `repl-close` removes it. A Ctrl-C'd
+client never sends `repl-close`.
+
+The obvious fix is "drop the session when its connection closes". You cannot,
+because **the connection already closed** — `tryQueue` closes after every
+message, so `repl-start` returns `repl-ready` and hangs up, and each
+`repl-interact` is a fresh connection. The session outlives every connection by
+construction, so there is no connection whose close means "this session is
+over".
+
+That is the clearest argument I have for item 4 on the list above. A persistent
+connection is not a performance micro-optimisation; it is the thing that gives
+server-side state a lifetime. Get it and the leak fixes itself, `stop` becomes
+addressable, and the per-interaction connect cost goes away — one change, three
+problems.
+
+If you want a band-aid before that: have `repl-start` evict every existing
+session before creating a new one. That is correct exactly when there is one
+client, which you have just said is the case — and it is wrong the moment there
+isn't, which is why I have not done it.
+
+### "Five terminals should be five different things"
+
+Agreed, and that is an argument against the server's *scope*, not just its
+protocol. `/tmp/parley-<username>/comm.sock` is one server per **user**: every
+project shares one process, one module cache, and one set of globally-mutated
+builtin dirs (bug 3). Per-project would be strictly better and would make bug 3
+unreachable.
+
+But follow it one step further. If the server serves exactly one client, and
+its lifetime should match that client's session, then it is not a daemon — it is
+**a worker process the CLI owns**: started over a socketpair or stdio, inherited
+rather than discovered, dying with its parent. No socket file in a shared
+namespace, no staleness, no `--shutdown`, no version heuristics, no leak,
+because there is nothing to outlive. That is the design I would point at for
+`--repl --backend pyret`, where in-process is not available. Against in-process
+it buys crash isolation and a separate heap; it does not buy warmth across
+restarts, and per the numbers above warmth across restarts is worth about
+400 ms.
+
 ## The bigger question underneath
 
 The REPL numbers (report 02) say the daemon was not buying the REPL anything.
@@ -161,12 +249,24 @@ lifecycle) for exactly the tight-loop case, and needs no protocol at all.
 That is the design question I would put back to you: **is the daemon serving
 "many invocations of a CLI", or "one long-running client"?**
 
-* If the tight loop can become one invocation, the daemon's remaining job is
-  editor/IDE integration — and then build (4) properly, because that is a real
-  protocol with real requirements, not a compile queue with a websocket on it.
-* If the CLI must stay one-file-per-process (grading harnesses, Makefiles,
-  student muscle memory), keep the daemon and fix 1–3 at minimum. They are
-  cheap and two of them are silent-wrong-answer bugs.
+Joe's answer is the second one — which, measured, removes the last argument for
+the daemon *in his own usage*. The tight-loop case I invoked above to justify it
+is somebody's pattern (grading harnesses, CI, Makefiles) but not the one that
+motivated it. For one long-running client plus occasional restarts, the daemon
+is saving ~400 ms a few times an hour and charging ~27 MB per restart for it.
+
+So, revised:
+
+* **Keep the daemon for the many-short-invocations case.** It is genuinely good
+  at that, nothing here changes it, and the batch path still uses it.
+* **Stop treating it as the default architecture for interactive use.** The REPL
+  default already flipped. `--backend pyret --repl` is the remaining case, and a
+  private stdio worker fits it better than a shared daemon.
+* **Fix the session leak** — properly via item 4, or with the band-aid above if
+  you want it today. This is the only one of the bugs on your path.
+* Bugs 1–3 stay on the list but drop in priority: they are correctness bugs for
+  a concurrency pattern you have just said you do not have, and would not
+  encourage.
 
 Either way I would not spend effort defending or replacing the websocket. It is
 the part of this that is merely unnecessary.
