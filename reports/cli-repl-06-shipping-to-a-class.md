@@ -39,9 +39,16 @@ bootstrap; the packed tarball with both is **23 MB**.
 I packed the tarball, `npm install`ed it into a clean directory, and ran the
 REPL from `node_modules/pyret-npm/pyret.js --repl`. Values, definitions,
 `print`, check results, compile errors, and `include image` +
-`image-width(circle(...))` returning 100 — so canvas resolves correctly through
-the ts build's browserified bundle out of the installed tree. **No compile
-server process was started.**
+`image-width(circle(...))` returning 100. **No compile server process was
+started.**
+
+*(An earlier revision of this report said that showed canvas resolving through
+the browserified bundle. Both halves of that were wrong — see the correction
+below. `image-width` of a circle is arithmetic and never rasterizes, so that
+test did not touch canvas at all. A test that does rasterize —
+`image-to-color-list(circle(2, "solid", "red"))` — returns real antialiased
+pixel data in the packaged REPL, so canvas does work; just not for the reason
+I gave.)*
 
 This is a genuinely different path through the package from the batch compile,
 so `test/packaged-cli.test.sh` now drives `--repl` from the tarball too, and
@@ -64,6 +71,87 @@ never re-loads the libraries: an interaction in a warm realm is **6–18 ms**,
 and `include image` — pulling in the whole image library — is **46 ms**
 (report 02). The 163 ms number is the right one for a *batch mode* you might
 layer on later; the REPL is an order of magnitude below it.
+
+## Correction: canvas is not, and cannot be, bundled
+
+Joe's correction, and he is right: `canvas` is a compiled module, so
+browserify cannot inline it — making that work needs per-platform prebuilt
+binaries, which is a lot of work. What I had not checked is what browserify
+*did* do instead, and it is worse than "left it out".
+
+`canvas`'s package.json has `"browser": "browser.js"`, and browserify honours
+the browser field by default. So `require("canvas")` in
+`src/js/trove/require-node-dependencies.js` bundled **the browser DOM shim**:
+
+```js
+83:[function(require,module,exports){
+/* globals document, ImageData */
+exports.createCanvas = function (width, height) {
+  return Object.assign(document.createElement('canvas'), { width, height })
+}
+```
+
+That is what `define("canvas", ...)` registers. In node, `document` is
+undefined, so it is not a fallback — it is a landmine.
+
+The reason images work anyway is `src/js/base/amd_loader.js`. Its
+`evaluateModuleFn` checks `isAvailableNodeModule(name)` **first** and, if node
+can resolve the name, does a real `require(name)` and never runs the bundled
+`define` callback at all:
+
+```js
+if(isAvailableNodeModule(moduleObj.name)) {
+  moduleObj.val = require(moduleObj.name);
+  moduleObj.resolved = true;
+  return;
+}
+```
+
+So the loader prefers a real installed module over the bundled copy, for every
+name. `canvas` is a dependency of `pyret-npm`, so it is installed, so images
+work. The bundle's canvas entry is never reached — until it is.
+
+Measured, to be sure of the failure mode: a `.jarr` that calls
+`image-to-color-list`, run in a directory whose `node_modules` has **every**
+dependency except `canvas`:
+
+```
+exit=5
+The run ended in error:
+Abstraction breaking: Uncaught JavaScript error:
+ReferenceError: document is not defined
+    at exports.createCanvas (img.jarr:14445:24)
+    at makeCanvas (img.jarr:171838:29)
+    at Object.imageToColorList (img.jarr:173212:16)
+```
+
+Not "Cannot find module 'canvas'". `document is not defined`, five frames deep
+in the image library.
+
+**Two consequences.**
+
+*It is a bad error for a student.* `canvas` installs through
+`prebuild-install`, which falls back to a `node-gyp` build when there is no
+prebuilt binary for the platform, which fails without build tools. A student
+whose canvas install fell over gets `document is not defined` on their first
+image program, with nothing pointing at the real cause. Changing
+`canvas = require("canvas")` to `canvas = nodeRequire("canvas")` in
+`require-node-dependencies.js` would leave it out of the bundle entirely and
+turn that into an honest `Cannot find module 'canvas'`. One word, and it is
+the mirror image of the `resolve` grouping below — `resolve` is in the
+`nodeRequire` group and should probably be bundled; `canvas` is in the
+`require` group and definitely should not be.
+
+*The same substitution has happened to `cross-fetch`.* Its package.json has
+`"browser": "dist/browser-ponyfill.js"`, and the bundle contains two
+`XMLHttpRequest` references and no `http.request` — so it is the browser
+ponyfill, not the node build. Unlike canvas, `cross-fetch` is **not** a
+dependency of `pyret-npm`, so the packaged CLI always takes the bundled copy.
+I have not tested whether Pyret's `fetch` actually breaks there — modern node
+has a global `fetch` the ponyfill may defer to — so this is "same shape, worth
+checking", not a demonstrated bug. Checked all ten bundled deps; `canvas` and
+`cross-fetch` are the only two with a substituting browser field (`js-md5`'s
+only stubs out `crypto`/`buffer`, which is harmless).
 
 ## The `.jarr` portability annoyance, diagnosed
 
@@ -102,21 +190,25 @@ Looking at `require-node-dependencies.js`, everything above uses
 `require(...)` (so browserify bundles it) and everything below uses
 `nodeRequire(...)` (so it stays external). `resolve` sits in the second group,
 in among `fs`, `readline`, `path` and `http` — which are all node builtins.
-`resolve` is not. That grouping looks like an oversight rather than a decision:
-moving that one line up would make every non-charting `.jarr` runnable from
-anywhere, which is the annoyance you named.
+`resolve` is not. That grouping looks like an oversight rather than a decision.
 
-I have not changed it. It is in `lang/`, it grows every generated standalone by
-however big `resolve` is, and the charting case still needs `vega` on the path —
-so it is a decision about what "standalone" is supposed to mean, not a bug fix
-I should make unasked. But it is a one-line experiment if you want the number.
+**But moving it does not buy relocatability**, and I overclaimed when I first
+wrote this. Per the correction above, `resolve` is only the *first* thing that
+breaks in an isolated directory; any program that rasterizes still needs a real
+installed `canvas`, and that genuinely cannot be bundled. Charting still needs
+`vega` on the path. So the honest scope of the `resolve` fix is: non-image,
+non-charting `.jarr` files become runnable from anywhere. That may still be
+most student programs, and it may not be worth it. Your call — I have not
+changed it, it is in `lang/`, and it grows every generated standalone.
 
 ## Small thing, done
 
 `repl-local.js` no longer symlinks `node_modules` into `.pyret/`. I had added it
 for parity with the server path; verified unnecessary — with the symlink absent,
-`include image` still resolves canvas, because the in-process REPL never loads a
-generated `.jarr` and gets its natives from the ts build's own bundle. The
+`include image` and `image-to-color-list` both still work, because the
+in-process REPL never loads a generated `.jarr`, and its natives resolve from
+the *package's own* `node_modules` through `repl-local.js`'s `require` (not,
+as I first wrote, from the bundle — see the correction above). The
 server-backed path still creates it, because there it is what lets
 `node .pyret/foo.jarr` find its runtime deps. One less stray symlink into the
 package's guts in a student's project directory.
