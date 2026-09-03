@@ -252,23 +252,30 @@ experimental, and likely can get stuck running, or lose track of its
 connection"* — and every one of those failure modes simply does not exist on the
 in-process path.
 
-## Recommendation
+## Recommendation, and what shipped
 
-Ship both, and flip the default:
+I originally left the default alone as a product decision. Joe's call was to
+flip it, so as of `e6211fd6a`:
 
-* Keep `--repl` on the server when `--backend pyret` is in play (it has to be).
-* Make `--repl` use the in-process path **by default whenever the ts build is
-  present**. Today that requires typing `--no-server`. I did not make it the
-  default because that is a product decision, not mine — but the numbers say it
-  should be, and it removes the server from the one workflow where it is least
-  useful.
-* Fix the server's `stop` handling regardless. A REPL where Ctrl-C wedges the
-  session is worse than one with no Ctrl-C at all.
+* `pyret --repl` runs in-process whenever the package ships the ts compiler.
+* `--server` opts back in. It is also selected implicitly by `--port` and
+  `--shutdown` (which mean nothing in-process), by an explicit
+  `--backend pyret` or `PYRET_COMPILER`, and as a silent fallback when the
+  package was built without `PYRET_NPM_TS=1`.
+* `--repl --server --backend ts` is refused with a message rather than left to
+  hang, since `server.ts` has no `repl-*` commands.
+* The batch path is untouched. `pyret prog.arr` still uses the server, which is
+  the case where a warm compiler shared across invocations is the whole point —
+  see the batch table above.
+
+Still outstanding: **fix the server's `stop` handling**. A REPL where Ctrl-C
+wedges the session is worse than one with no Ctrl-C at all, and the server-backed
+REPL is still the only REPL on the pyret backend.
 
 ## Known gaps in what I built
 
-* **`--no-server` is TS-only.** Documented in `--help`; errors clearly if you
-  ask for `--no-server --backend pyret`.
+* **The in-process path is TS-only.** `--backend pyret` therefore always means
+  the server; that is now a routing rule rather than an error.
 * **No `--type-check` verification.** `repl-local.js` threads
   `typeCheck: options['pyret-options']['type-check']` into the compile options,
   and `repl.ts` honours it, but I did not test a `--repl --no-server -y`
