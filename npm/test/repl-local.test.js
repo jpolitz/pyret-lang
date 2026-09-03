@@ -1,9 +1,11 @@
-// End-to-end test for the no-server CLI REPL (`pyret --repl --no-server`).
+// End-to-end test for the in-process CLI REPL, which is what plain
+// `pyret --repl` gets when the package ships the ts compiler.
 //
-// Same session and same assertions as repl.test.js, against the in-process
-// back end: the TS compiler and a Pyret runtime in the CLI process, no
-// compile server and no socket. Skipped unless the package was built with
-// the ts-compiler (PYRET_NPM_TS=1), which is what --no-server runs on.
+// Same session and same assertions as repl.test.js (which pins itself to the
+// compile server with --server), against the in-process back end: the TS
+// compiler and a Pyret runtime in the CLI process, no compile server and no
+// socket. Skipped unless the package was built with the ts-compiler
+// (PYRET_NPM_TS=1), since without it --repl falls back to the server.
 const cp = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -21,7 +23,7 @@ function runRepl(input) {
   try {
     const proc = cp.spawnSync(
       'node',
-      [PYRET_JS, '--repl', '--no-server'],
+      [PYRET_JS, '--repl'],
       { input, cwd, encoding: 'utf8', timeout: TIMEOUT });
     return (proc.stdout || '') + (proc.stderr || '');
   } finally {
@@ -29,7 +31,7 @@ function runRepl(input) {
   }
 }
 
-describeIfTS('pyret --repl --no-server', () => {
+describeIfTS('pyret --repl (in-process)', () => {
   let out;
 
   beforeAll(() => {
@@ -91,5 +93,15 @@ describeIfTS('pyret --repl --no-server', () => {
 
   test('starts no compile server and creates no socket', () => {
     expect(out).not.toContain('Starting Parley server');
+  });
+
+  // Routing: --port/--server select the compile server, and the ts server has
+  // no repl-* commands, so that combination must be refused rather than hang.
+  test('--server --backend ts is refused, not hung', () => {
+    const proc = cp.spawnSync(
+      'node', [PYRET_JS, '--repl', '--server', '--backend', 'ts'],
+      { input: '', encoding: 'utf8', timeout: 30000 });
+    expect(proc.status).not.toEqual(0);
+    expect(proc.stderr).toContain('no REPL support');
   });
 });

@@ -1,6 +1,9 @@
-// End-to-end test for the CLI REPL (`pyret --repl`).
+// End-to-end test for the compile-server CLI REPL (`pyret --repl --server`).
 //
-// Spawns the real `pyret.js --repl`, feeds a session of interactions on stdin,
+// --repl on its own now runs in-process (see repl-local.test.js), so this
+// pins the server back end explicitly.
+//
+// Spawns the real `pyret.js --repl --server`, feeds a session of interactions on stdin,
 // and asserts on the rendered output. This exercises the full stack: the
 // repl-client TUI, the WebSocket protocol, and the server-side REPL session
 // (server.arr / load-lib). It guards the integration bugs that unit tests
@@ -25,7 +28,7 @@ function runRepl(input) {
   try {
     const proc = cp.spawnSync(
       'node',
-      [PYRET_JS, '--repl', '--port', SOCK],
+      [PYRET_JS, '--repl', '--server', '--port', SOCK],
       { input, cwd, encoding: 'utf8', timeout: TIMEOUT });
     return (proc.stdout || '') + (proc.stderr || '');
   } finally {
