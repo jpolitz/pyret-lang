@@ -218,13 +218,13 @@ function start(options) {
 
   const localParley = options['_all']['local-parley'];
   const localParleyDir = path.resolve(path.join(process.cwd(), localParley));
+  // Only the compiled-module cache goes here. Unlike the server-backed path
+  // this deliberately does not symlink node_modules in: nothing here loads a
+  // generated .jarr, and the runtime natives come from the ts-compiler build's
+  // own bundle, resolved relative to this file.
   if (!fs.existsSync(localParleyDir)) {
     try {
       fs.mkdirSync(localParleyDir, { recursive: true });
-      // Same layout the server-backed path and client-lib create, so a
-      // project directory looks the same whichever back end made it.
-      fs.symlinkSync(path.join(__dirname, 'node_modules'),
-                     path.join(localParleyDir, 'node_modules'));
     } catch (e) {
       process.stderr.write('Could not create ' + localParley + ' directory: ' + e + '\n');
       process.exit(1);

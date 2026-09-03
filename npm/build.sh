@@ -5,17 +5,17 @@ cd "$(dirname "$0")"
 
 (cd ../lang && npm ci && make phaseA libA)
 
-# Optionally also build the TypeScript port of the compiler so the packaged
-# CLI supports `pyret --backend ts` (see pyret.js). Opt-in because it is
-# strictly additive to the stock backend.
-if [ "${PYRET_NPM_TS:-}" = "1" ]; then
+# The TypeScript compiler. `pyret --repl` runs it in this process by default
+# (see pyret.js / repl-local.js), so a package built without it silently falls
+# back to the compile-server REPL. Build it unless PYRET_NPM_TS=0.
+if [ "${PYRET_NPM_TS:-1}" != "0" ]; then
   (cd ../lang && make ts-compiler ts-libA)
 fi
 
 rm -rf pyret-lang
 mkdir -p pyret-lang/build
 cp -r ../lang/build/phaseA pyret-lang/build/
-if [ "${PYRET_NPM_TS:-}" = "1" ]; then
+if [ "${PYRET_NPM_TS:-1}" != "0" ]; then
   cp -r ../lang/build/ts-compiler pyret-lang/build/
   mkdir -p pyret-lang/src/js/base pyret-lang/lib/jglr
   cp ../lang/src/js/base/js-numbers.js \
