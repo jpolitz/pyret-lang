@@ -29,4 +29,8 @@ CLI invocation exits 0 without compiling (see `../cli-repl-01-rebase.md`).
     bench-autograder.sh sequential throughput per submission, both backends.
                         Its 4-way-parallel figure is meaningless on a 2-core
                         box; ignore it.
+    trap-ls.js          NODE_OPTIONS=--require preload that traps reads of
+                        global.localStorage and prints pid + stack; finds who
+                        triggers Node's localStorage ExperimentalWarning.
+                        See ../cli-repl-03-localstorage-file.md.
     summarize.py        medians from run-bench.sh / bench-proj.sh output.

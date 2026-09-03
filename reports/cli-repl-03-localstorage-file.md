@@ -57,24 +57,84 @@ Printing `e.message` before `printUsage()` fixes it. **I have not made this
 change** — it is one line in `pyret.js` outside the REPL work, and it is your
 call whether it rides along.
 
-**3. The warning is almost certainly not about the flag.**
+**3. The warning is a Node warning, and Pyret's own compiled output causes it.**
+*(Resolved — this section originally said the warning was probably unrelated
+noise and asked for the exact text. Shriram supplied it, and the guess was right
+in shape but the cause is ours.)*
 
-I could not find any warning anywhere in the CLI or the compiler that mentions
-storage: `grep -i "warn\|warning"` across `npm/*.js`, `lang/src/arr/**` and
-`lang/src/js/**` turns up only `client-lib.js`'s "Error during shutdown", one
-unrelated comment in `js-numbers.js`, and the `[server]` log helpers (which are
-compiled out — `LOG_LEVEL = ERROR`). Nothing in the compiler's own flag list
-(`pyret.arr`, `cmdline.ts`) is storage-shaped either.
+His verbatim text:
 
-The mechanism that fits his description without any storage warning existing:
-whatever his ordinary runs print, the flagged command *doesn't* print, because
-the flagged command dies during argument parsing before the CLI does anything at
-all. So "I get a warning when I don't provide that flag" and "no warning when I
-do" is consistent with the warning being unrelated background noise — a Node
-deprecation notice, an npm install warning, something from `canvas` — that
-simply never gets reached on the failing invocation. **Worth just asking him to
-paste the exact text**; that resolves it in one round trip and I would not guess
-further.
+```
+All modules already compiled. Cleaning up and generating standalone...
+(node:8939) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+```
+
+`--localstorage-file` is a **Node** flag. It is in `node --help`:
+
+```
+  --localstorage-file=...     file used to persist localStorage data
+```
+
+So the flag he tried to pass to `pyret` is real, it just belongs to `node`.
+Nothing about it is a Pyret option, which is why `--help` does not list it and
+why `command-line-args` rejects it.
+
+**What reads `localStorage`.** Not the compiler, and not the compile server —
+**his own compiled program**. I preloaded a getter on `globalThis.localStorage`
+into every process in the CLI (`cli-repl-bench/trap-ls.js`) and ran a compile.
+The only reads come from the generated `.pyret/<name>.jarr`, twice, at load:
+
+```
+[LOCALSTORAGE READ] pid=97257 argv=.../.pyret/new.jarr
+    at config     (.../new.jarr:45715:17)
+    at Object.deprecate (.../new.jarr:45682:7)
+    at             (.../new.jarr:44333:25)
+```
+
+`config` and `deprecate` are `util-deprecate`. Both call sites are
+`readable-stream`'s deprecation shim for `WritableState.prototype.buffer`
+(DEP0003), evaluated at module top level — there are two copies of
+`readable-stream` in the bundle, hence two reads. `util-deprecate`'s `config()`
+reads `global.localStorage` to decide whether to suppress deprecation notices.
+
+That is why the warning appears immediately after *"Cleaning up and generating
+standalone..."*: that is the moment `client-lib.js` spawns
+`node .pyret/new.jarr` with `stdio: 'inherit'`. It fires on **every run of
+every Pyret program**, and it has nothing to do with his code or his data.
+
+**Why `util-deprecate`'s browser build is in there** is the same bug as canvas
+and cross-fetch (report 06): its package.json has `"browser": "browser.js"`,
+browserify honours the browser field, so `require-node-dependencies.js` bundles
+the browser variant — the one that probes `localStorage`. The node build of
+`util-deprecate` reads `process.noDeprecation` instead and would never touch it.
+
+**Why I could not reproduce it here.** Node version. On Node 24.20,
+`globalThis.localStorage` is simply undefined and reading it is silent; under
+`--experimental-webstorage` it *throws* `ERR_INVALID_ARG_VALUE` rather than
+warning. The `ExperimentalWarning` wording is the older Node behaviour, so
+Shriram is on 22.x or 23.x. Worth noting the forward risk: on a Node where
+webstorage is enabled without a file, that read stops being a warning and
+becomes a crash at program load.
+
+**Workaround for him today (measured).** It is a Node warning, so
+`NODE_OPTIONS=--no-warnings` silences it, and it propagates to the spawned
+`.jarr`:
+
+```
+$ NODE_OPTIONS=--no-warnings pyret new.arr
+Looks shipshape, your test passed, mate!
+```
+
+I verified the propagation by emitting a stand-in `ExperimentalWarning` from
+inside the spawned jarr — visible by default, gone with `--no-warnings`, both
+lines included.
+
+**Real fix, on our side.** Keep `util-deprecate` out of the browser-field
+substitution — either browserify with the browser field off for these, or
+`nodeRequire` them so the node build is used. Or update whatever drags in the
+two ancient `readable-stream` copies. Same one-line shape as the canvas item in
+report 06, and it removes a spurious warning from every student's every run.
 
 **4. What the CLI actually persists across runs, today.**
 
@@ -127,36 +187,46 @@ one he wants.
 
 ## Draft reply — substance only, please re-phrase
 
-> There is no `--localstorage-file` option — not on any released `pyret-npm`
-> (I checked back through 0.0.80) and not in the current source. So the flag
-> isn't undocumented; it isn't there.
+> Good news and bad news. `--localstorage-file` is a real flag, but it's
+> **Node's**, not Pyret's — it's in `node --help`, and it tells Node where to
+> persist its experimental `localStorage`. Pyret has no such option, which is
+> why it isn't in `pyret --help`.
 >
-> What you hit is a bug in how the CLI reports that. `command-line-args` raises
-> a proper "Unknown option: --localstorage-file", but `pyret.js` catches every
-> argument error, prints the whole help text, and exits 1 without saying what
-> was wrong. Hence "doesn't seem to work" plus "not in `--help`". I'll make it
-> print the actual error.
+> The warning is our fault, not yours, and it's harmless. It comes from the
+> compiled program Pyret generates and runs for you — the `.jarr` — not from
+> your code. We bundle a library (`util-deprecate`, pulled in by
+> `readable-stream`) and we accidentally bundle its *browser* build, which
+> reads `localStorage` on startup to decide whether to print deprecation
+> notices. On your Node version, touching `localStorage` without
+> `--localstorage-file` produces that warning. It fires twice on every run of
+> every Pyret program and means nothing about your program.
 >
-> Could you paste the exact warning text you get without the flag? I can't find
-> any warning in the CLI or the compiler that mentions storage, and I suspect
-> it's unrelated noise that just doesn't appear on the failing command because
-> that command exits during argument parsing before anything runs.
+> To silence it now:
 >
-> On the real question — right now the CLI persists exactly two things between
-> runs, and neither is yours: the compiled-module cache and generated `.jarr`
-> files under `./.pyret/`, and the compile server's socket in
-> `/tmp/parley-<user>/`. There's a `--global-parley` option defaulting to
-> `~/.parley/` that nothing reads. The REPL in particular saves nothing at all,
-> not even command history.
+>     NODE_OPTIONS=--no-warnings pyret new.arr
 >
-> Which of these do you want for the fall?
+> I'll fix it properly on our end so nobody sees it.
 >
-> 1. REPL history that survives between sessions (easy — a file of past lines).
+> Two other things from this:
+>
+> The reason `pyret --localstorage-file hold-my-data new.arr` printed the whole
+> help text with no explanation is a bug in our CLI — the argument parser does
+> raise a clear "Unknown option: --localstorage-file", and we throw the message
+> away before printing usage. Fixing that.
+>
+> And if you *do* want persistence, tell me which one you mean, because right
+> now the CLI keeps nothing of yours between runs — only the compiled-module
+> cache and generated `.jarr` files under `./.pyret/`, plus the compile
+> server's socket in `/tmp`. The REPL saves nothing at all, not even command
+> history.
+>
+> 1. REPL history that survives between sessions. Easy, and probably the thing
+>    you'll miss most in class.
 > 2. A place a *program* can read and write data that outlives the run — the
->    offline equivalent of the browser's localStorage. That's a library, and
->    the flag would just pick the file.
-> 3. Somewhere stable for the compiled cache so `.pyret/` stops appearing in
+>    offline equivalent of the browser's localStorage. That's a library, and a
+>    flag would just pick the file.
+> 3. Somewhere stable for the compiled cache, so `.pyret/` stops appearing in
 >    every directory.
 >
-> (1) I can do quickly. (2) is the interesting one and needs a bit of design —
-> if that's what you're after, tell me what the students' programs would call.
+> (1) I can do quickly. (2) is the interesting one and needs some design — if
+> that's what you're after, tell me what the students' programs would call.
