@@ -923,7 +923,7 @@ end
 # fresh-id/js-id-of minting, get-loc interning, dispatch-table pushes --
 # therefore happens after all of its body's, which is what lets a
 # consumer of a flattened statement chain walk it as one backward loop.
-fun get-remaining-code(compiler, opt-dest, rest, ans) -> {J.JBlock;CList<J.JCase>}:
+fun get-remaining-code(compiler, opt-dest, rest :: DAG.CaseResults%(is-c-block), ans) -> {J.JBlock;CList<J.JCase>}:
   compiled-body = cases(Option) opt-dest:
     | some(dest) =>
       compile-annotated-let(compiler, dest, c-exp(j-id(ans), cl-empty), rest)
@@ -938,7 +938,7 @@ end
 # their block of code is done
 fun get-new-cases(compiler, opt-dest, opt-rest, ans) -> {CList<J.JBlock>; J.JExpr}:
   cases(Option) opt-rest:
-    | some(rest) =>
+    | some(rest :: DAG.CaseResults%(is-c-block)) =>
       pre-body-label = compiler.make-label()
       {next-block; next-cases} = get-remaining-code(compiler, opt-dest, rest, ans)
       remaining-cases = cl-cons(j-case(pre-body-label, next-block), next-cases)
@@ -1142,7 +1142,7 @@ fun compile-flat-app(l, compiler, opt-dest, f, args, opt-rest, app-info, is-defi
   # portions: 1) the code that can be in the same "block" (or case region)
   # and 2) the rest of the case statements
   {remaining-code; new-cases} = cases (Option) opt-rest:
-    | some(rest) =>
+    | some(rest :: DAG.CaseResults%(is-c-block)) =>
       get-remaining-code(compiler, opt-dest, rest, ans)
     | none =>
       # Special case: there is no more code after this so just jump to the
@@ -1423,7 +1423,7 @@ fun compile-flat-prim-app(l, compiler, opt-dest, f, args, opt-rest):
   # portions: 1) the code that can be in the same "block" (or case region)
   # and 2) the rest of the case statements
   {remaining-code; new-cases} = cases (Option) opt-rest:
-    | some(rest) =>
+    | some(rest :: DAG.CaseResults%(is-c-block)) =>
       get-remaining-code(compiler, opt-dest, rest, ans)
     | none =>
       # Special case: there is no more code after this so just jump to the
