@@ -78,3 +78,6 @@ compiled/
 build/ts-compiler
 tests/ts-compiled/
 compiled-ts/
+
+# jsnums oracle freeze stamp
+tests/jsnums-test/oracle/.freeze-stamp
