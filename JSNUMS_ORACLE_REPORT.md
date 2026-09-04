@@ -37,7 +37,7 @@ freeze stamp file. Both are system prose-free edits; flagging them here.
 
 ```
 cd lang
-make jsnums-test                 # node --test, no build, ~12 s on the fixed library
+make jsnums-test                 # node --test, no build, ~16 s on the fixed library
 make jsnums-oracle               # needs racket, julia, python3+mpmath; reruns only when inputs change
 node tests/jsnums-test/oracle/freeze.js --refreeze   # regenerate every frozen case from scratch
 node tests/jsnums-test/gen/generate.js               # add any new generator inputs as pending
@@ -231,9 +231,9 @@ Summary (file-config groups, `make jsnums-test` plus `policy.test.js`):
 
 | library | runner groups passing | policy checks passing | wall time |
 |---|---:|---:|---:|
-| drydock | 66 / 177 | 4 / 8 | 3 min 24 s (watchdog timeouts) |
+| drydock | 66 / 177 | 4 / 8 | 3 min 30 s (`make jsnums-test`; watchdog timeouts on hanging cases) |
 | branch 6c558ba68 | 144 / 177 | 7 / 8 | 1 min 15 s |
-| rebased + corrections | 177 / 177 | 8 / 8 | 12 s |
+| rebased + corrections | 177 / 177 | 8 / 8 | 16 s (`make jsnums-test`, runner plus policy checks) |
 
 Per case family, drydock (A) against the branch (B):
 
