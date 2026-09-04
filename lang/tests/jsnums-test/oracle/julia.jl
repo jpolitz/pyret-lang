@@ -6,10 +6,10 @@ struct Domain <: Exception
     msg::String
 end
 
-const LIT = r"^~?[+-]?\d+(?:/\d+|(?:\.\d+)?(?:[eE][+-]?\d+)?)$"
-const BIGNUM_LIT = r"^[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$"
-const EXACT = r"^([+-]?\d+)(?:/(\d+))?$"
-const DECIMAL = r"^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$"
+const LIT = r"^~?[+-]?[0-9]+(?:/[0-9]+|(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$"
+const BIGNUM_LIT = r"^[+-]?[0-9]+(?:(?:\.[0-9]+)?[eE]\+?[0-9]+)?$"
+const EXACT = r"^([+-]?[0-9]+)(?:/([0-9]+))?$"
+const DECIMAL = r"^([+-]?)([0-9]*)(?:\.([0-9]*))?(?:[eE]([+-]?[0-9]+))?$"
 
 function parse_num(s)
     if startswith(s, "~")
@@ -54,10 +54,14 @@ int_only(xs...) = for x in xs; (x isa Rational && denominator(x) == 1) || throw(
 fl(x) = x isa Float64 ? x : Float64(x)
 # arithmetic on a mixed exact/rough pair happens in doubles (Julia would promote to BigFloat)
 mixed(f, a, b) = (a isa Float64 || b isa Float64) ? f(fl(a), fl(b)) : f(a, b)
-tobf(x) = (d = fl(x); isfinite(d) ? BigFloat(d) : BigFloat(x))
+# a double read back as the decimal it prints as (js-numbers' Roughnum.toRational)
+float_exact(x::Float64) = parse_decimal(string(x))
+to_exact(x) = x isa Rational ? x : float_exact(x)
+# evaluate at the double nearest x unless that loses the magnitude
+tobf(x) = (d = fl(x); (isfinite(d) && (d != 0 || x == 0)) ? BigFloat(d) : BigFloat(x))
 via1(f, x) = Float64(f(tobf(x)))
 via2(f, x, y) = Float64(f(tobf(x), tobf(y)))
-round_away(x) = round(BigInt, x isa Float64 ? Rational{BigInt}(x) : x, RoundNearestTiesAway)
+round_away(x) = (x isa Float64 && !isfinite(x) && throw(Domain("non-finite")); round(BigInt, to_exact(x), RoundNearestTiesAway))
 function iroot(n::BigInt, k)
     n < 2 && return n
     x = big(1) << (div(ndigits(n, base=2) + k - 1, k) + 1)
@@ -86,9 +90,9 @@ function pyret_expt(x, y)
         rn, rd = exact_root(abs(numerator(x)), q), exact_root(denominator(x), q)
         if rn !== nothing && rd !== nothing
             rn == 0 && p < 0 && throw(DivideError())
-            return (neg ? -1 : 1) * (rn // rd)^p
+            return (neg && isodd(p) ? -1 : 1) * (rn // rd)^p
         end
-        return (neg ? -1.0 : 1.0) * via2(^, abs(x), y)
+        return (neg && isodd(p) ? -1.0 : 1.0) * via2(^, abs(x), y)
     end
     return via2(^, x, y)
 end
@@ -102,22 +106,30 @@ function pyret_remainder(a, b)
     if a isa Rational && b isa Rational
         return a - b * trunc(BigInt, a / b)
     end
-    ea, eb = Rational{BigInt}(a), Rational{BigInt}(b)
-    return Float64(ea - eb * trunc(BigInt, ea / eb))
+    da, db = fl(a), fl(b)   # IEEE fmod: fmod(x, inf) = x, fmod(inf, y) undefined, zero keeps x's sign
+    isinf(da) && throw(Domain("non-finite"))
+    isinf(db) && return da
+    ea, eb = Rational{BigInt}(da), Rational{BigInt}(db)
+    r = ea - eb * trunc(BigInt, ea / eb)
+    return r == 0 ? copysign(0.0, da) : Float64(r)
 end
 function pyret_rel(cv, tv, delta, smoothed)
+    cv, tv, delta = to_exact(cv), to_exact(tv), to_exact(delta)
     delta < 0 && throw(Domain("negative tolerance"))
     cv == tv && return true
     err = abs(cv - tv)
     den = min(abs(cv), abs(tv))
     smoothed && (den = den + 1)
+    delta > 1 && den == 0 && throw(DivideError())
     return delta <= 1 ? err <= delta * den : err / den <= delta
 end
 function from_string(s)
     occursin(LIT, s) || return nothing
     if startswith(s, "~")
         v = parse_num_lit(s[2:end])
-        return v === nothing ? nothing : fl(v)
+        v === nothing && return nothing
+        f = fl(v)
+        return (f == 0 && startswith(s, "~-")) ? -0.0 : f
     end
     return parse_num_lit(s)
 end
@@ -139,11 +151,11 @@ end
 function to_string_digits(n, d)
     int_only(d)
     t = (big(10) // 1)^Int(numerator(d))
-    return round_away(n * t) // t
+    return round_away(mixed(*, n, t)) // t
 end
-function check_finite_rational(x)
-    x isa Rational || throw(Domain("rough"))
-    return x
+function finite_only(x)
+    x isa Float64 && !isfinite(x) && throw(Domain("non-finite"))
+    return to_exact(x)
 end
 
 const OPS = Dict{String,Tuple{Vector{Symbol},Function}}(
@@ -169,7 +181,7 @@ const OPS = Dict{String,Tuple{Vector{Symbol},Function}}(
     "atan"               => ([:num], x -> via1(atan, x)),
     "atan2"              => ([:num, :num], pyret_atan2),
     "sqrt"               => ([:num], pyret_sqrt),
-    "integerSqrt"        => ([:num], x -> (int_only(x); isqrt(numerator(x)) // 1)),
+    "integerSqrt"        => ([:num], x -> (int_only(x); x < 0 && throw(Domain("negative")); isqrt(numerator(x)) // 1)),
     "sqr"                => ([:num], x -> x * x),
     "abs"                => ([:num], x -> abs(x)),
     "modulo"             => ([:num, :num], (a, b) -> (int_only(a, b); mod(numerator(a), numerator(b)) // 1)),
@@ -177,15 +189,15 @@ const OPS = Dict{String,Tuple{Vector{Symbol},Function}}(
     "remainder"          => ([:num, :num], pyret_remainder),
     "gcd"                => ([:num, :num], (a, b) -> (int_only(a, b); gcd(numerator(a), numerator(b)) // 1)),
     "lcm"                => ([:num, :num], (a, b) -> (int_only(a, b); lcm(numerator(a), numerator(b)) // 1)),
-    "floor"              => ([:num], x -> floor(BigInt, x) // 1),
-    "ceiling"            => ([:num], x -> ceil(BigInt, x) // 1),
+    "floor"              => ([:num], x -> floor(BigInt, to_exact(x)) // 1),
+    "ceiling"            => ([:num], x -> ceil(BigInt, to_exact(x)) // 1),
     "round"              => ([:num], x -> round_away(x) // 1),
-    "roundEven"          => ([:num], x -> round(BigInt, x) // 1),
-    "numerator"          => ([:num], x -> numerator(check_finite_rational(x)) // 1),
-    "denominator"        => ([:num], x -> denominator(check_finite_rational(x)) // 1),
+    "roundEven"          => ([:num], x -> round(BigInt, to_exact(x)) // 1),
+    "numerator"          => ([:num], x -> numerator(to_exact(x)) // 1),
+    "denominator"        => ([:num], x -> denominator(to_exact(x)) // 1),
     "toFixnum"           => ([:num], fl),
-    "toRational"         => ([:num], check_finite_rational),
-    "toExact"            => ([:num], check_finite_rational),
+    "toRational"         => ([:num], to_exact),
+    "toExact"            => ([:num], to_exact),
     "toRoughnum"         => ([:num], fl),
     "isInteger"          => ([:num], x -> x isa Rational && denominator(x) == 1),
     "isRational"         => ([:num], x -> x isa Rational),
@@ -198,11 +210,11 @@ const OPS = Dict{String,Tuple{Vector{Symbol},Function}}(
     "isNonNegative"      => ([:num], x -> x >= 0),
     "isPyretNumber"      => ([:num], x -> true),
     "fromString"         => ([:str], from_string),
-    "fromFixnum"         => ([:double], x -> x isa Rational ? x : throw(Domain("non-finite"))),
+    "fromFixnum"         => ([:double], finite_only),
     "makeBignum"         => ([:str], make_bignum),
     "makeRational"       => ([:num, :num], (n, d) -> (int_only(n, d); d == 0 && throw(DivideError()); n / d)),
     "makeRoughnum"       => ([:double], x -> x),
-    "roughlyEquals"      => ([:num, :num, :num], (x, y, d) -> (d < 0 && throw(Domain("negative tolerance")); abs(mixed(-, x, y)) <= d)),
+    "roughlyEquals"      => ([:num, :num, :num], (x, y, d) -> (d = to_exact(d); d < 0 && throw(Domain("negative tolerance")); abs(to_exact(x) - to_exact(y)) <= d)),
     "roughlyEqualsRel"   => ([:num, :num, :num, :bool], pyret_rel),
     "toRepeatingDecimal" => ([:num, :num], (n, d) -> (int_only(n, d); d <= 0 && throw(Domain("d <= 0")); n / d)),
     "toStringDigits"     => ([:num, :num], to_string_digits),

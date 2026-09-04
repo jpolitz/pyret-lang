@@ -5,13 +5,14 @@ import sys, re, math, struct
 from fractions import Fraction as Fr
 import mpmath
 mpmath.mp.prec = 200
+sys.set_int_max_str_digits(0)
 
 class Domain(Exception):
     pass
 
-LIT = re.compile(r'^~?[+-]?\d+(?:/\d+|(?:\.\d+)?(?:[eE][+-]?\d+)?)$')
-BIGNUM_LIT = re.compile(r'^[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$')
-EXACT = re.compile(r'^[+-]?\d+(?:/\d+)?$')
+LIT = re.compile(r'^~?[+-]?[0-9]+(?:/[0-9]+|(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$')
+BIGNUM_LIT = re.compile(r'^[+-]?[0-9]+(?:(?:\.[0-9]+)?[eE]\+?[0-9]+)?$')
+EXACT = re.compile(r'^[+-]?[0-9]+(?:/[0-9]+)?$')
 
 def parse_num(s):
     if s.startswith('~'):
@@ -42,17 +43,25 @@ def ieee_float(x):
     if isinstance(x, float): return x
     try: return float(x)
     except OverflowError: return math.inf if x > 0 else -math.inf
+# a double read back as the decimal it prints as (js-numbers' Roughnum.toRational)
+def float_exact(x): return Fr(repr(x))
+def to_exact(x): return x if isinstance(x, Fr) else float_exact(x)
+# evaluate at the double nearest x unless that loses the magnitude
 def to_mp(x):
     d = ieee_float(x)
-    if math.isfinite(d): return mpmath.mpf(d)
+    if math.isfinite(d) and (d != 0 or x == 0): return mpmath.mpf(d)
     return mpmath.mpf(x.numerator) / mpmath.mpf(x.denominator)
 def to_float(v):
     if isinstance(v, mpmath.mpc): raise Domain('complex')
     return float(v)
 def via1(f, x): return to_float(f(to_mp(x)))
+# mpmath drops the sign of zero; odd functions and sqrt keep it in IEEE
+def via1_signed(f, x):
+    r = via1(f, x)
+    return math.copysign(0.0, ieee_float(x)) if r == 0 and ieee_float(x) == 0 else r
 def via2(f, x, y): return to_float(f(to_mp(x), to_mp(y)))
 def round_away(x):
-    e = Fr(x)
+    e = to_exact(x)
     r = math.floor(abs(e) + Fr(1, 2))
     return -r if e < 0 else r
 def iroot(n, k):
@@ -69,7 +78,7 @@ def pyret_sqrt(x):
     if isinstance(x, Fr) and x >= 0:
         rn, rd = exact_root(x.numerator, 2), exact_root(x.denominator, 2)
         if rn is not None and rd is not None: return Fr(rn, rd)
-    return via1(mpmath.sqrt, x)
+    return via1_signed(mpmath.sqrt, x)
 def pyret_expt(x, y):
     if isinstance(x, Fr) and isinstance(y, Fr) and y.denominator == 1:
         return x ** y.numerator
@@ -78,20 +87,26 @@ def pyret_expt(x, y):
         if neg and q % 2 == 0: raise Domain('even root of negative')
         rn, rd = exact_root(abs(x.numerator), q), exact_root(x.denominator, q)
         if rn is not None and rd is not None:
-            return (-1 if neg else 1) * Fr(rn, rd) ** p
-        return (-1.0 if neg else 1.0) * via2(mpmath.power, abs(x), y)
+            return (-1 if neg and p % 2 else 1) * Fr(rn, rd) ** p
+        return (-1.0 if neg and p % 2 else 1.0) * via2(mpmath.power, abs(x), y)
     return via2(mpmath.power, x, y)
 def pyret_atan2(y, x):
     if y == 0 and x == 0: raise Domain('atan2(0,0)')
     r = mpmath.atan2(to_mp(y), to_mp(x))
+    if r == 0: return math.copysign(0.0, ieee_float(y))
     return to_float(r + 2 * mpmath.pi if r < 0 else r)
 def pyret_remainder(a, b):
     if b == 0: raise Domain('zero divisor')
     if isinstance(a, Fr) and isinstance(b, Fr):
         return a - b * math.trunc(a / b)
-    ea, eb = Fr(a), Fr(b)
-    return ieee_float(ea - eb * math.trunc(ea / eb))
+    da, db = ieee_float(a), ieee_float(b)   # IEEE fmod: fmod(x, inf) = x, fmod(inf, y) undefined, zero keeps x's sign
+    if math.isinf(da): raise Domain('non-finite')
+    if math.isinf(db): return da
+    ea, eb = Fr(da), Fr(db)
+    r = ea - eb * math.trunc(ea / eb)
+    return math.copysign(0.0, da) if r == 0 else ieee_float(r)
 def pyret_rel(cv, tv, delta, smoothed):
+    cv, tv, delta = to_exact(cv), to_exact(tv), to_exact(delta)
     if delta < 0: raise Domain('negative tolerance')
     if cv == tv: return True
     err = abs(cv - tv)
@@ -100,23 +115,19 @@ def pyret_rel(cv, tv, delta, smoothed):
     return err <= delta * den if delta <= 1 else err / den <= delta
 def from_string(s):
     if not LIT.match(s): return None
-    if s.startswith('~'):
-        v = Fr(s[1:])
-        if v.denominator == 0: return None
-        return ieee_float(v)
-    return Fr(s) if '/' not in s or int(s.split('/')[1]) != 0 else None
+    if '/' in s and int(s.split('/')[1]) == 0: return None
+    if s.startswith('~'): return ieee_float(Fr(s[1:])) if '/' in s else float(s[1:])
+    return Fr(s)
 def make_bignum(s):
     if not BIGNUM_LIT.match(s): raise Domain('not an integer string')
     v = Fr(s)
     if v.denominator != 1: raise Domain('not an integer string')
     return v
-def exact_only(x):
-    if not isinstance(x, Fr): raise Domain('rough')
-    return x
 def finite_only(x):
-    if not isinstance(x, Fr): raise Domain('non-finite')
-    return x
+    if isinstance(x, float) and not math.isfinite(x): raise Domain('non-finite')
+    return to_exact(x)
 def roughly_equals(x, y, d):
+    x, y, d = to_exact(x), to_exact(y), to_exact(d)
     if d < 0: raise Domain('negative tolerance')
     return abs(x - y) <= d
 def to_repeating_decimal(n, d):
@@ -143,12 +154,12 @@ OPS = {
     'expt':               (('num', 'num'), pyret_expt),
     'exp':                (('num',), lambda x: via1(mpmath.exp, x)),
     'log':                (('num',), lambda x: via1(mpmath.log, x)),
-    'sin':                (('num',), lambda x: via1(mpmath.sin, x)),
+    'sin':                (('num',), lambda x: via1_signed(mpmath.sin, x)),
     'cos':                (('num',), lambda x: via1(mpmath.cos, x)),
-    'tan':                (('num',), lambda x: via1(mpmath.tan, x)),
-    'asin':               (('num',), lambda x: via1(mpmath.asin, x)),
+    'tan':                (('num',), lambda x: via1_signed(mpmath.tan, x)),
+    'asin':               (('num',), lambda x: via1_signed(mpmath.asin, x)),
     'acos':               (('num',), lambda x: via1(mpmath.acos, x)),
-    'atan':               (('num',), lambda x: via1(mpmath.atan, x)),
+    'atan':               (('num',), lambda x: via1_signed(mpmath.atan, x)),
     'atan2':              (('num', 'num'), pyret_atan2),
     'sqrt':               (('num',), pyret_sqrt),
     'integerSqrt':        (('num',), lambda x: (int_only(x), Fr(math.isqrt(x.numerator)))[1]),
@@ -159,15 +170,15 @@ OPS = {
     'remainder':          (('num', 'num'), pyret_remainder),
     'gcd':                (('num', 'num'), lambda a, b: (int_only(a, b), Fr(math.gcd(a.numerator, b.numerator)))[1]),
     'lcm':                (('num', 'num'), lambda a, b: (int_only(a, b), Fr(math.lcm(a.numerator, b.numerator)))[1]),
-    'floor':              (('num',), lambda x: Fr(math.floor(Fr(x)))),
-    'ceiling':            (('num',), lambda x: Fr(math.ceil(Fr(x)))),
+    'floor':              (('num',), lambda x: Fr(math.floor(to_exact(x)))),
+    'ceiling':            (('num',), lambda x: Fr(math.ceil(to_exact(x)))),
     'round':              (('num',), lambda x: Fr(round_away(x))),
-    'roundEven':          (('num',), lambda x: Fr(round(Fr(x)))),
-    'numerator':          (('num',), lambda x: Fr(exact_only(x).numerator)),
-    'denominator':        (('num',), lambda x: Fr(exact_only(x).denominator)),
+    'roundEven':          (('num',), lambda x: Fr(round(to_exact(x)))),
+    'numerator':          (('num',), lambda x: Fr(to_exact(x).numerator)),
+    'denominator':        (('num',), lambda x: Fr(to_exact(x).denominator)),
     'toFixnum':           (('num',), ieee_float),
-    'toRational':         (('num',), exact_only),
-    'toExact':            (('num',), exact_only),
+    'toRational':         (('num',), to_exact),
+    'toExact':            (('num',), to_exact),
     'toRoughnum':         (('num',), ieee_float),
     'isInteger':          (('num',), lambda x: isinstance(x, Fr) and x.denominator == 1),
     'isRational':         (('num',), lambda x: isinstance(x, Fr)),

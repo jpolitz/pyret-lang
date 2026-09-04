@@ -8,8 +8,8 @@
 (define (domain msg) (raise (exn:fail:contract (string-append "domain: " msg) (current-continuation-marks))))
 
 ;; Pyret literal grammar (js-numbers fromString) and makeBignum's grammar.
-(define LIT #px"^~?[+-]?\\d+(?:/\\d+|(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)$")
-(define BIGNUM-LIT #px"^[+-]?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$")
+(define LIT #px"^~?[+-]?[0-9]+(?:/[0-9]+|(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)$")
+(define BIGNUM-LIT #px"^[+-]?[0-9]+(?:(?:\\.[0-9]+)?[eE]\\+?[0-9]+)?$")
 
 (define (parse-num s)
   (cond [(string-prefix? s "~")
@@ -39,10 +39,14 @@
 ;; helpers
 (define (int-only . xs) (for ([x xs]) (unless (and (exact? x) (integer? x)) (domain "not an exact integer"))))
 (define (fl x) (if (exact? x) (exact->inexact x) x))
-(define (->bf x) (let ([d (fl x)]) (if (infinite? d) (bf x) (bf d))))
+;; a double read back as the decimal it prints as (js-numbers' Roughnum.toRational)
+(define (float-exact x) (string->number (number->string x) 10 'number-or-false 'decimal-as-exact))
+(define (->exact x) (if (exact? x) x (float-exact x)))
+;; evaluate at the double nearest x unless that loses the magnitude
+(define (->bf x) (let ([d (fl x)]) (if (or (infinite? d) (and (zero? d) (not (zero? x)))) (bf x) (bf d))))
 (define (via1 f x) (bigfloat->flonum (f (->bf x))))
 (define (via2 f x y) (bigfloat->flonum (f (->bf x) (->bf y))))
-(define (round-away x) (let ([e (inexact->exact x)]) (* (if (< e 0) -1 1) (floor (+ (abs e) 1/2)))))
+(define (round-away x) (let ([e (->exact x)]) (* (if (< e 0) -1 1) (floor (+ (abs e) 1/2)))))
 (define (exact-root n k) (let ([r (integer-root n k)]) (and (= (expt r k) n) r)))
 (define (pyret-sqrt x)
   (cond [(and (exact? x) (>= x 0))
@@ -56,8 +60,8 @@
            (when (and neg (even? q)) (domain "even root of negative"))
            (let ([rn (exact-root (abs (numerator x)) q)] [rd (exact-root (denominator x) q)])
              (if (and rn rd)
-                 (* (if neg -1 1) (expt (/ rn rd) p))
-                 (* (if neg -1.0 1.0) (via2 bfexpt (abs x) y)))))]
+                 (* (if (and neg (odd? p)) -1 1) (expt (/ rn rd) p))
+                 (* (if (and neg (odd? p)) -1.0 1.0) (via2 bfexpt (abs x) y)))))]
         [else (via2 bfexpt x y)]))
 (define (pyret-atan2 y x)
   (when (and (zero? y) (zero? x)) (domain "atan2(0,0)"))
@@ -67,9 +71,14 @@
   (when (zero? b) (domain "zero divisor"))
   (if (and (exact? a) (exact? b))
       (- a (* b (truncate (/ a b))))
-      (let ([ea (inexact->exact a)] [eb (inexact->exact b)])
-        (exact->inexact (- ea (* eb (truncate (/ ea eb))))))))
+      (let ([da (fl a)] [db (fl b)])   ; IEEE fmod: fmod(x, inf) = x, fmod(inf, y) undefined, zero keeps x's sign
+        (cond [(infinite? da) (domain "non-finite")]
+              [(infinite? db) da]
+              [else (let* ([ea (inexact->exact da)] [eb (inexact->exact db)]
+                           [r (- ea (* eb (truncate (/ ea eb))))])
+                      (if (zero? r) (if (< da 0) -0.0 0.0) (exact->inexact r)))]))))
 (define (pyret-rel cv tv delta smoothed)
+  (set! cv (->exact cv)) (set! tv (->exact tv)) (set! delta (->exact delta))
   (when (< delta 0) (domain "negative tolerance"))
   (if (= cv tv) #t
       (let* ([err (abs (- cv tv))]
@@ -79,7 +88,10 @@
 (define (from-string s)
   (if (regexp-match? LIT s)
       (if (string-prefix? s "~")
-          (let ([v (string->number (substring s 1))]) (if (and v (rational? v)) (exact->inexact v) (if v v 'none)))
+          (let* ([r (substring s 1)] [v (string->number r 10 'number-or-false 'decimal-as-inexact)])
+            (cond [(not v) 'none]
+                  [(and (exact? v) (zero? v) (string-prefix? r "-")) -0.0]
+                  [else (exact->inexact v)]))
           (let ([v (string->number s 10 'number-or-false 'decimal-as-exact)]) (if v v 'none)))
       'none))
 (define (make-bignum s)
@@ -121,15 +133,15 @@
    "remainder"          (cons '(num num) pyret-remainder)
    "gcd"                (cons '(num num) (lambda (a b) (int-only a b) (gcd a b)))
    "lcm"                (cons '(num num) (lambda (a b) (int-only a b) (lcm a b)))
-   "floor"              (cons '(num) (lambda (x) (inexact->exact (floor x))))
-   "ceiling"            (cons '(num) (lambda (x) (inexact->exact (ceiling x))))
+   "floor"              (cons '(num) (lambda (x) (floor (->exact x))))
+   "ceiling"            (cons '(num) (lambda (x) (ceiling (->exact x))))
    "round"              (cons '(num) round-away)
-   "roundEven"          (cons '(num) (lambda (x) (inexact->exact (round x))))
-   "numerator"          (cons '(num) (lambda (x) (int-only (denominator x)) (numerator x)))
-   "denominator"        (cons '(num) (lambda (x) (int-only (denominator x)) (denominator x)))
+   "roundEven"          (cons '(num) (lambda (x) (round (->exact x))))
+   "numerator"          (cons '(num) (lambda (x) (numerator (->exact x))))
+   "denominator"        (cons '(num) (lambda (x) (denominator (->exact x))))
    "toFixnum"           (cons '(num) exact->inexact)
-   "toRational"         (cons '(num) (lambda (x) (if (exact? x) x (domain "rough"))))
-   "toExact"            (cons '(num) (lambda (x) (if (exact? x) x (domain "rough"))))
+   "toRational"         (cons '(num) ->exact)
+   "toExact"            (cons '(num) ->exact)
    "toRoughnum"         (cons '(num) exact->inexact)
    "isInteger"          (cons '(num) (lambda (x) (and (exact? x) (integer? x))))
    "isRational"         (cons '(num) exact?)
@@ -142,11 +154,11 @@
    "isNonNegative"      (cons '(num) (lambda (x) (>= x 0)))
    "isPyretNumber"      (cons '(num) (lambda (x) #t))
    "fromString"         (cons '(str) from-string)
-   "fromFixnum"         (cons '(double) (lambda (x) (if (exact? x) x (domain "non-finite"))))
+   "fromFixnum"         (cons '(double) (lambda (x) (if (or (infinite? x) (nan? x)) (domain "non-finite") (->exact x))))
    "makeBignum"         (cons '(str) make-bignum)
    "makeRational"       (cons '(num num) (lambda (n d) (int-only n d) (/ n d)))
    "makeRoughnum"       (cons '(double) (lambda (x) x))
-   "roughlyEquals"      (cons '(num num num) (lambda (x y d) (when (< d 0) (domain "negative tolerance")) (<= (abs (- x y)) d)))
+   "roughlyEquals"      (cons '(num num num) (lambda (x y d) (when (< d 0) (domain "negative tolerance")) (<= (abs (- (->exact x) (->exact y))) (->exact d))))
    "roughlyEqualsRel"   (cons '(num num num bool) pyret-rel)
    "toRepeatingDecimal" (cons '(num num) (lambda (n d) (int-only n d) (when (<= d 0) (domain "d <= 0")) (/ n d)))
    "toStringDigits"     (cons '(num num) (lambda (n d) (int-only d) (let ([t (expt 10 d)]) (/ (round-away (* n t)) t))))))

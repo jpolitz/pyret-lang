@@ -14,20 +14,18 @@ const ULP_LIMIT = {
   exp: 1, log: 2, expt: 2, sqrt: 0,
 };
 
-// Ops where js-numbers reads roughnums as their printed decimal
-// (Roughnum.toRational goes through fromString(n.toString())).
-const DECIMAL_PRINT_OPS = new Set([
-  'toRational', 'toExact', 'numerator', 'denominator', 'fromFixnum',
-  'roughlyEquals', 'roughlyEqualsRel',
-]);
-
 // Ops where js-numbers converts the exact side to a double before comparing
 // (oracles compare exact against float exactly).
 const MIXED_COMPARE_OPS = new Set(['lessThan', 'lessThanOrEqual', 'greaterThan', 'greaterThanOrEqual']);
 
-// Ops where a zero second argument is a division-by-zero error in js-numbers
-// whatever the oracle did (IEEE infinity, Python ZeroDivisionError, ...).
-const ZERO_DIVISOR_OPS = new Set(['divide', 'quotient', 'remainder', 'makeRational']);
+// Ops where js-numbers checks the divisor before anything else, so a zero
+// second argument is a division-by-zero error whatever the oracle did (IEEE
+// infinity, NaN, Python ZeroDivisionError, Racket's exact 0 for (/ 0 -0.0),
+// a domain error for a non-integer first argument, ...).
+const ZERO_DIVISOR_OPS = new Set(['divide', 'remainder', 'makeRational']);
+// Integer exponents beyond the fixnum range go to jsbn's bnpExp, which
+// refuses exponents above 2^32-1 rather than computing e.g. (-1)^n.
+const EXPT_EXPONENT_LIMIT = 9000000000000000n;
 
 function numArg(kind, s) {
   if (kind === 'num' || kind === 'double') {
@@ -50,14 +48,6 @@ function oracleArgs(op, args) {
   const rules = new Set();
   const out = args.slice();
   const A = argsOf(op, args);
-  if (DECIMAL_PRINT_OPS.has(op)) {
-    A.forEach((a, i) => {
-      if (isRough(a) && Number.isFinite(a.rough)) {
-        out[i] = F.exactLit(F.decimalToExact(a.lit.slice(1)));
-        rules.add('decimal-print-exact');
-      }
-    });
-  }
   if (MIXED_COMPARE_OPS.has(op) && isRough(A[0]) !== isRough(A[1])) {
     const i = isRough(A[0]) ? 1 : 0;
     out[i] = F.roughLit(F.exactToDouble(A[i].exact));
@@ -92,7 +82,7 @@ function identityValue(op, A) {
     case 'sin': case 'tan': case 'asin': case 'atan': return isExactZero(A[0]) ? '0' : null;
     case 'cos': case 'exp': return isExactZero(A[0]) ? '1' : null;
     case 'log': case 'acos': return isExactOne(A[0]) ? '0' : null;
-    case 'atan2': return isExactZero(A[0]) && A[1].exact !== undefined && isPositive(A[1]) ? '0' : null;
+    case 'atan2': return isExactZero(A[0]) && isPositive(A[1]) ? '0' : null;
     case 'expt':
       if (isExactZero(A[1]) || isExactOne(A[0])) return '1';
       if (isExactZero(A[0])) {
@@ -111,10 +101,11 @@ function normalize(op, args, r) {
   const rules = [];
   if (r === null || r.harnessError) return { result: r, rules };
   const A = argsOf(op, args);
+  if (ZERO_DIVISOR_OPS.has(op) && isZero(A[1])) {
+    r = { error: 'div-by-zero' }; rules.push('zero-divisor');
+  }
   if (r.nonfinite || r.error) {
-    if (ZERO_DIVISOR_OPS.has(op) && isZero(A[1])) {
-      r = { error: 'div-by-zero' }; rules.push('zero-divisor');
-    } else if (op === 'expt' && isZero(A[0]) && isNegative(A[1])) {
+    if (op === 'expt' && isZero(A[0]) && isNegative(A[1])) {
       r = { error: 'div-by-zero' }; rules.push('zero-divisor');
     } else if (op === 'modulo' && isZero(A[1])) {
       r = { error: 'error' }; rules.push('modulo-zero-is-domain-error');
@@ -124,6 +115,10 @@ function normalize(op, args, r) {
     }
   }
   if (r.rough && op === 'toFixnum') r = { double: r.rough };
+  if (r.rough && op === 'add' && roughIs(r.rough, '0')) {
+    const other = isExactZero(A[0]) && isRough(A[1]) ? A[1] : isExactZero(A[1]) && isRough(A[0]) ? A[0] : null;
+    if (other && other.rough === 0) { r = { rough: F.doubleToBits(other.rough) }; rules.push('exact-zero-add-identity'); }
+  }
   if (r.rough && roughIs(r.rough, '0') &&
       ((op === 'multiply' && (isExactZero(A[0]) || isExactZero(A[1]))) ||
        (op === 'divide' && isExactZero(A[0])))) {
@@ -132,6 +127,18 @@ function normalize(op, args, r) {
   const idv = identityValue(op, A);
   if (idv !== null && r.rough && roughIs(r.rough, idv)) {
     r = { exact: idv }; rules.push('exact-at-identity');
+  }
+  if ((op === 'sin' || op === 'cos' || op === 'tan') && A[0].exact !== undefined && !Number.isFinite(F.exactToDouble(A[0].exact))) {
+    r = { error: 'error' }; rules.push('trig-overflow-is-error');
+  }
+  if (op === 'expt' && A[0].exact !== undefined && !isExactZero(A[0]) && !isExactOne(A[0]) &&
+      A[1].exact !== undefined && A[1].exact.d === 1n && F.bigAbs(A[1].exact.n) > EXPT_EXPONENT_LIMIT) {
+    r = { error: 'error' }; rules.push('expt-exponent-limit');
+  }
+  if (op === 'roughlyEquals' && isRough(A[2]) && A[2].rough === Number.MIN_VALUE && (isRough(A[0]) || isRough(A[1]))) {
+    const x = isRough(A[0]) ? A[0].rough : F.exactToDouble(A[0].exact);
+    const y = isRough(A[1]) ? A[1].rough : F.exactToDouble(A[1].exact);
+    if (Math.abs(x - y) === Number.MIN_VALUE) { r = { error: 'error' }; rules.push('min-value-tolerance-error'); }
   }
   return { result: r, rules };
 }

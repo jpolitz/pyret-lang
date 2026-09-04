@@ -143,10 +143,18 @@ function describeExpect(e) {
 function checkRepeating(items, q) {
   if (items.length !== 3) return 'expected 3 parts';
   const [whole, pre, rep] = items;
-  if (!/^-?\d+$/.test(whole) || !/^\d*$/.test(pre) || !/^\d+$/.test(rep)) return 'malformed parts';
+  if (!/^-?\d+$/.test(whole) || !/^\d*$/.test(pre) || !(/^\d+$/.test(rep) || rep === '...')) return 'malformed parts';
   const neg = whole.startsWith('-');
   const w = BigInt(whole.replace('-', ''));
   const preN = pre === '' ? 0n : BigInt(pre);
+  if (rep === '...') {
+    // expansion cut off at the limit: whole and the digits so far must be the truncated expansion
+    const mag = F.exact(F.bigAbs(q.n), q.d);
+    const scale = 10n ** BigInt(pre.length);
+    const truncated = (mag.n * scale) / mag.d;
+    if ((neg !== (q.n < 0n)) || truncated !== w * scale + preN) return 'truncated expansion does not match';
+    return null;
+  }
   const scale = 10n ** BigInt(pre.length);
   const repN = BigInt(rep), period = 10n ** BigInt(rep.length) - 1n;
   // value = w + (preN + repN/period) / scale
@@ -186,7 +194,9 @@ function compare(op, args, c, actual) {
     if (actual.kind !== 'exact') return { ok: false, why: 'got ' + describe(actual) };
     const x = F.parseExact(e.exact);
     if (x.n !== actual.q.n || x.d !== actual.q.d) return { ok: false, why: 'got ' + describe(actual) };
-    if (!actual.canonical) return { ok: false, why: 'non-canonical representation: ' + describe(actual), representation: true };
+    if (OPS[op].repr) {
+      if (actual.repr !== OPS[op].repr) return { ok: false, why: 'expected a ' + OPS[op].repr + ': ' + describe(actual), representation: true };
+    } else if (!actual.canonical) return { ok: false, why: 'non-canonical representation: ' + describe(actual), representation: true };
     return { ok: true, negZero: !!actual.negZero };
   }
   if (e.rough !== undefined) {
