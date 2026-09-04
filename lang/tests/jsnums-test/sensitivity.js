@@ -8,7 +8,8 @@
 //   node sensitivity.js --base <git-ref> --fixed <git-ref|path> [--groups groups.json] [--list]
 //
 // groups.json: { "<name>": { "hunks": [1, 4], "note": "..." }, ... } with
-// 1-based hunk ordinals of `git diff BASE FIXED -- lang/src/js/base/js-numbers.js`.
+// 1-based ordinals of the zero-context hunks (git diff -U0) between the
+// base and fixed files; --list prints them.
 
 const fs = require('fs');
 const os = require('os');
@@ -33,10 +34,10 @@ function parseHunks(diff) {
   let cur = null;
   for (const line of diff.split('\n')) {
     const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/.exec(line);
-    if (m) { cur = { header: line, oldStart: +m[1], newStart: +m[3], lines: [] }; hunks.push(cur); continue; }
+    if (m) { cur = { header: line, oldStart: +m[1], newStart: +m[3], newLen: m[4] === undefined ? 1 : +m[4], lines: [] }; hunks.push(cur); continue; }
     if (!cur) continue;
     if (line.startsWith('\\')) continue;
-    if (/^[ +-]/.test(line) || line === '') cur.lines.push(line === '' ? ' ' : line);
+    if (/^[ +-]/.test(line)) cur.lines.push(line);
   }
   for (const h of hunks) {
     h.post = h.lines.filter(l => l[0] !== '-').map(l => l.slice(1));
@@ -49,7 +50,7 @@ function parseHunks(diff) {
 function revert(fixedLines, hunks) {
   const out = fixedLines.slice();
   for (const h of [...hunks].sort((a, b) => b.newStart - a.newStart)) {
-    const at = h.newStart - 1;
+    const at = h.newLen === 0 ? h.newStart : h.newStart - 1;
     const have = out.slice(at, at + h.post.length);
     if (have.join('\n') !== h.post.join('\n')) throw new Error('hunk ' + h.header + ' does not match the fixed file');
     out.splice(at, h.post.length, ...h.pre);
@@ -80,9 +81,10 @@ async function main(argv) {
   const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'jsnums-sens-'));
   const fixedPath = path.join(tmp, 'fixed.js');
   fs.writeFileSync(fixedPath, fixedText);
-  const diff = fs.existsSync(opt.fixed)
-    ? execFileSync('git', ['diff', '--no-index', '--', '/dev/fd/0', fixedPath], { cwd: REPO, encoding: 'utf8', input: readRef(opt.base), maxBuffer: 1 << 28 }).toString()
-    : git('diff', opt.base, opt.fixed, '--', FILE);
+  const basePath = path.join(tmp, 'base.js');
+  fs.writeFileSync(basePath, readRef(opt.base));
+  // git diff --no-index exits 1 when the files differ
+  const diff = require('child_process').spawnSync('git', ['diff', '--no-index', '-U0', '--', basePath, fixedPath], { cwd: REPO, encoding: 'utf8', maxBuffer: 1 << 28 }).stdout;
   const hunks = parseHunks(diff);
   console.log('hunks in diff: ' + hunks.length);
   if (opt.list) { hunks.forEach((h, i) => console.log((i + 1) + ': ' + h.header)); return; }
@@ -94,9 +96,10 @@ async function main(argv) {
   console.log('\n| group | hunks | new failures | first failing cases |');
   console.log('|---|---|---:|---|');
   const fixedLines = fixedText.split('\n');
+  let gi = 0;
   for (const [name, g] of Object.entries(groups)) {
     const hs = g.hunks.map(i => { covered.add(i); return hunks[i - 1]; });
-    const variant = path.join(tmp, name + '.js');
+    const variant = path.join(tmp, 'group-' + (++gi) + '.js');
     fs.writeFileSync(variant, revert(fixedLines, hs).join('\n'));
     const r = await runSuite(variant);
     const fresh = r.fails.filter(f => !baselineIds.has(f.id));

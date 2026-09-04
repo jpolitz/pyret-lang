@@ -20,16 +20,15 @@ if (!isMainThread && workerData.single) {
   const { lib } = loadLibrary(libPath, bits);
   for (const { name, start } of files) {
     const data = S.readCaseFile(name);
-    const results = [];
     for (let i = start; i < data.cases.length; i++) {
       const c = data.cases[i];
       if (filterText && !c.id.includes(filterText)) continue;
       parentPort.postMessage({ type: 'start', name, index: i });
       const actual = S.evaluate(lib, data.op, c.args);
       const r = S.compare(data.op, c.args, c, actual);
-      results.push({ id: c.id, family: c.family, args: c.args, expect: c.expect, mode: c.mode, ok: r.ok, why: r.why, ulp: r.ulp, negZero: r.negZero, representation: r.representation, actual: { kind: actual.kind, text: S.describe(actual) } });
+      // one message per case so nothing is lost when a later case hangs
+      parentPort.postMessage({ type: 'result', name, result: { id: c.id, family: c.family, args: c.args, expect: c.expect, mode: c.mode, ok: r.ok, why: r.why, ulp: r.ulp, negZero: r.negZero, representation: r.representation, actual: { kind: actual.kind, text: S.describe(actual) } } });
     }
-    parentPort.postMessage({ type: 'file', name, results });
   }
   parentPort.postMessage({ type: 'done' });
 }
@@ -50,8 +49,8 @@ function runConfig(libPath, bits, fileNames, opts) {
           current = m;
           clearTimeout(timer);
           timer = setTimeout(onTimeout, timeout);
-        } else if (m.type === 'file') {
-          out.get(m.name).push(...m.results);
+        } else if (m.type === 'result') {
+          out.get(m.name).push(m.result);
         } else if (m.type === 'done') {
           clearTimeout(timer);
           resolve(out);
