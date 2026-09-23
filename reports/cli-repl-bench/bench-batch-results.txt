@@ -1,0 +1,7 @@
+batch pyret  cold (server fork + compile)  2151 ms (exit 0)
+batch pyret  warm server, cached compile     663 ms (exit 0)
+batch pyret  warm server, cache cleared      977 ms (exit 0)
+batch ts  cold (server fork + compile)  878 ms (exit 0)
+batch ts  warm server, cached compile     443 ms (exit 0)
+batch ts  warm server, cache cleared      547 ms (exit 0)
+### BATCH DONE

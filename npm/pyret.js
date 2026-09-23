@@ -3,6 +3,8 @@
 const usage = require('command-line-usage');
 const commandLineArgs = require('command-line-args');
 const pyretClient = require('./client-lib');
+const pyretRepl = require('./repl-client');
+const pyretReplLocal = require('./repl-local');
 const path = require('path');
 const fs = require('fs');
 const stripAnsi = require('strip-ansi');
@@ -130,6 +132,17 @@ const usages = [
         description: "Specify the path to a socket file to use to communicate with the server. Defaults to {underline /tmp/parley-<username>/comm.sock}."
       },
       {
+        name: 'repl',
+        alias: 'r',
+        type: Boolean,
+        description: "Start an interactive REPL instead of running a program. The REPL runs the compiler in this process, with no background compile server: interactions are faster, and there is no socket or {bold --shutdown} to manage. Use {bold --server} for the old behavior."
+      },
+      {
+        name: 'server',
+        type: Boolean,
+        description: "For {bold --repl}: use the background compile server instead of running the compiler in this process. Implied by {bold --port} and by {bold --backend pyret}. Only the {bold pyret} backend has a REPL-capable server."
+      },
+      {
         name: 'backend',
         typeLabel: "{underline pyret|ts}",
         description: "Which compiler backend to use (defaults to {bold pyret} or the PYRET_COMPILER environment variable if set). {bold ts} selects the TypeScript port of the compiler. An explicit {bold --compiler} path overrides this choice."
@@ -228,6 +241,9 @@ const optionDefinitions = [
   { name: 'global-parley', type: String, defaultValue: "~/.parley/" },
   { name: 'local-parley', type: String, defaultValue: ".pyret" },
 
+  { name: 'repl', alias: 'r', type: Boolean, group: "meta", defaultValue: false },
+  { name: 'server', type: Boolean, group: "client", defaultValue: false },
+
   { name: 'program', alias: 'p', type: String, group: "pyret-options", defaultOption: true },
 
   // These options are passed on to the compiler, and have no effect (yet)
@@ -281,6 +297,38 @@ catch(e) {
   process.exit(1);
 }
 
+// Which REPL back end: in-process (repl-local) or the compile server
+// (repl-client). Only --repl reads this; the batch path always uses the
+// server, where a warm compiler shared across invocations is the whole point.
+//
+// The in-process REPL runs the TypeScript compiler -- there is no in-process
+// host for the Pyret-hosted one -- so it needs a package built with
+// PYRET_NPM_TS=1, and asking for the pyret backend means asking for the
+// server. commandLineArgs' defaultValue makes an explicit `--backend pyret`
+// indistinguishable from the default, hence the argv check.
+const backendWasExplicit = process.argv.some((a) => a === "--backend" || a.startsWith("--backend="))
+      || !!process.env.PYRET_COMPILER;
+// --port and --shutdown only mean anything to the server, so they select it.
+const wantsServer = options.client.server || !!options.client.port || options.client.shutdown
+      || (backendWasExplicit && options.client.backend === "pyret");
+let replInProcess = false;
+if(options.meta.repl) {
+  if(wantsServer) {
+    // server.ts has no repl-* commands, so the ts server cannot host a REPL.
+    if(options.client.backend === "ts") {
+      console.error("The ts compile server has no REPL support; drop --backend ts, or drop the flags that select the server.");
+      process.exit(1);
+    }
+  }
+  else if(fs.existsSync(tsCompilerPath)) {
+    replInProcess = true;
+    options.client.backend = "ts";
+    options["_all"]["backend"] = "ts";
+  }
+  // Otherwise this package was built without the ts compiler; fall back to the
+  // server, which is the only REPL there is on the pyret backend.
+}
+
 const backend = options.client.backend;
 if(backend !== "pyret" && backend !== "ts") {
   console.error("--backend must be pyret or ts (got " + backend + ")");
@@ -307,5 +355,13 @@ if(!options["pyret-options"]["outfile"] && options["pyret-options"]["program"]) 
   }
 }
 
-pyretClient.start(options);
+if(options.meta.repl) {
+  if(replInProcess) {
+    pyretReplLocal.start(options);
+  } else {
+    pyretRepl.start(options);
+  }
+} else {
+  pyretClient.start(options);
+}
 

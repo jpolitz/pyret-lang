@@ -41,3 +41,40 @@ if [ -e node_modules/pyret-npm/pyret-lang/build/ts-compiler/pyret.js ]; then
 else
   echo "packaged cli: ts backend not in package, skipped"
 fi
+
+# The REPL is what students run, and it takes a different path through the
+# package than the batch compile: repl-local.js loads the ts-compiler build's
+# AMD bundle out of the installed tree. Check it end to end from the tarball.
+repl_out="$smokedir/out-repl.log"
+repl_status=0
+set +e
+{
+  echo '21 * 2'
+  echo 'include image'
+  echo 'image-width(circle(50, "solid", "red"))'
+  echo 'check: 2 + 2 is 4 end'
+} | node node_modules/pyret-npm/pyret.js --repl > "$repl_out" 2>&1
+repl_status=$?
+set -e
+if [ -e node_modules/pyret-npm/pyret-lang/build/ts-compiler/pyret.js ]; then
+  # No ts build would mean a silent fall back to the compile-server REPL, so
+  # assert we really took the in-process path.
+  if grep -q "Starting Parley server" "$repl_out"; then
+    echo "packaged cli: --repl fell back to the compile server despite a ts build:"
+    cat "$repl_out"
+    exit 1
+  fi
+fi
+for expected in "42" "100" "Looks shipshape"; do
+  if ! grep -q "$expected" "$repl_out"; then
+    echo "packaged cli: --repl missing '$expected' (exit $repl_status):"
+    cat "$repl_out"
+    exit 1
+  fi
+done
+if [ "$repl_status" -ne 0 ]; then
+  echo "packaged cli: --repl exited $repl_status:"
+  cat "$repl_out"
+  exit 1
+fi
+echo "packaged cli: --repl is shipshape"
