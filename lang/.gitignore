@@ -78,3 +78,4 @@ compiled/
 build/ts-compiler
 tests/ts-compiled/
 compiled-ts/
+build/codegen-bench
