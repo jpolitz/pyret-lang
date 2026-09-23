@@ -4,7 +4,6 @@
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
-const vm = require("vm");
 const { spawnSync } = require("child_process");
 
 const LANG = path.resolve(__dirname, "../..");
@@ -12,6 +11,7 @@ const BENCH = __dirname;
 const OUT = path.join(LANG, "build/codegen-bench");
 const PROGRAMS_DIR = path.join(BENCH, "programs");
 const STACK_KB = 1000000;
+const PRISTINE_REV = "f552e0084";
 
 const VARIANTS = require("./variants.js");
 
@@ -41,13 +41,26 @@ function requireConfig(v) {
   for (const k of ["pyret-base/js/runtime.js", "pyret-base/js/js-numbers"]) {
     base["raw-js"][k] = base["raw-js"][k].replace(/^build\/phaseA\/js\//, "src/js/base/");
   }
-  Object.assign(base["raw-js"], v.rawJs || {});
+  if (v.jsnums === "bigint") {
+    base["raw-js"]["pyret-base/js/js-numbers"] = require("./make-bigint-jsnums.js").generate(path.join(variantDir(v), "js-numbers-bigint.js"));
+  }
+  if (v.runtime === "pristine") {
+    const file = path.join(variantDir(v), "runtime-pristine.js");
+    const r = spawnSync("git", ["show", PRISTINE_REV + ":lang/src/js/base/runtime.js"], { cwd: LANG, encoding: "utf8", maxBuffer: 1 << 28 });
+    if (r.status !== 0) { throw new Error("git show failed: " + r.stderr); }
+    fs.mkdirSync(variantDir(v), { recursive: true });
+    fs.writeFileSync(file, r.stdout);
+    base["raw-js"]["pyret-base/js/runtime.js"] = file;
+  }
   const file = path.join(variantDir(v), "config.json");
   fs.writeFileSync(file, JSON.stringify(base, null, 2));
   return file;
 }
 
+const EXTRA_SOURCES = {};
+
 function srcPath(prog) {
+  if (EXTRA_SOURCES[prog]) { return EXTRA_SOURCES[prog]; }
   return prog === "empty" ? path.join(BENCH, "empty.arr") : path.join(PROGRAMS_DIR, prog + ".arr");
 }
 
@@ -105,34 +118,26 @@ function moduleSource(m) {
   return typeof m.theModule === "string" ? m.theModule : null;
 }
 
-function parseMs(src, eager) {
-  const wrapped = "(" + src + ")";
-  const reps = 3;
-  const times = [];
-  for (let i = 0; i < reps; i++) {
-    const t0 = process.hrtime.bigint();
-    new vm.Script(wrapped, { filename: "m" + Math.random() + ".js" });
-    times.push(Number(process.hrtime.bigint() - t0) / 1e6);
-  }
-  return median(times);
-}
-
 function sizes(jarr, prog, doParse) {
   const p = extractProgram(jarr);
-  const res = { prog: { raw: 0, gz: 0 }, stdlib: { raw: 0, gz: 0 }, jarrBytes: fs.statSync(jarr).size, parseMs: null, stdlibParseMs: null };
-  const progSrcs = [];
-  const libSrcs = [];
+  const res = { prog: { raw: 0, gz: 0 }, stdlib: { raw: 0, gz: 0 }, jarrBytes: fs.statSync(jarr).size, compileLazyMs: null, compileEagerMs: null };
   for (const uri of p.toLoad) {
     const src = moduleSource(p.staticModules[uri]);
     if (src === null) { continue; }
     const bucket = uri.startsWith("file://") && uri.endsWith("/" + prog + ".arr") ? res.prog : res.stdlib;
     bucket.raw += Buffer.byteLength(src);
     bucket.gz += zlib.gzipSync(src, { level: 9 }).length;
-    (bucket === res.prog ? progSrcs : libSrcs).push(src);
   }
   if (doParse) {
-    res.parseMs = progSrcs.reduce((a, s) => a + parseMs(s), 0);
-    res.stdlibParseMs = libSrcs.reduce((a, s) => a + parseMs(s), 0);
+    const handalone = path.join(LANG, "src/js/base/handalone.js");
+    const script = path.join(BENCH, "measure-parse.js");
+    const measure = (flags) => {
+      const r = spawnSync(process.execPath, flags.concat([script, jarr, prog, handalone]), { encoding: "utf8", maxBuffer: 1 << 28 });
+      if (r.status !== 0) { throw new Error("measure-parse failed: " + r.stderr); }
+      return JSON.parse(r.stdout);
+    };
+    res.compileLazyMs = measure([]);
+    res.compileEagerMs = measure(["--no-lazy"]);
   }
   return res;
 }
@@ -145,7 +150,12 @@ function main() {
     return v;
   }) : VARIANTS;
   if (!variants.some((v) => v.name === "baseline")) { variants.unshift(VARIANTS.find((x) => x.name === "baseline")); }
-  const programs = (opts.programs || listPrograms()).concat(["empty"]).filter((p, i, a) => a.indexOf(p) === i);
+  const programs = (opts.programs || listPrograms()).map((p) => {
+    if (!p.endsWith(".arr")) { return p; }
+    const name = path.basename(p, ".arr");
+    EXTRA_SOURCES[name] = path.resolve(p);
+    return name;
+  }).concat(["empty"]).filter((p, i, a) => a.indexOf(p) === i);
   fs.mkdirSync(OUT, { recursive: true });
 
   const results = { runs: opts.runs, node: process.version, variants: {}, mismatches: [] };
