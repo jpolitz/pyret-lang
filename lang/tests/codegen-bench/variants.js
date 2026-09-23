@@ -10,9 +10,11 @@ module.exports = [
   { name: "fixnum", codegen: "fixnum" },
   { name: "sched-noyield", codegen: "", pauseSchedule: "schedules/noyield.js" },
   { name: "sched-nocapture", codegen: "", pauseSchedule: "schedules/nocapture.js" },
+  { name: "no-anns", codegen: "", compileFlags: ["-no-runtime-annotations"] },
   { name: "all-ablations", codegen: "no-al,no-gas,fixnum", pauseSchedule: "schedules/nocapture.js" },
   { name: "bigint", codegen: "", jsnums: "bigint" },
   { name: "direct", codegen: "direct", pauseSchedule: "schedules/nocapture.js" },
   { name: "direct-fixnum", codegen: "direct,fixnum", pauseSchedule: "schedules/nocapture.js" },
+  { name: "direct-fixnum-noanns", codegen: "direct,fixnum", pauseSchedule: "schedules/nocapture.js", compileFlags: ["-no-runtime-annotations"] },
   { name: "direct-fixnum-bigint", codegen: "direct,fixnum", pauseSchedule: "schedules/nocapture.js", jsnums: "bigint" },
 ];

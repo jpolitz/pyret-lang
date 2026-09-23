@@ -78,6 +78,7 @@ function compile(v, prog) {
     "--compiled-dir", path.join(dir, "compiled"),
     "--require-config", requireConfig(v),
   ];
+  args.push(...(v.compileFlags || []));
   if (v.pauseSchedule) { args.push("--pause-schedule", path.join(BENCH, v.pauseSchedule)); }
   const env = Object.assign({}, process.env, { PYRET_TS_NO_RESPAWN: "1", PYRET_CODEGEN: v.codegen || "" });
   const r = spawnSync(process.execPath, args, { cwd: LANG, env, encoding: "utf8", maxBuffer: 1 << 28 });
@@ -159,9 +160,9 @@ function main() {
   fs.mkdirSync(OUT, { recursive: true });
 
   const results = { runs: opts.runs, node: process.version, variants: {}, mismatches: [] };
-  const baselineOut = {};
+  const jobs = [];
   for (const v of variants) {
-    results.variants[v.name] = { description: v.description, programs: {} };
+    results.variants[v.name] = { description: v.description, codegen: v.codegen, programs: {} };
     if (!opts.skipCompile) { fs.rmSync(path.join(variantDir(v), "compiled"), { recursive: true, force: true }); }
     for (const prog of programs) {
       const t0 = Date.now();
@@ -173,33 +174,47 @@ function main() {
         results.mismatches.push({ variant: v.name, program: prog, kind: "compile-error" });
         continue;
       }
-      const compileS = (Date.now() - t0) / 1000;
-      const times = [];
-      let first = null;
-      for (let i = 0; i < opts.runs; i++) {
-        const r = runOnce(v, jarr);
-        if (first === null) { first = r; }
-        if (r.stdout !== first.stdout) {
-          results.mismatches.push({ variant: v.name, program: prog, kind: "nondeterministic" });
-        }
-        times.push(r.ms);
-      }
-      const entry = {
-        medianMs: median(times), times, status: first.status,
-        stdout: first.stdout, stderrTail: first.stderr.slice(-2000), compileS,
-        sizes: sizes(jarr, prog, opts.parse),
-      };
-      if (v.name === "baseline") { baselineOut[prog] = first.stdout; }
-      else if (baselineOut[prog] !== undefined && baselineOut[prog] !== first.stdout) {
-        results.mismatches.push({ variant: v.name, program: prog, kind: "differs-from-baseline" });
-      }
-      if (first.status !== 0 && prog !== "checks") {
-        results.mismatches.push({ variant: v.name, program: prog, kind: "exit-" + first.status });
-      }
+      const entry = { compileS: (Date.now() - t0) / 1000, sizes: sizes(jarr, prog, opts.parse), times: [] };
       results.variants[v.name].programs[prog] = entry;
-      process.stderr.write(v.name + "/" + prog + ": " + entry.medianMs.toFixed(0) + "ms (compile " + compileS.toFixed(1) + "s) " +
-        JSON.stringify(first.stdout.slice(0, 80)) + (first.status ? " EXIT " + first.status + " " + first.stderr.slice(-300) : "") + "\n");
+      jobs.push({ v, prog, jarr, entry });
+      process.stderr.write("compiled " + v.name + "/" + prog + " in " + entry.compileS.toFixed(1) + "s\n");
     }
+  }
+
+  let seed = 12345;
+  const rand = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  for (let round = 0; round < opts.runs; round++) {
+    const order = jobs.slice();
+    for (let i = order.length - 1; i > 0; i--) {
+      const k = Math.floor(rand() * (i + 1));
+      [order[i], order[k]] = [order[k], order[i]];
+    }
+    for (const job of order) {
+      const r = runOnce(job.v, job.jarr);
+      const e = job.entry;
+      if (e.stdout === undefined) {
+        e.stdout = r.stdout; e.status = r.status; e.stderrTail = r.stderr.slice(-2000);
+      } else if (r.stdout !== e.stdout) {
+        results.mismatches.push({ variant: job.v.name, program: job.prog, kind: "nondeterministic" });
+      }
+      e.times.push(r.ms);
+      e.medianMs = median(e.times);
+    }
+    process.stderr.write("round " + (round + 1) + "/" + opts.runs + " done\n");
+    fs.writeFileSync(opts.out, JSON.stringify(results, null, 1));
+  }
+
+  for (const job of jobs) {
+    const e = job.entry;
+    const base = results.variants.baseline.programs[job.prog];
+    if (job.v.name !== "baseline" && base && base.stdout !== e.stdout) {
+      results.mismatches.push({ variant: job.v.name, program: job.prog, kind: "differs-from-baseline" });
+    }
+    if (e.status !== 0 && job.prog !== "checks") {
+      results.mismatches.push({ variant: job.v.name, program: job.prog, kind: "exit-" + e.status });
+    }
+    process.stderr.write(job.v.name + "/" + job.prog + ": " + (e.medianMs || 0).toFixed(0) + "ms " +
+      JSON.stringify((e.stdout || "").slice(0, 60)) + (e.status ? " EXIT " + e.status + " " + e.stderrTail.slice(-300) : "") + "\n");
   }
   fs.writeFileSync(opts.out, JSON.stringify(results, null, 1));
   if (results.mismatches.length > 0) {
