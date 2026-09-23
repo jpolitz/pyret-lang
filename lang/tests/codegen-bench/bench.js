@@ -152,6 +152,7 @@ function main() {
   const baselineOut = {};
   for (const v of variants) {
     results.variants[v.name] = { description: v.description, programs: {} };
+    if (!opts.skipCompile) { fs.rmSync(path.join(variantDir(v), "compiled"), { recursive: true, force: true }); }
     for (const prog of programs) {
       const t0 = Date.now();
       let jarr;

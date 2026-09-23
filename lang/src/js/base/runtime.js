@@ -3410,6 +3410,19 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
       this.stack = stack;
     }
     function makeCont() { return new Cont([]); }
+
+    function installGasBox() {
+      if (thisRuntime.gasBox) { return thisRuntime.gasBox; }
+      var box = { GAS: thisRuntime.GAS, RUNGAS: thisRuntime.RUNGAS };
+      Object.defineProperty(thisRuntime, "GAS", {
+        get: function() { return box.GAS; }, set: function(v) { box.GAS = v; }, configurable: true
+      });
+      Object.defineProperty(thisRuntime, "RUNGAS", {
+        get: function() { return box.RUNGAS; }, set: function(v) { box.RUNGAS = v; }, configurable: true
+      });
+      thisRuntime.gasBox = box;
+      return box;
+    }
     function isCont(v) { return v instanceof Cont; }
     function isContinuation(v) { return typeof v === "object" && v instanceof Cont; }
     Cont.prototype._toString = function() {
@@ -4040,6 +4053,29 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
           }
         });
       });
+    }
+
+    var runTaskFunction = makeFunction(execThunk, "run-task");
+
+    function execThunkDirect(thunk) {
+      if (arguments.length !== 1) { var $a=new Array(arguments.length); for (var $i=0;$i<arguments.length;$i++) { $a[$i]=arguments[$i]; } throw thisRuntime.ffi.throwArityErrorC(["run-task"], 1, $a, false); }
+      try {
+        return thisRuntime.ffi.makeLeft(thunk.app());
+      } catch(e) {
+        if(isPyretException(e)) {
+          if(thisRuntime.ffi.isUserBreak(e.exn)) { throw e; }
+          e.pyretStack = e.pyretStack || [];
+          return thisRuntime.ffi.makeRight(makeOpaque(e));
+        }
+        return thisRuntime.ffi.makeRight(makeOpaque(makePyretFailException(thisRuntime.ffi.makeMessageException(String(e + "\n" + e.stack)))));
+      }
+    }
+
+    function installDirectMode() {
+      if (!thisRuntime.directMode) {
+        thisRuntime.directMode = true;
+        runTaskFunction.app = execThunkDirect;
+      }
     }
 
     function runWhileRunning(thunk) {
@@ -5969,7 +6005,7 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
         return thisRuntime.isRow(v);
       }, "is-row"),
 
-      'run-task': makeFunction(execThunk, "run-task"),
+      'run-task': runTaskFunction,
 
       'gensym': gensym,
       'random': makeFunction(random, "random"),
@@ -6161,6 +6197,8 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
       'makeActivationRecord' : makeActivationRecord,
 
       'GAS': INITIAL_GAS,
+      'installGasBox': installGasBox,
+      'installDirectMode': installDirectMode,
       'INITIAL_GAS': INITIAL_GAS,
       'pauseSchedule': theOutsideWorld.pauseSchedule || null,
       'setPauseSchedule': setPauseSchedule,

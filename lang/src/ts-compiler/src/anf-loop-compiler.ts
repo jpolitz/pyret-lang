@@ -36,6 +36,7 @@ import * as T from './type-structs';
 import * as SL from './srcloc';
 import { jsnums } from './interop/js-numbers';
 import { InternalCompilerError, raise, map2, mapGetValue, partition, field } from './shared';
+import * as DIRECT from './anf-direct';
 
 export type Loc = SL.Loc;
 export type CList<T> = CL.ConcatList<T>;
@@ -51,6 +52,127 @@ const clSnoc = CL.clSnoc;
 // applied to the locator (see compile-lib.arr), so it is treated as a
 // boolean here (tested only for truthiness, as Pyret's `if` would).
 export type SplitCompileOptions = Omit<CS.CompileOptions, 'shouldProfile'> & { shouldProfile: any };
+
+const CG_FLAGS = ['no-al', 'no-gas', 'gas-box', 'gas-modvar', 'fixnum', 'direct'];
+export const CG = (() => {
+  const raw = (typeof process !== 'undefined' && process.env && process.env.PYRET_CODEGEN) || '';
+  const flags = new Set(raw.split(',').map((x) => x.trim()).filter((x) => x !== ''));
+  for (const f of flags) {
+    if (CG_FLAGS.indexOf(f) === -1) { throw new InternalCompilerError('Unknown PYRET_CODEGEN flag: ' + f); }
+  }
+  return {
+    noAl: flags.has('no-al') || flags.has('direct'),
+    noGas: flags.has('no-gas') || flags.has('direct'),
+    gasBox: flags.has('gas-box'),
+    gasModvar: flags.has('gas-modvar'),
+    fixnum: flags.has('fixnum'),
+    direct: flags.has('direct'),
+  };
+})();
+const MODVAR_RUNGAS = 5000;
+
+function gasField(name: string): J.JExprT {
+  return CG.gasBox ? jDot(jId(constId('$gasBox')), name) : rtField(name);
+}
+
+function captureOn(cond: J.JExprT, ans: A.Name, reset: CList<J.JStmt>): J.JStmt {
+  return jIf1(cond, jBlock(reset.append(clist<J.JStmt>(
+    jExpr(jDotAssign(RUNTIME, 'EXN_STACKHEIGHT', jNum(0))),
+    jExpr(jAssign(ans, rtMethod('makeCont', clEmpty)))))));
+}
+
+function modvarTick(ans: A.Name): J.JStmt {
+  const rg = jId(constId('$RG'));
+  return captureOn(jBinop(jUnop(rg, jDecr), J.jLeq, jNum(0)), ans,
+    clSing<J.JStmt>(jExpr(jRawCode('$RG = ' + String(MODVAR_RUNGAS)))));
+}
+
+function entryGasCheck(ans: A.Name): CList<J.JStmt> {
+  if (CG.noGas || CG.gasModvar) { return clEmpty; }
+  return clSing(captureOn(
+    jBinop(jBinop(jUnop(gasField('GAS'), jDecr), J.jLeq, jNum(0)),
+      J.jOr,
+      jBinop(jUnop(gasField('RUNGAS'), jDecr), J.jLeq, jNum(0))),
+    ans, clEmpty));
+}
+
+function tailCallGasCheck(ans: A.Name): CList<J.JStmt> {
+  if (CG.noGas) { return clEmpty; }
+  if (CG.gasModvar) { return clSing(modvarTick(ans)); }
+  return clSing(captureOn(jBinop(jUnop(gasField('RUNGAS'), jDecr), J.jLeq, jNum(0)), ans, clEmpty));
+}
+
+function exitGasStmts(): CList<J.JStmt> {
+  if (CG.noGas || CG.gasModvar) { return clEmpty; }
+  return clSing<J.JStmt>(jExpr(jUnop(gasField('GAS'), jIncr)));
+}
+
+function isAssignTo(s: J.JStmt, id: A.Name): boolean {
+  return J.isJExpr(s) && J.isJAssign(s.expr) && s.expr.name.key() === id.key();
+}
+
+export function stripAssignsBlock(id: A.Name, b: J.JBlockT): J.JBlockT {
+  if (J.isJBlock1(b)) {
+    const s = stripAssignsStmt(id, b.stmt);
+    return s === undefined ? jBlock(clEmpty) : jBlock1(s);
+  }
+  return jBlock(stripAssignsStmts(id, b.stmts));
+}
+
+function stripAssignsStmts(id: A.Name, stmts: CList<J.JStmt>): CList<J.JStmt> {
+  const out: J.JStmt[] = [];
+  stmts.each((st: J.JStmt) => {
+    const r = stripAssignsStmt(id, st);
+    if (r !== undefined) { out.push(r); }
+  });
+  return CL.from_list(out);
+}
+
+function stripAssignsStmt(id: A.Name, s: J.JStmt): J.JStmt | undefined {
+  if (isAssignTo(s, id)) { return undefined; }
+  if (J.isJIf(s)) { return jIf(s.cond, stripAssignsBlock(id, s.consq), stripAssignsBlock(id, s.alt)); }
+  if (J.isJIf1(s)) { return jIf1(s.cond, stripAssignsBlock(id, s.consq)); }
+  if (J.isJWhile(s)) { return jWhile(s.cond, stripAssignsBlock(id, s.body)); }
+  if (J.isJTryCatch(s)) { return new J.JTryCatch(stripAssignsBlock(id, s.body), s.exn, stripAssignsBlock(id, s.catch)); }
+  if (J.isJSwitch(s)) { return jSwitch(s.exp, stripAssignsCases(id, s.branches)); }
+  return s;
+}
+
+export function stripAssignsCases(id: A.Name, cases: CList<J.JCaseT>): CList<J.JCaseT> {
+  return cases.map((c: J.JCaseT) =>
+    J.isJCase(c) ? jCase(c.exp, stripAssignsBlock(id, c.body)) as J.JCaseT : jDefault(stripAssignsBlock(id, c.body)) as J.JCaseT);
+}
+
+const FIXNUM_OPS: Map<string, string> = new Map([
+  ['_plus', '+'], ['_minus', '-'], ['_times', '*'],
+  ['_lessthan', '<'], ['_greaterthan', '>'], ['_lessequal', '<='], ['_greaterequal', '>='],
+  ['equal-always', '==='],
+]);
+
+function simpleArgSource(e: J.JExprT): string | undefined {
+  if (J.isJId(e)) { return e.id.tosourcestring(); }
+  if (e instanceof J.JNum) { return '(' + e.toUglySource() + ')'; }
+  if (J.isJParens(e) && e.exp instanceof J.JNum) { return '(' + e.toUglySource() + ')'; }
+  return undefined;
+}
+
+export function fixnumFastPath(compiler: CompilerVisitor, f: N.AVal, compiledArgs: CList<J.JExprT>, slow: J.JExprT): J.JExprT {
+  if (!CG.fixnum || !N.isAId(f) || f.id.$name !== 's-global') { return slow; }
+  const name = f.id.toname();
+  const op = FIXNUM_OPS.get(name);
+  if (op === undefined) { return slow; }
+  const origin = compiler.env.originByValueName(name);
+  if (origin === undefined || origin.uriOfDefinition !== 'builtin://global') { return slow; }
+  const args = compiledArgs.toList().map(simpleArgSource);
+  if (args.length !== 2 || args[0] === undefined || args[1] === undefined) { return slow; }
+  const [a, b] = args as string[];
+  const bothNums = 'typeof ' + a + ' === "number" && typeof ' + b + ' === "number"';
+  if (op === '+' || op === '-' || op === '*') {
+    const r = '(' + a + ' ' + op + ' ' + b + ')';
+    return jTernary(jRawCode('(' + bothNums + ' && ' + r + ' >= -9e15 && ' + r + ' <= 9e15)'), jRawCode(r), slow);
+  }
+  return jTernary(jRawCode('(' + bothNums + ')'), jRawCode('(' + a + ' ' + op + ' ' + b + ')'), slow);
+}
 
 export function getExp(o: any): any { return o.exp; }
 export function getId(o: any): any { return o.id; }
@@ -405,7 +527,7 @@ export function isFunctionFlat(flatnessEnv: FL.FEnv, funName: string): boolean {
 
 // Pyret object extension `obj.{ f1: v1, ... }`: clone preserving prototype
 // (visitor methods), overriding the given fields.
-function ext<T extends object>(obj: T, fields: Record<string, any>): T {
+export function ext<T extends object>(obj: T, fields: Record<string, any>): T {
   const out = Object.create(Object.getPrototypeOf(obj));
   Object.assign(out, obj, fields);
   return out as T;
@@ -794,6 +916,9 @@ export function compileFunBody(
   if (argUsedInLambda) {
     compiler = ext(compiler, { allowTco: false });
   }
+  if (CG.direct) {
+    return DIRECT.compileDirectFunBody(l, compiler, args, optArity, body, isMethod);
+  }
   const makeLabel = makeLabelSequence(0);
   const retLabel = makeLabel();
   const ans = freshId(compilerName('ans'));
@@ -834,6 +959,9 @@ export function compileFunBody(
   const finish = timeNow() - start;
   totalTime = totalTime + finish;
   mainBodyCases = mainBodyCasesAndDeadVars.body;
+  if (CG.noAl) {
+    mainBodyCases = stripAssignsCases(apploc, mainBodyCases);
+  }
   const allVars: Map<string, A.Name> = new Map();
   mainBodyCases.each((caseExpr: J.JCaseT) => {
     localBoundVars(caseExpr, allVars);
@@ -854,7 +982,7 @@ export function compileFunBody(
       : clEmpty)
       .append(isFlat
         ? clEmpty
-        : clSing<J.JStmt>(jExpr(jUnop(rtField('GAS'), jIncr))))
+        : exitGasStmts())
       .append(localCompiler.options.shouldProfile
         ? clSing<J.JStmt>(jExpr(rtMethod('profileExit', clist(localCompiler.getLoc(l)))))
         : clEmpty)
@@ -912,6 +1040,9 @@ export function compileFunBody(
     }
   }
 
+  if (CG.gasModvar && !isFlat) {
+    firstEntryStmts = clSnoc(firstEntryStmts, modvarTick(localCompiler.curAns));
+  }
   const isActivationRecordCall = rtMethod('isActivationRecord', clist<J.JExprT>(jId(firstArg)));
   const preambleStmts: CList<J.JStmt> =
     (localCompiler.options.shouldProfile
@@ -941,16 +1072,9 @@ export function compileFunBody(
         jReturn(jId(localCompiler.curAns)));
 
   const checkCont = jUnop(rtMethod('isContinuation', clist<J.JExprT>(jId(localCompiler.curAns))), jNot);
-  const gasCheck = jIf1(
-    jBinop(jBinop(jUnop(rtField('GAS'), jDecr), J.jLeq, jNum(0)),
-      J.jOr,
-      jBinop(jUnop(rtField('RUNGAS'), jDecr), J.jLeq, jNum(0))),
-    jBlock(clist<J.JStmt>(jExpr(jDotAssign(RUNTIME, 'EXN_STACKHEIGHT', jNum(0))),
-      jExpr(jAssign(localCompiler.curAns, rtMethod('makeCont', clEmpty))))));
-
   const gasCheckOrComment: CList<J.JStmt> = isFlat
     ? clSing<J.JStmt>(jExpr(jRawCode('// callee optimization')))
-    : clSing<J.JStmt>(gasCheck);
+    : entryGasCheck(localCompiler.curAns);
   const funBody =
     clAppend(
       clAppend(preambleStmts, gasCheckOrComment),
@@ -1116,7 +1240,7 @@ export function compileAExpr(compiler: CompilerVisitor, ae: N.AExpr): DAG.CBlock
   return rest;
 }
 
-function compileHead(compiler: CompilerVisitor, head: N.AExprHead, rest: DAG.CBlock): DAG.CBlock {
+export function compileHead(compiler: CompilerVisitor, head: N.AExprHead, rest: DAG.CBlock): DAG.CBlock {
   switch (head.$name) {
     case 'a-let': {
       const b = new BLet(head.bind);
@@ -1354,11 +1478,8 @@ function compileSplitApp(
           // Update step before the call, so that if it runs out of gas,
           // the resumer goes to the right step
           jExpr(jAssign(step, jNum(0))),
-          jExpr(jUnop(jId(compiler.elidedFrames), jIncr)),
-          jIf1(jBinop(jUnop(rtField('RUNGAS'), jDecr), J.jLeq, jNum(0)),
-            jBlock(clist<J.JStmt>(
-              jExpr(jDotAssign(RUNTIME, 'EXN_STACKHEIGHT', jNum(0))),
-              jExpr(jAssign(ans, rtMethod('makeCont', clEmpty)))))))
+          jExpr(jUnop(jId(compiler.elidedFrames), jIncr)))
+          .append(tailCallGasCheck(ans))
           .append(CL.from_list<J.JStmt>([...pre, ...post]))
           .append(clSing<J.JStmt>(jContinue))),
       newCases);
@@ -1371,10 +1492,10 @@ function compileSplitApp(
           jExpr(jAssign(step, afterAppLabel)),
           jExpr(jAssign(compiler.curApploc, compiler.getLoc(l))))
           .append(!isDefinitelyFn
-            ? clSing<J.JStmt>(checkFun(l, jId(compiler.curApploc), compiledF))
+            ? clSing<J.JStmt>(checkFun(l, CG.noAl ? compiler.getLoc(l) : jId(compiler.curApploc), compiledF))
             : clSing<J.JStmt>(jExpr(jRawCode('// omitting isFunction check'))))
           .append(clist<J.JStmt>(
-            jExpr(wrapWithSrcnode(l, jAssign(ans, app(l, compiledF, compiledArgs)))),
+            jExpr(wrapWithSrcnode(l, jAssign(ans, fixnumFastPath(compiler, f, compiledArgs, app(l, compiledF, compiledArgs))))),
             jBreak))),
       newCases);
   }
@@ -1404,7 +1525,7 @@ function compileFlatApp(
   // Generate the code for calling the function
   const callCode = clist<J.JStmt>(
     jExpr(jRawCode('// caller optimization')),
-    jExpr(wrapWithSrcnode(l, jAssign(ans, app(l, compiledF, compiledArgs))))
+    jExpr(wrapWithSrcnode(l, jAssign(ans, fixnumFastPath(compiler, f, compiledArgs, app(l, compiledF, compiledArgs)))))
   );
 
   // Splice in the already-compiled rest of the let. We split it into two
@@ -1867,7 +1988,7 @@ function compileSplitUpdate(
 
 // An assignment is a plain store only when its target is a box this module
 // created without an annotation.
-function varAssignIsChecked(compiler: CompilerVisitor, id: A.Name): boolean {
+export function varAssignIsChecked(compiler: CompilerVisitor, id: A.Name): boolean {
   const vb = compiler.bindings.get(id.key());
   if (vb === undefined) { return false; }
   return !vb.origin.newDefinition || !(A.isABlank(vb.ann) || A.isAAny(vb.ann));
@@ -2481,7 +2602,15 @@ export function mkAbbrevs(l: Loc): CList<J.JStmt> {
         clist<J.JExprT>(jId(loc), jId(name))))))),
     jVar(constId('M'), jStr((l as SL.Srcloc).source)),
     jVar(constId('D'), rtField('undefined'))
-  );
+  ).append(CG.gasBox
+    ? clSing<J.JStmt>(jVar(constId('$gasBox'), rtMethod('installGasBox', clEmpty)))
+    : clEmpty
+  ).append(CG.gasModvar
+    ? clSing<J.JStmt>(jVar(constId('$RG'), jNum(MODVAR_RUNGAS)))
+    : clEmpty
+  ).append(CG.direct
+    ? clSing<J.JStmt>(jExpr(rtMethod('installDirectMode', clEmpty)))
+    : clEmpty);
 }
 
 export function importKey(i: A.ImportType): string {
