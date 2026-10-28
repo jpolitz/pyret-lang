@@ -57,6 +57,7 @@ t-image = t-name(module-uri("builtin://image-lib"), A.s-type-global("Image"))
 t-option = t-name(module-uri("builtin://option"), A.s-type-global("Option"))
 t-reactor = t-name(module-uri("builtin://reactors"), A.s-type-global("Reactor"))
 t-event-handler = t-name(module-uri("builtin://reactors"), A.s-type-global("EventHandler"))
+t-event-source = t-name(module-uri("builtin://reactors"), A.s-type-global("EventSource"))
 t-equality-result = t-name(module-uri("builtin://equality"), A.s-type-global("EqualityResult"))
 t-value-skeleton = t-name(module-uri("builtin://valueskeleton"), A.s-type-global("ValueSkeleton"))
 t-list = t-name(module-uri("builtin://lists"), A.s-type-global("List"))
@@ -134,8 +135,13 @@ fun make-default-types() block:
         "stop-when", t-option-app(t-arrow([list: tva], t-boolean)),
         "seconds-per-tick", t-option-app(t-number),
         "close-when-stop", t-option-app(t-boolean),
-        "title", t-option-app(t-string)])],
+        "title", t-option-app(t-string)]),
+      t-array(t-app(t-event-handler, [list: tva]))],
     t-reactor-app(tva))))
+  default-typs.set-now("makeEventHandler", t-forall([list: tva, tvb], t-arrow([list:
+      t-app(t-event-source, [list: tvb]),
+      t-arrow([list: tva, tvb], tva)],
+    t-app(t-event-handler, [list: tva]))))
   default-typs.set-now("hasField", t-arrow([list: t-record([string-dict: ]), t-string], t-boolean))
   default-typs.set-now("makeSrcloc", t-arrow([list: t-srcloc], t-bot))
 

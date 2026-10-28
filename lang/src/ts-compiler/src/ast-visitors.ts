@@ -538,6 +538,10 @@ export class DefaultMapVisitor {
     return new A.SMutableField(node.l, node.name, node.ann.visit(this), node.value.visit(this));
   }
 
+  sEventField(node: A.SEventField): A.Member {
+    return new A.SEventField(node.l, node.name, node.source.visit(this), node.value.visit(this));
+  }
+
   sMethodField(node: A.SMethodField): A.Member {
     return new A.SMethodField(
       node.l,
@@ -1179,6 +1183,10 @@ export class DefaultIterVisitor {
 
   sMutableField(node: A.SMutableField): boolean {
     return node.ann.visit(this) && node.value.visit(this);
+  }
+
+  sEventField(node: A.SEventField): boolean {
+    return node.source.visit(this) && node.value.visit(this);
   }
 
   // NOTE: the Pyret source visits `args` twice here (and never visits params);
@@ -1865,6 +1873,10 @@ export class DummyLocVisitor {
 
   sMutableField(node: A.SMutableField): A.Member {
     return new A.SMutableField(dummyLoc, node.name, node.ann.visit(this), node.value.visit(this));
+  }
+
+  sEventField(node: A.SEventField): A.Member {
+    return new A.SEventField(dummyLoc, node.name, node.source.visit(this), node.value.visit(this));
   }
 
   sMethodField(node: A.SMethodField): A.Member {

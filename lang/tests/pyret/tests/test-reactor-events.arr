@@ -105,3 +105,46 @@ check "subscription is not started by react":
   ES.subscriber-count() is 0
   r.interact() raises "No interaction set up"
 end
+
+check "on(source): handler syntax":
+  r = reactor:
+    init: 10,
+    on-tick: lam(w): w + 1 end,
+    on(ES.counter): lam(w, n): w + n end,
+    on(ES.words): lam(w, s): w + string-length(s) end
+  end
+  r.react(R.custom-event(ES.counter, 5)).get-value() is 15
+  r.react(R.custom-event(ES.words, "abc")).get-value() is 13
+  r.react(R.time-tick).get-value() is 11
+  r.react(R.custom-event(R.every(1), 3)) raises "No on-event handler defined"
+end
+
+check "on(source) entries come before on-event entries, in source order":
+  r = reactor:
+    init: [list:],
+    on(ES.counter): lam(w, n): link(n, w) end,
+    on-event: [list: R.on(ES.counter, lam(w, n): link(n * 100, w) end)],
+    on(ES.counter): lam(w, n): link(n * 10, w) end
+  end
+  r.react(R.custom-event(ES.counter, 2)).get-value() is [list: 200, 20, 2]
+end
+
+check "on(source) checks its parts":
+  reactor:
+    init: 0,
+    on(5): lam(w, n): w end
+  end raises "EventSource"
+  reactor:
+    init: 0,
+    on(ES.counter): 5
+  end raises "Function"
+end
+
+check "on(source) handlers in a traced reactor":
+  r = reactor:
+    init: 0,
+    on(ES.counter): lam(w, n): w + n end
+  end
+  r.start-trace().react(R.custom-event(ES.counter, 2)).react(R.custom-event(ES.counter, 3)).get-trace()
+    is [list: 0, 2, 5]
+end

@@ -230,8 +230,11 @@ list-table-item: binop-expr COMMA
 # NOTE(joe): just parsing as "fields" for now, and handling naming in
 # desugaring/well-formed, so that better error messages can be given
 reactor-expr: REACTOR COLON
-  fields
+  reactor-fields
 END
+reactor-fields: reactor-field (COMMA reactor-field)* [COMMA]
+reactor-field: field | event-field
+event-field: NAME PARENNOSPACE binop-expr RPAREN COLON binop-expr
 
 dot-expr: expr DOT NAME
 bracket-expr: expr LBRACK binop-expr RBRACK

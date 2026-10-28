@@ -6,29 +6,28 @@ in `reactor-events-report/` is agent prose; the system diff is described in
 
 ## Summary
 
-Reactors can now subscribe to arbitrary event emitters. A reactor gets one new
-option, `on-event`, whose value is a list of bindings made with `R.on`:
+Reactors can now subscribe to arbitrary event emitters. A reactor option
+written `on(source): handler` binds a handler to an *event source*, a value a
+JS library builds with one call:
 
 ```
-import reactors as R
 import js-file("/microbit") as MB
 
 r = reactor:
   init: {tilt: {x: 0, y: 0, z: 0}, temp: 0},
   on-tick: advance,
-  on-event: [list:
-    R.on(MB.tilt, lam(w, t): w.{tilt: t} end),
-    R.on(MB.temperature, lam(w, c): w.{temp: c} end)
-  ],
+  on(MB.tilt): lam(w, t): w.{tilt: t} end,
+  on(MB.temperature): lam(w, c): w.{temp: c} end,
   to-draw: draw
 end
 r.interact()
 ```
 
-`MB.tilt` and `MB.temperature` are *event sources*: values a JS library builds
-with one call. The language has no new syntax and no new hardcoded `on-*`
-names. A library that wants the familiar look can define `MB.on-tilt(f)` as
-`R.on(MB.tilt, f)` in one line (the attached micro:bit patch does this).
+No list, no import of `reactors`, and no hardcoded `on-*` names: the library
+decides what `MB.tilt` is. The same binding is also available as a plain
+value, `R.on(source, handler)`, and a reactor may take a computed list of them
+under the `on-event` option (`on-event: [list: R.on(src, f), ...]`); the
+`on(...)` form desugars to exactly that value, so both can be mixed.
 
 Reactors stay testable without running them: `R.custom-event(source, value)`
 is a new `Event` and `r.react(R.custom-event(MB.tilt, {x: 0, y: 500, z: 800}))`
@@ -52,7 +51,54 @@ A handler always takes two arguments, the state and the emitted value, in the
 same shape as `on-key` and `on-mouse`. Several bindings may target one source;
 `react` applies them in list order and the running reactor subscribes each one.
 
-### Why a value-level list and not new syntax
+### The `on(source): handler` form
+
+Grammar: a reactor's body is now `reactor-fields`, where each
+`reactor-field` is either an ordinary `field` or an `event-field`:
+
+```
+event-field: NAME PARENNOSPACE binop-expr RPAREN COLON binop-expr
+```
+
+The parentheses are what makes this unambiguous: a bare `tilt: handler`
+could be a misspelled option or a variable named `tilt`, and the compiler
+could not tell, while `on(expr):` says "this key is an expression". The
+production accepts any `NAME` so that `foo(x): v` can get a targeted
+well-formedness error ("must be written `on(event-source)`, but found one
+named `foo`") instead of a parse error; the name must be `on`. The paren must
+follow `on` directly, as in every Pyret application.
+
+AST: a new `Member` variant `s-event-field(l, name, source, value)` (TS:
+`SEventField`). It can only come from a reactor body, so object literals,
+`extend`, and `data ... with` never see it; the generic visitors in both
+compilers handle it like any other member. `tosource` prints it back as
+`on(source): value`, and the pretty-printer round-trip test covers it.
+
+Well-formedness: event fields are checked (name is `on`, underscores are
+rejected in both parts) and then set aside before the existing option-name
+and duplicate checks run, so `on(...)` never collides with the option table.
+Two `on(...)` entries for the same source are allowed (they run in order, as
+two `R.on` bindings do); that cannot be checked statically because the keys
+are expressions.
+
+Desugaring: each `on(e): h` becomes `makeEventHandler(e, check(h, Function))`
+and `makeReactor` gains a third argument, a raw array of those, typed
+`RawArray<EventHandler<a>>`. `makeEventHandler` is a runtime param set to
+`R.on` at load time, like `makeReactor`. `make-reactor` concatenates the
+syntactic bindings (in source order) with any `on-event` list (after them).
+
+Type checking needs no new rules: `makeEventHandler` is typed
+`forall a, e. (EventSource<e>, (a, e -> a)) -> EventHandler<a>`, so a
+handler whose payload disagrees with the source, or whose state disagrees
+with `init`, is rejected (`bad-reactor-event-syntax*.arr`).
+
+Editor: the CodeMirror mode already indents `on(x):` as a field (`(`/`)`
+pair, then the `:` in `REACTOR` context opens a `FIELD`), which I checked by
+running the mode on a sample; the result is byte-identical to the same
+program with `on-key:` in place of `on(MB.tilt):`. The VS Code grammar has
+no reactor-specific rules, so nothing to change there.
+
+### Why the binding is also a value
 
 The alternatives I considered:
 
@@ -69,9 +115,11 @@ The alternatives I considered:
   `init`/`on-tick`/`to-draw` fields and the type checker can relate the
   state type of every handler to the reactor's `init`.
 
-I went with the last. `on-event` parallels the other handler options in name;
-`R.on` is short and is the name every JavaScript emitter uses, which is what
-students meet next.
+The value form came first and stays as the desugaring target and as the
+escape hatch for computed subscriptions (a loop over controllers, say). The
+syntax form is what curricula that avoid lists should teach. `on` is short
+and is the name every JavaScript emitter uses, which is what students meet
+next.
 
 ### What a library author writes
 
@@ -167,7 +215,20 @@ by `R.react(r, e)`.
 
 ## Files changed
 
-Language and compilers (`lang/`):
+Syntax (`lang/`):
+
+- `src/js/base/pyret-grammar.bnf`: `reactor-fields`, `reactor-field`, `event-field`.
+- `src/js/trove/parse-pyret.js`, `src/ts-compiler/src/parse-pyret.ts`: the three new node translations.
+- `src/arr/trove/ast.arr`, `src/ts-compiler/src/ast.ts`: `s-event-field` / `SEventField`, with `tosource`;
+  the default map, iter and dummy-loc visitors (`ast.arr`, `ast-visitors.ts`) and the
+  method-name-collecting visitor in `ast-util` (both).
+- `well-formed.arr` / `well-formed.ts`: the event-field check and the reactor check setting event fields aside.
+- `desugar.arr` / `desugar.ts`: `makeEventHandler` per field and the third `makeReactor` argument.
+- `type-defaults.arr` / `type-defaults.ts`: `makeEventHandler`'s type and `makeReactor`'s new argument.
+- `src/js/base/runtime.js`, `src/js/base/post-load-hooks.js`: the `makeEventHandler` prim and its param.
+- `src/js/trove/reactors.js`: `make-reactor` takes the array and merges it with `on-event`.
+
+Language and compilers (`lang/`), from the first commit:
 
 - `src/arr/trove/reactor-events.arr`: `custom-event(source, value)` variant of `Event`.
 - `src/js/trove/reactors.js`: `EventSource` and `EventHandler` brands, `on`,
@@ -194,15 +255,19 @@ Tests:
   (a JS module that provides two typed sources, used to test construction,
   equality, printing, dispatch order, tracing, `stop-when`, contract errors,
   `every`, and that `react` never subscribes), registered in `main2.arr`.
-- `lang/tests/pyret/tests/test-reactor.arr`: parse/print of `on-event`.
-- `lang/tests/type-check/good/good-reactor-events.arr` and three `bad/` files.
+- `lang/tests/pyret/tests/test-reactor.arr`: parse/print of `on-event` and of `on(...)` fields.
+- `lang/tests/pyret/tests/test-well-formed.arr`: `foo(x):` rejected, `on(...)` does not satisfy `init`, underscores rejected.
+- `lang/tests/type-check/good/good-reactor-events.arr`, `good-reactor-event-syntax.arr` and five `bad/` files.
+- `lang/src/ts-compiler/tests/run-unit-tests.js`: parses `on(MB.tilt): f` into an event field and prints it back.
 - `browser-test/tests/reactor-events.js`, registered as the `reactor-events`
   suite: runs real reactors in code.pyret.org through Playwright and asserts
   the delivered trace, interleaving with `on-tick`, and error reporting.
 
 Not changed on purpose: `docs/` (proposed text below), the legacy
 `W.big-bang(init, [list: ...])` configuration API (it could get a
-`W.on-event(src, f)` option in a few lines if wanted), and the parser.
+`W.on-event(src, f)` option in a few lines if wanted), the CodeMirror mode
+and VS Code grammar (verified to need nothing), and the committed VS Code
+bundle under `vscode/media`, which is a build output.
 
 ## Validation
 
@@ -210,14 +275,22 @@ All runs below were made on this box against the final tree.
 
 | Suite | Command | Result |
 |---|---|---|
-| Language suite (`main2`) | `make pyret-test` in `lang/` | 12335 passed, 0 failed (includes the new `test-reactor-events.arr`, 33 checks) |
-| Type-check corpus | `tests/type-check/main.arr` | 215 passed (96 good, 68 bad); new good/bad files included |
-| TS compiler unit tests | `make ts-unit-test` | 18 passed |
-| TS/Pyret type-check parity | `make ts-type-check-parity` | 178 programs, identical diagnostics |
+| Language suite (`main2`) | `make pyret-test` in `lang/` | 12354 passed, 0 failed, from a clean `tests/compiled/` (a run on a cache left over from earlier compiler builds evaluated two modules that share mutable state in the other order and failed two of their checks; it passed after wiping the cache, and the tests in question do not involve reactors) |
+| Type-check corpus | `tests/type-check/main.arr` | 218 passed (97 good, 70 bad, plus one meta check); the syntax form's bad cases fail as intended |
+| TS compiler unit tests | `make ts-unit-test` | 19 passed, including parse and print of `on(MB.tilt): f` |
+| TS/Pyret type-check parity | `make ts-type-check-parity` | 181 programs, identical diagnostics |
 | TS/Pyret well-formedness parity | `make ts-wf-parity` | 147 programs, identical diagnostics |
-| Browser, new suite | `node run.js --env=cpo --suites=reactor-events` | 5 passed: ordered delivery and trace `[0, 1, 3, 6, 10]`, interleaving with `on-tick` and two sources, handler error reporting and recovery, timers torn down on stop, typed run |
+| Browser, new suite | `node run.js --env=cpo --suites=reactor-events` | 5 passed, programs written with `on(...)`: ordered delivery and trace `[0, 1, 3, 6, 10]`, interleaving of `on-tick`, an `on(...)` field and an `on-event` list, handler error reporting and recovery, timers torn down on stop, typed run |
 | Browser, existing suites | `--suites=errors,check-blocks` | 246 passed |
-| Example | `reactor-events-report/every-demo.arr` run in the editor | reactor stopped at `spawned: 5` with 278 ticks and 19 heartbeats, check block passed |
+| Example | `reactor-events-report/every-demo.arr` run in the editor | reactor stopped at `spawned: 5` with 279 ticks and 19 heartbeats, check block passed |
+| Editor mode | CodeMirror `pyret` mode run over a sample | `on(MB.tilt): lam(w, t):` indents identically to `on-key: lam(w, t):` |
+
+One thing the type checker taught me on the way: a `s-check-expr` wrapper
+in checking position is *not* checked against the expected type (the
+`XXX` in `type-check.arr`), so the first desugaring of `on(e): h`, which
+wrapped `h` in a `Function` check like the other options do, let
+mistyped handlers through. The handler is now passed to `makeEventHandler`
+bare; the `Function` contract is still enforced at runtime by `R.on`.
 
 Not validated: the micro:bit patch against a real board (no hardware here).
 
@@ -226,12 +299,30 @@ Not validated: the micro:bit patch against a real board (no hardware here).
 I did not edit the docs. Suggested additions, in prose for the maintainer to
 scribble-ify:
 
-**`on-event`** (new subsection after `on-mouse`). The `on-event` option takes a
-list of event handlers, each built with `on`. While the reactor is running,
-every event source named in the list is subscribed to, and each value the
-source emits is passed, along with the current state, to the corresponding
-handler, which produces the new state. Handlers are applied in the order
-they appear. Subscriptions end when the reactor stops.
+**Grammar** (`forms.scrbl`, reactor expressions):
+
+```
+reactor-expr: REACTOR COLON reactor-fields END
+reactor-fields: reactor-field (COMMA reactor-field)* [COMMA]
+reactor-field: field | event-field
+event-field: NAME PARENNOSPACE binop-expr RPAREN COLON binop-expr
+```
+
+**`on(source)`** (new subsection after `on-mouse`). A reactor option written
+`on(source): handler` subscribes the reactor to an event source while it is
+running. Each value the source emits is passed, along with the current state,
+to the handler, which produces the new state:
+
+```
+on(source) :: (a, E -> a)      where source :: EventSource<E>
+```
+
+A reactor may have any number of `on(...)` options; they are applied in the
+order they appear. Subscriptions end when the reactor stops.
+
+**`on-event`**. For a computed set of subscriptions, the `on-event` option
+takes a list of event handlers built with `on`, which is the value form of
+the same binding:
 
 ```
 on :: (source :: EventSource<E>, handler :: (a, E -> a)) -> EventHandler<a>

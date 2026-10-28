@@ -695,6 +695,14 @@ well-formed-visitor = A.default-iter-visitor.{
     end
     ann.visit(self) and value.visit(self)
   end,
+  method s-event-field(self, l, name, source, value) block:
+    when name <> "on":
+      wf-error([list: ED.text("A reactor option with an argument must be written "),
+          ED.code(ED.text("on(event-source)")), ED.text(", but found one named "),
+          ED.code(ED.text(name)), ED.text(" ")], l)
+    end
+    source.visit(self) and value.visit(self)
+  end,
   method s-method(self, l, name, params, args, ann, doc, body, _check-loc, _check, blocky) block:
     old-pbl = parent-block-loc
     parent-block-loc := cases(Option) _check-loc:
@@ -917,7 +925,10 @@ well-formed-visitor = A.default-iter-visitor.{
     end
     true
   end,
-  method s-reactor(self, l, fields):
+  method s-reactor(self, l, shadow fields) block:
+    event-fields = for filter(f from fields): A.is-s-event-field(f) end
+    for each(f from event-fields): f.visit(self) end
+    shadow fields = for filter(f from fields): not(A.is-s-event-field(f)) end
     method-fields = for filter(f from fields): A.is-s-method-field(f) end
     fun has-field(name):
       is-some(for find(f from fields): f.name == name end)
@@ -1346,6 +1357,9 @@ top-level-visitor = A.default-iter-visitor.{
   end,
   method s-mutable-field(_, l :: Loc, name :: String, ann :: A.Ann, value :: A.Expr):
     well-formed-visitor.s-mutable-field(l, name, ann, value)
+  end,
+  method s-event-field(_, l :: Loc, name :: String, source :: A.Expr, value :: A.Expr):
+    well-formed-visitor.s-event-field(l, name, source, value)
   end,
   method s-method-field(_, l :: Loc, name :: String, params :: List<A.Name>, args :: List<A.Bind>, ann :: A.Ann, doc :: String, body :: A.Expr, _check-loc :: Option<Loc>, _check :: Option<A.Expr>, blocky):
     well-formed-visitor.s-method-field(l, name, params, args, ann, doc, body, _check-loc, _check, blocky)

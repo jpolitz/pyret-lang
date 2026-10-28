@@ -185,6 +185,17 @@ test('well-formed: reactor Valid-options message is sorted', () => {
     'reactor options must be listed in sorted order');
 });
 
+test('parse: on(source): handler is a reactor event field', () => {
+  const prog = P.surfaceParse('reactor:\n  init: 0,\n  on(MB.tilt): f\nend\n', 'file://test');
+  const reactor = prog.block.stmts[0];
+  assert.strictEqual(reactor.$name, 's-reactor');
+  assert.strictEqual(reactor.fields.length, 2);
+  assert.strictEqual(reactor.fields[1].$name, 's-event-field');
+  assert.strictEqual(reactor.fields[1].name, 'on');
+  assert.strictEqual(reactor.fields[1].source.$name, 's-dot');
+  assert.strictEqual(reactor.tosource().pretty(80).join('\n'), 'reactor: init: 0, on(MB.tilt): f end');
+});
+
 // ---------- typechecker: record-type identity ----------
 // A record type is a *set* of (name :: type) fields; field order is not part
 // of its identity. The typechecker keys its Set<Type> (TypeSet) off type.key(),

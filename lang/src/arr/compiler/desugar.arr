@@ -567,7 +567,12 @@ fun desugar-expr(expr :: A.Expr):
             [list: A.s-array(l,
                   elts.map(lam(elt): desugar-expr(A.s-lam(elt.l, "", empty, empty, A.a-blank, "", elt, none, none, false)) end))])
       end
-    | s-reactor(l, fields) =>
+    | s-reactor(l, shadow fields) =>
+      event-fields = for filter(f from fields): A.is-s-event-field(f) end
+      event-handlers = for map(f from event-fields):
+        A.s-prim-app(f.l, "makeEventHandler", [list: desugar-expr(f.source), desugar-expr(f.value)], flat-prim-app)
+      end
+      shadow fields = for filter(f from fields): not(A.is-s-event-field(f)) end
       fields-by-name = SD.make-mutable-string-dict()
       init-and-non-init = for lists.partition(f from fields) block:
         when f.name <> "init": fields-by-name.set-now(f.name, f.value) end
@@ -587,7 +592,7 @@ fun desugar-expr(expr :: A.Expr):
           A.s-data-field(l, f, A.s-prim-app(l, "makeNone", [list:], flat-prim-app))
         end
       end
-      A.s-prim-app(l, "makeReactor", [list: desugar-expr(init), A.s-obj(l, option-fields)], flat-prim-app)
+      A.s-prim-app(l, "makeReactor", [list: desugar-expr(init), A.s-obj(l, option-fields), A.s-array(l, event-handlers)], flat-prim-app)
     | s-table(l, headers, rows) =>
       shadow l = A.dummy-loc
       column-names = for map(header from headers):

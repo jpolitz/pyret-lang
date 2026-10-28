@@ -816,6 +816,10 @@ class SetRecursiveVisitor extends PostScopeMapVisitor {
   sDataField(node: A.SDataField): A.Member {
     return new A.SDataField(node.l, node.name, node.value.visit(this.collectMethodName(node.name)));
   }
+
+  sEventField(node: A.SEventField): A.Member {
+    return new A.SEventField(node.l, node.name, node.source.visit(this), node.value.visit(this));
+  }
 }
 
 export const setRecursiveVisitor: DefaultMapVisitor = new SetRecursiveVisitor();

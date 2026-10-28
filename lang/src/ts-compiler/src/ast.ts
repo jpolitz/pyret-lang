@@ -2456,8 +2456,20 @@ export class SMethodField extends MemberBase {
   }
 }
 
-export type Member = SDataField | SMutableField | SMethodField;
+export class SEventField extends MemberBase {
+  get $name(): 's-event-field' { return 's-event-field'; }
+  constructor(public l: Loc, public name: string, public source: Expr, public value: Expr) { super(); }
+  visit(visitor: any): any { return visitor.sEventField(this); }
+  label(): string { return 's-event-field'; }
+  tosource(): any {
+    const keyPart = PP.str(this.name).append(PP.parens(this.source.tosource()));
+    return PP.nest(INDENT, keyPart.append(strColonspace).append(this.value.tosource()));
+  }
+}
+
+export type Member = SDataField | SMutableField | SMethodField | SEventField;
 export function isSDataField(x: any): x is SDataField { return x instanceof SDataField; }
+export function isSEventField(x: any): x is SEventField { return x instanceof SEventField; }
 export function isSMutableField(x: any): x is SMutableField { return x instanceof SMutableField; }
 export function isSMethodField(x: any): x is SMethodField { return x instanceof SMethodField; }
 export function isMember(x: any): x is Member { return x instanceof MemberBase; }

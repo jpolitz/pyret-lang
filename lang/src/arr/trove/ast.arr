@@ -1433,6 +1433,12 @@ data Member:
         end
       PP.nest(INDENT, str-mutable + ann-part + str-colonspace + self.value.tosource())
     end,
+  | s-event-field(l :: Loc, name :: String, source :: Expr, value :: Expr) with:
+    method label(self): "s-event-field" end,
+    method tosource(self):
+      key-part = PP.str(self.name) + PP.parens(self.source.tosource())
+      PP.nest(INDENT, key-part + str-colonspace + self.value.tosource())
+    end,
   | s-method-field(
       l :: Loc,
       name :: String,
@@ -2375,6 +2381,9 @@ default-map-visitor = {
   method s-mutable-field(self, l :: Loc, name :: String, ann :: Ann, value :: Expr):
     s-mutable-field(l, name, ann.visit(self), value.visit(self))
   end,
+  method s-event-field(self, l :: Loc, name :: String, source :: Expr, value :: Expr):
+    s-event-field(l, name, source.visit(self), value.visit(self))
+  end,
   method s-method-field(
       self,
       l :: Loc,
@@ -2994,6 +3003,9 @@ default-iter-visitor = {
   method s-mutable-field(self, l :: Loc, name :: String, ann :: Ann, value :: Expr):
     ann.visit(self) and value.visit(self)
   end,
+  method s-event-field(self, l :: Loc, name :: String, source :: Expr, value :: Expr):
+    source.visit(self) and value.visit(self)
+  end,
   method s-method-field(
       self,
       l :: Loc,
@@ -3608,6 +3620,9 @@ dummy-loc-visitor = {
   end,
   method s-mutable-field(self, l :: Loc, name :: String, ann :: Ann, value :: Expr):
     s-mutable-field(dummy-loc, name, ann.visit(self), value.visit(self))
+  end,
+  method s-event-field(self, l :: Loc, name :: String, source :: Expr, value :: Expr):
+    s-event-field(dummy-loc, name, source.visit(self), value.visit(self))
   end,
   method s-method-field(
       self,

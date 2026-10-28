@@ -22,10 +22,8 @@ r = reactor:
     else: w
     end
   end,
-  on-event: [list:
-    R.on(spawner, lam(w, n): w.{spawned: n} end),
-    R.on(heartbeat, lam(w, n): w.{beats: n} end)
-  ],
+  on(spawner): lam(w, n): w.{spawned: n} end,
+  on(heartbeat): lam(w, n): w.{beats: n} end,
   to-draw: draw,
   stop-when: lam(w): w.spawned >= 5 end,
   close-when-stop: true

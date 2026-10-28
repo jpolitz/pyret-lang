@@ -241,6 +241,11 @@ check "reactors":
   cwfs("reactor: init: 5, todraw: 67 end") satisfies sc("but found one named `todraw`")
   cwfs("reactor: method f(self): 5 end end") satisfies sc("cannot contain method fields")
   cwfs("reactor: init: 5, init: 10 end") satisfies sc("Duplicate")
+  cwfs("reactor: init: 5, foo(x): 10 end") satisfies sc("must be written `on(event-source)`")
+  cwfs("reactor: init: 5, foo(x): 10 end") satisfies sc("found one named `foo`")
+  cwfs("reactor: on(x): 10 end") satisfies sc("must have a field named `init`")
+  c("x = 5\nreactor: init: 5, on(x): _ end") satisfies CS.is-underscore-as-expr
+  c("reactor: init: 5, on(_): 10 end") satisfies CS.is-underscore-as-expr
 end
 
 check "malformed reactors":

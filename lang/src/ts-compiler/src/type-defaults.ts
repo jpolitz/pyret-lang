@@ -67,6 +67,7 @@ export const tImage = tName(moduleUri('builtin://image-lib'), new A.STypeGlobal(
 export const tOption = tName(moduleUri('builtin://option'), new A.STypeGlobal('Option'));
 export const tReactor = tName(moduleUri('builtin://reactors'), new A.STypeGlobal('Reactor'));
 export const tEventHandler = tName(moduleUri('builtin://reactors'), new A.STypeGlobal('EventHandler'));
+export const tEventSource = tName(moduleUri('builtin://reactors'), new A.STypeGlobal('EventSource'));
 export const tEqualityResult = tName(moduleUri('builtin://equality'), new A.STypeGlobal('EqualityResult'));
 export const tValueSkeleton = tName(moduleUri('builtin://valueskeleton'), new A.STypeGlobal('ValueSkeleton'));
 export const tList = tName(moduleUri('builtin://lists'), new A.STypeGlobal('List'));
@@ -139,8 +140,13 @@ export function makeDefaultTypes(): Map<string, Type> {
       ['stop-when', tOptionApp(tArrow([tva], tBoolean))],
       ['seconds-per-tick', tOptionApp(tNumber)],
       ['close-when-stop', tOptionApp(tBoolean)],
-      ['title', tOptionApp(tString)]))],
+      ['title', tOptionApp(tString)])),
+    tArray(tApp(tEventHandler, [tva]))],
   tReactorApp(tva))));
+  defaultTyps.set('makeEventHandler', tForall([tva, tvb], tArrow([
+    tApp(tEventSource, [tvb]),
+    tArrow([tva, tvb], tva)],
+  tApp(tEventHandler, [tva]))));
   defaultTyps.set('hasField', tArrow([tRecord(dict<Type>()), tString], tBoolean));
   defaultTyps.set('makeSrcloc', tArrow([tSrcloc], tBot));
 

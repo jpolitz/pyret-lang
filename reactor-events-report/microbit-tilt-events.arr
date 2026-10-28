@@ -1,6 +1,6 @@
 use context starter2024
 import js-file("/microbit") as MB
-import reactors as R
+
 import image as I
 
 # The same tilt demo as tilt-demo.arr, but driven by events instead of
@@ -24,11 +24,9 @@ MB.connect()
 
 r = reactor:
   init: {tilt: {x: 0, y: 0, z: 0}, temp: 0, pressed: false},
-  on-event: [list:
-    R.on(MB.tilt, lam(w, t): w.{tilt: t} end),
-    R.on(MB.temperature, lam(w, c): w.{temp: c} end),
-    MB.on-button-a(lam(w, state): w.{pressed: state == "down"} end)
-  ],
+  on(MB.tilt): lam(w, t): w.{tilt: t} end,
+  on(MB.temperature): lam(w, c): w.{temp: c} end,
+  on(MB.button-a): lam(w, state): w.{pressed: state == "down"} end,
   to-draw: draw
 end
 

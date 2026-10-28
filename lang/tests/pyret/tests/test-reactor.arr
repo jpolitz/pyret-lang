@@ -10,6 +10,10 @@ check "parse and print":
   t2.tosource().pretty(80) is [list: "reactor: init: 5, on-tick: ticker end"]
   t3 = P.surface-parse("reactor: init: 5, on-event: [list: R.on(src, f)] end", "test")
   t3.tosource().pretty(80) is [list: "reactor: init: 5, on-event: [list: R.on(src, f)] end"]
+  t4 = P.surface-parse("reactor: init: 5, on(MB.tilt): f, on(R.every(2)): lam(w, n): w + n end end", "test")
+  t4.tosource().pretty(80) is [list: "reactor: init: 5, on(MB.tilt): f, on(R.every(2)): lam(w, n): w + n end end"]
+  t5 = P.surface-parse("reactor: init: 5, on(src): f, end", "test")
+  t5.tosource().pretty(80) is [list: "reactor: init: 5, on(src): f end"]
 end
 
 check "reactors":

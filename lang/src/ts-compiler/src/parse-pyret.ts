@@ -1067,8 +1067,25 @@ function translate(node: ParseNode, fileName: string): A.Program {
       }
     },
     'reactor-expr': function(node) {
-      // (REACTOR COLON fields END)
+      // (REACTOR COLON reactor-fields END)
       return new A.SReactor(pos(node.pos), tr(node.kids[2]));
+    },
+    'reactor-fields': function(node) {
+      if (node.kids[node.kids.length - 1].name !== 'reactor-field') {
+        // (reactor-fields reactor-field (COMMA f1)* COMMA)
+        return makeListComma(node.kids, 0, node.kids.length - 1);
+      } else {
+        // (reactor-fields reactor-field (COMMA f1)*)
+        return makeListComma(node.kids);
+      }
+    },
+    'reactor-field': function(node) {
+      // (reactor-field field) or (reactor-field event-field)
+      return tr(node.kids[0]);
+    },
+    'event-field': function(node) {
+      // (event-field NAME PARENNOSPACE source RPAREN COLON value)
+      return new A.SEventField(pos(node.pos), symbol(node.kids[0]), tr(node.kids[2]), tr(node.kids[5]));
     },
     'table-expr': function(node) {
       // (TABLE table-headers table-rows end)

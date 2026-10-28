@@ -689,6 +689,14 @@ class WellFormedVisitor extends DefaultIterVisitor {
     }
     return node.value.visit(this);
   }
+  sEventField(node: A.SEventField): boolean {
+    if (node.name !== 'on') {
+      wfError([ED.text('A reactor option with an argument must be written '),
+        ED.code(ED.text('on(event-source)')), ED.text(', but found one named '),
+        ED.code(ED.text(node.name)), ED.text(' ')], node.l);
+    }
+    return node.source.visit(this) && node.value.visit(this);
+  }
   sMutableField(node: A.SMutableField): boolean {
     if (reservedNames.has(node.name)) {
       reservedName(node.l, node.name);
@@ -913,9 +921,12 @@ class WellFormedVisitor extends DefaultIterVisitor {
     return true;
   }
   sReactor(node: A.SReactor): boolean {
-    const methodFields = node.fields.filter((f) => A.isSMethodField(f));
+    const eventFields = node.fields.filter((f) => A.isSEventField(f));
+    for (const f of eventFields) { f.visit(this); }
+    const fields = node.fields.filter((f) => !A.isSEventField(f));
+    const methodFields = fields.filter((f) => A.isSMethodField(f));
     const hasField = (name: string): boolean =>
-      node.fields.find((f) => f.name === name) !== undefined;
+      fields.find((f) => f.name === name) !== undefined;
     if (methodFields.length !== 0) {
       wfError([ED.text('A reactor cannot contain method fields ')], methodFields[0].l);
       return true;
@@ -930,7 +941,7 @@ class WellFormedVisitor extends DefaultIterVisitor {
         wfError([ED.text('A reactor can only specify one of on-key and on-raw-key')], node.l);
       }
 
-      for (const f of node.fields) {
+      for (const f of fields) {
         if (!okFields.has(f.name)) {
           wfError([ED.text('Valid options for reactors are '),
             // Canonicalize with sort() so the message is deterministic and
@@ -1353,6 +1364,9 @@ class TopLevelVisitor extends DefaultIterVisitor {
   }
   sMutableField(node: A.SMutableField): boolean {
     return wellFormedVisitor.sMutableField(node);
+  }
+  sEventField(node: A.SEventField): boolean {
+    return wellFormedVisitor.sEventField(node);
   }
   sMethodField(node: A.SMethodField): boolean {
     return wellFormedVisitor.sMethodField(node);

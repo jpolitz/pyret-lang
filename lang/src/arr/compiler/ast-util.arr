@@ -663,6 +663,9 @@ set-recursive-visitor = A.default-map-visitor.{
   method s-data-field(self, l, name, value):
     A.s-data-field(l, name, value.visit(self.collect-method-name(name)))
   end,
+  method s-event-field(self, l, name, source, value):
+    A.s-event-field(l, name, source.visit(self), value.visit(self))
+  end,
 }
 
 fun is-stateful-ann(ann :: A.Ann) -> Boolean:

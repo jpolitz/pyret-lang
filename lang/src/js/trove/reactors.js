@@ -190,9 +190,9 @@
       return getSourceInfo(source).name;
     }
 
-    function toEventBindings(lst) {
-      runtime.checkList(lst);
-      return runtime.ffi.toArray(lst).map(function(h) {
+    function toEventBindings(arr) {
+      if(!Array.isArray(arr)) { runtime.ffi.throwInternalError("Expected an array of event handlers", runtime.ffi.makeList([arr])); }
+      return arr.map(function(h) {
         c1("on-event", h, annEventHandler);
         var source = gf(h, "source");
         var info = getSourceInfo(source);
@@ -204,8 +204,7 @@
     var setInteract = function(newInteract) {
       externalInteractionHandler = newInteract;
     }
-    var makeReactor = function(init, fields) {
-      runtime.ffi.checkArity(2, arguments, "reactor", false);
+    var makeReactor = function(init, fields, eventHandlers) {
       c1("make-reactor", fields, annObject);
       var handlerDict = {};
       Object.keys(fields.dict).forEach(function(f) {
@@ -213,8 +212,16 @@
           handlerDict[f] = gf(gf(fields, f), "value");
         }
       });
+      var bindings = (eventHandlers === undefined) ? [] : toEventBindings(eventHandlers);
       if(handlerDict.hasOwnProperty("on-event")) {
-        handlerDict["on-event"] = toEventBindings(handlerDict["on-event"]);
+        runtime.checkList(handlerDict["on-event"]);
+        bindings = bindings.concat(toEventBindings(runtime.ffi.toArray(handlerDict["on-event"])));
+      }
+      if(bindings.length > 0) {
+        handlerDict["on-event"] = bindings;
+      }
+      else {
+        delete handlerDict["on-event"];
       }
       return makeReactorRaw(init, handlerDict, false, []);
     }

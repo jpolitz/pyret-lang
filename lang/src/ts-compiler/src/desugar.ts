@@ -661,11 +661,15 @@ export function desugarExpr(expr: A.Expr): A.Expr {
     }
     case 's-reactor': {
       const l = expr.l;
+      const eventFields = expr.fields.filter((f) => A.isSEventField(f)) as A.SEventField[];
+      const eventHandlers: A.Expr[] = eventFields.map((f) => new A.SPrimApp(f.l, 'makeEventHandler',
+        [desugarExpr(f.source), desugarExpr(f.value)], flatPrimApp));
+      const plainFields = expr.fields.filter((f) => !A.isSEventField(f));
       const fieldsByName = new Map<string, A.Expr>();
       const initAndNonInit = partition((f: A.Member) => {
         if (f.name !== 'init') { fieldsByName.set(f.name, field(f, 'value')); }
         return f.name === 'init';
-      }, expr.fields);
+      }, plainFields);
       const init = field(initAndNonInit.isTrue[0], 'value');
       const nonInitFields = initAndNonInit.isFalse;
       void nonInitFields;
@@ -682,7 +686,7 @@ export function desugarExpr(expr: A.Expr): A.Expr {
           optionFields.push(new A.SDataField(l, f, new A.SPrimApp(l, 'makeNone', [], flatPrimApp)));
         }
       }
-      return new A.SPrimApp(l, 'makeReactor', [desugarExpr(init), new A.SObj(l, optionFields)], flatPrimApp);
+      return new A.SPrimApp(l, 'makeReactor', [desugarExpr(init), new A.SObj(l, optionFields), new A.SArray(l, eventHandlers)], flatPrimApp);
     }
     case 's-table': {
       const l = dummyLoc; // shadow l = A.dummy-loc
