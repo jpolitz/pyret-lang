@@ -180,7 +180,7 @@ test('well-formed: reactor Valid-options message is sorted', () => {
   assert.ok(rendered.includes('Valid options for reactors are'),
     'expected the reactor Valid-options error');
   assert.ok(rendered.includes(
-    '`close-when-stop`, `init`, `last-image`, `on-key`, `on-mouse`, `on-raw-key`, '
+    '`close-when-stop`, `init`, `last-image`, `on-event`, `on-key`, `on-mouse`, `on-raw-key`, '
     + '`on-tick`, `seconds-per-tick`, `stop-when`, `title`, or `to-draw`'),
     'reactor options must be listed in sorted order');
 });

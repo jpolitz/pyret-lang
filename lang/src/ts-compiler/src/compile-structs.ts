@@ -1425,6 +1425,7 @@ export const reactorOptionalFields: Map<string, (l: Loc) => A.Ann> = new Map<str
   ["on-key", (l: Loc) => new A.AName(l, new A.STypeGlobal("Function"))],
   ["on-raw-key", (l: Loc) => new A.AName(l, new A.STypeGlobal("Function"))],
   ["on-mouse", (l: Loc) => new A.AName(l, new A.STypeGlobal("Function"))],
+  ["on-event", (l: Loc) => new A.AAny(l)],
   ["stop-when", (l: Loc) => new A.AName(l, new A.STypeGlobal("Function"))],
   ["seconds-per-tick", (l: Loc) => new A.AName(l, new A.STypeGlobal("NumPositive"))],
   ["title", (l: Loc) => new A.AName(l, new A.STypeGlobal("String"))],

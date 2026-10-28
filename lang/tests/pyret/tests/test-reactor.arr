@@ -8,6 +8,8 @@ check "parse and print":
   t1.tosource().pretty(80) is [list: "reactor: init: 5 end"]
   t2 = P.surface-parse("reactor: init: 5, on-tick: ticker end", "test")
   t2.tosource().pretty(80) is [list: "reactor: init: 5, on-tick: ticker end"]
+  t3 = P.surface-parse("reactor: init: 5, on-event: [list: R.on(src, f)] end", "test")
+  t3.tosource().pretty(80) is [list: "reactor: init: 5, on-event: [list: R.on(src, f)] end"]
 end
 
 check "reactors":

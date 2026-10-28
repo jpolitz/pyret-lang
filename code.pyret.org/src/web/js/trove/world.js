@@ -175,6 +175,11 @@
           handlers.push(runtime.makeOpaque(new OnTick(dict["on-tick"], DEFAULT_TICK_DELAY * 1000)));
         }
       }
+      if(dict.hasOwnProperty("on-event")) {
+        dict["on-event"].forEach(function(binding) {
+          handlers.push(runtime.makeOpaque(new OnEvent(binding.name, binding.subscribe, binding.handler)));
+        });
+      }
       add("on-mouse", OnMouse);
       add("on-key", OnKey);
       add("on-raw-key", OnRawKey);
@@ -471,6 +476,33 @@
 
 
 
+
+    var OnEvent = function(name, subscribe, handler) {
+      WorldConfigOption.call(this, 'on-event');
+      this.sourceName = name;
+      this.subscribe = subscribe;
+      this.handler = handler;
+    };
+
+    OnEvent.prototype = Object.create(WorldConfigOption.prototype);
+
+    OnEvent.prototype.toRawHandler = function(toplevelNode) {
+      var that = this;
+      var worldFunction = adaptWorldFunction(that.handler);
+      var subscribe = function(emit) {
+        try {
+          return that.subscribe(emit);
+        } catch(e) {
+          var message = "The event source " + JSON.stringify(that.sourceName) + " failed to start: " + String((e && e.message) || e);
+          var exn = runtime.makePyretFailException(runtime.ffi.makeMessageException(message));
+          setTimeout(function() { rawJsworld.shutdown({errorShutdown: exn}); }, 0);
+          return null;
+        }
+      };
+      return rawJsworld.on_event(subscribe, function(w, value, success) {
+        worldFunction(w, value, success);
+      });
+    };
 
     var OutputConfig = function() {}
     OutputConfig.prototype = Object.create(WorldConfigOption.prototype);

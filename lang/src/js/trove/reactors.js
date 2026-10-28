@@ -9,6 +9,8 @@
   provides: {
     shorthands: {
       "RofA": ["tyapp", ["local", "Reactor"], [["tid", "a"]]],
+      "ESofE": ["tyapp", ["local", "EventSource"], [["tid", "e"]]],
+      "EHofA": ["tyapp", ["local", "EventHandler"], [["tid", "a"]]],
       "ReactorEvent": { tag: "name",
                  origin: { "import-type": "uri", uri: "builtin://reactor-events" },
                  name: "Event" },
@@ -26,13 +28,17 @@
                  name: "Table" }
     },
     values: {
-      "keypress": ["arrow", ["String"], ["local", "Event"]],
-      "mouse": ["arrow", ["Number", "Number", "String"], ["local", "Event"]],
-      "time-tick": ["local", "Event"],
-      "raw-key": ["local", "Event"],
+      "keypress": ["arrow", ["String"], "ReactorEvent"],
+      "mouse": ["arrow", ["Number", "Number", "String"], "ReactorEvent"],
+      "time-tick": "ReactorEvent",
+      "raw-key": "ReactorEvent",
       "key-up": ["local", "RawKeyEventType"],
       "key-down": ["local", "RawKeyEventType"],
       "key-press": ["local", "RawKeyEventType"],
+      "custom-event": ["forall", ["e"], ["arrow", ["ESofE", ["tid", "e"]], "ReactorEvent"]],
+      "on": ["forall", ["a", "e"], ["arrow", ["ESofE", ["arrow", [["tid", "a"], ["tid", "e"]], ["tid", "a"]]], "EHofA"]],
+      "every": ["arrow", ["Number"], ["tyapp", ["local", "EventSource"], ["Number"]]],
+      "event-source-name": ["forall", ["e"], ["arrow", ["ESofE"], "String"]],
 
       "get-value": ["forall", ["a"], ["arrow", ["RofA"], ["tid", "a"]]],
       "get-instance": ["forall", ["a"], ["arrow", ["RofA"], ["tid", "a"]]],
@@ -44,14 +50,18 @@
       "stop-trace": ["forall", ["a"], ["arrow", ["RofA"], "RofA"]],
       "get-trace": ["forall", ["a"], ["arrow", ["RofA"], ["List", ["tid", "a"]]]],
       "get-trace-as-table": ["forall", ["a"], ["arrow", ["RofA"], "Table"]],
-      "react": ["forall", ["a"], ["arrow", ["RofA", ["local", "Event"]], "RofA"]]
+      "react": ["forall", ["a"], ["arrow", ["RofA", "ReactorEvent"], "RofA"]]
     },
     aliases: {
       "Event": "ReactorEvent",
       "RawKeyEventType": "RawKeyEventType",
-      "Reactor": ["local", "Reactor"]
+      "Reactor": ["local", "Reactor"],
+      "EventSource": ["local", "EventSource"],
+      "EventHandler": ["local", "EventHandler"]
     },
     datatypes: {
+      "EventSource": ["data", "EventSource", ["e"], [], {}],
+      "EventHandler": ["data", "EventHandler", ["a"], [], {}],
       "Reactor": ["data", "Reactor", ["a"], [], {
         "get-value": ["arrow", [], ["tid", "a"]],
         "draw": ["arrow", [], "Image"],
@@ -62,7 +72,7 @@
         "stop-trace": ["arrow", [], "RofA"],
         "get-trace": ["arrow", [], ["List", ["tid", "a"]]],
         "get-trace-as-table": ["arrow", [], "Any"],
-        "react": ["arrow", [["local", "Event"]], "RofA"],
+        "react": ["arrow", ["ReactorEvent"], "RofA"],
         "is-stopped": ["arrow", [], "Boolean"],
         "_output": ["arrow", [], "ValueSkeleton"]
       }]
@@ -78,6 +88,10 @@
 
     var brandReactor = runtime.namedBrander("reactors", ["reactors"]);
     var annReactor = runtime.makeBranderAnn(brandReactor, "Reactor");
+    var brandEventSource = runtime.namedBrander("event-source", ["reactors"]);
+    var annEventSource = runtime.makeBranderAnn(brandEventSource, "EventSource");
+    var brandEventHandler = runtime.namedBrander("event-handler", ["reactors"]);
+    var annEventHandler = runtime.makeBranderAnn(brandEventHandler, "EventHandler");
 
     var checkArity = runtime.ffi.checkArity;
 
@@ -112,6 +126,80 @@
     }
 
     var isEvent = gmf(reactorEvents, "is-Event");
+
+    var sourceInfo = new WeakMap();
+
+    function makeEventSource(name, subscribe) {
+      if(typeof name !== "string") { throw new Error("makeEventSource: name must be a string"); }
+      if(typeof subscribe !== "function") { throw new Error("makeEventSource: subscribe must be a function"); }
+      var o = runtime.makeObject({
+        name: name,
+        _output: runtime.makeMethod0(function(self) {
+          checkArity(1, arguments, "_output", true);
+          return gf(VS, "vs-constr").app("event-source",
+            runtime.ffi.makeList([gf(VS, "vs-value").app(name)]));
+        }),
+        _equals: runtime.makeMethod2(function(self, other, rec) {
+          checkArity(3, arguments, "_equals", true);
+          return runtime.ffi.notEqual.app("", self, other);
+        })
+      });
+      var branded = applyBrand(brandEventSource, o);
+      sourceInfo.set(branded, { name: name, subscribe: subscribe });
+      return branded;
+    }
+    function isEventSource(v) {
+      return runtime.isObject(v) && runtime.isPyretTrue(hasBrand(brandEventSource, v));
+    }
+    function getSourceInfo(source) {
+      c1("event-source", source, annEventSource);
+      return sourceInfo.get(source);
+    }
+
+    function on(source, handler) {
+      checkArity(2, arguments, "on", false);
+      c2("on", source, annEventSource, handler, runtime.Function);
+      var o = runtime.makeObject({
+        source: source,
+        handler: handler,
+        _output: runtime.makeMethod0(function(self) {
+          checkArity(1, arguments, "_output", true);
+          return gf(VS, "vs-constr").app("on",
+            runtime.ffi.makeList([gf(VS, "vs-value").app(source), gf(VS, "vs-value").app(handler)]));
+        })
+      });
+      return applyBrand(brandEventHandler, o);
+    }
+
+    function every(seconds) {
+      checkArity(1, arguments, "every", false);
+      c1("every", seconds, runtime.NumPositive);
+      var delay = jsnums.toFixnum(seconds) * 1000;
+      return makeEventSource("every " + String(seconds) + "s", function(emit) {
+        var count = 0;
+        var id = setInterval(function() {
+          count += 1;
+          emit(runtime.makeNumber(count));
+        }, delay);
+        return function() { clearInterval(id); };
+      });
+    }
+
+    function eventSourceName(source) {
+      checkArity(1, arguments, "event-source-name", false);
+      return getSourceInfo(source).name;
+    }
+
+    function toEventBindings(lst) {
+      runtime.checkList(lst);
+      return runtime.ffi.toArray(lst).map(function(h) {
+        c1("on-event", h, annEventHandler);
+        var source = gf(h, "source");
+        var info = getSourceInfo(source);
+        return { source: source, handler: gf(h, "handler"), name: info.name, subscribe: info.subscribe };
+      });
+    }
+
     var externalInteractionHandler = null;
     var setInteract = function(newInteract) {
       externalInteractionHandler = newInteract;
@@ -125,6 +213,9 @@
           handlerDict[f] = gf(gf(fields, f), "value");
         }
       });
+      if(handlerDict.hasOwnProperty("on-event")) {
+        handlerDict["on-event"] = toEventBindings(handlerDict["on-event"]);
+      }
       return makeReactorRaw(init, handlerDict, false, []);
     }
     var makeReactorRaw = function(init, handlers, tracing, trace) {
@@ -286,6 +377,28 @@
                     // out 8 parameters is pretty unreasonable, and this fancy version
                     // will mainly be used by folks who have gone through at least Reactive
                     return callOrError("on-raw-key", [init, event]);
+                  },
+                  "custom-event": function(source, value) {
+                    var info = getSourceInfo(source);
+                    var bindings = (handlers["on-event"] || []).filter(function(b) {
+                      return b.source === source;
+                    });
+                    if(bindings.length === 0) {
+                      runtime.ffi.throwMessageException("No on-event handler defined for the event source " + JSON.stringify(info.name));
+                    }
+                    function dispatch(i, current, currentTrace) {
+                      if(i >= bindings.length) {
+                        return makeReactorRaw(current, handlers, tracing, currentTrace);
+                      }
+                      var funObj = bindings[i].handler.app;
+                      return runtime.safeCall(function() {
+                        return funObj.apply(funObj, [current, value]);
+                      }, function(newVal) {
+                        var newTrace = tracing ? currentTrace.concat([newVal]) : currentTrace;
+                        return dispatch(i + 1, newVal, newTrace);
+                      }, "react:on-event:" + info.name);
+                    }
+                    return dispatch(0, init, trace);
                   }
                 });
               }
@@ -380,6 +493,10 @@
       "key-up": gmf(reactorEvents, "key-up"),
       "key-down": gmf(reactorEvents, "key-down"),
       "key-press": gmf(reactorEvents, "key-press"),
+      "custom-event": gmf(reactorEvents, "custom-event"),
+      "on": F(on, "on"),
+      "every": F(every, "every"),
+      "event-source-name": F(eventSourceName, "event-source-name"),
       "make-reactor": F(makeReactor, "make-reactor"),
 
       "get-value": F(getValue, "get-value"),
@@ -398,11 +515,16 @@
 
     var types = {
       Event: gtf(reactorEvents, "Event"),
-      Reactor: annReactor
+      Reactor: annReactor,
+      EventSource: annEventSource,
+      EventHandler: annEventHandler
     };
 
     var internal = {
-      setInteract: setInteract          
+      setInteract: setInteract,
+      makeEventSource: makeEventSource,
+      isEventSource: isEventSource,
+      getSourceInfo: getSourceInfo
     };
     return runtime.makeModuleReturn(values, types, internal);
   }

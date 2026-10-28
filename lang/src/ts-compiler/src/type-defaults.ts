@@ -66,6 +66,7 @@ export const tvh = tVar(A.globalNames.makeAtom('H'));
 export const tImage = tName(moduleUri('builtin://image-lib'), new A.STypeGlobal('Image'));
 export const tOption = tName(moduleUri('builtin://option'), new A.STypeGlobal('Option'));
 export const tReactor = tName(moduleUri('builtin://reactors'), new A.STypeGlobal('Reactor'));
+export const tEventHandler = tName(moduleUri('builtin://reactors'), new A.STypeGlobal('EventHandler'));
 export const tEqualityResult = tName(moduleUri('builtin://equality'), new A.STypeGlobal('EqualityResult'));
 export const tValueSkeleton = tName(moduleUri('builtin://valueskeleton'), new A.STypeGlobal('ValueSkeleton'));
 export const tList = tName(moduleUri('builtin://lists'), new A.STypeGlobal('List'));
@@ -133,6 +134,7 @@ export function makeDefaultTypes(): Map<string, Type> {
       ['on-tick', tOptionApp(tArrow([tva], tva))],
       ['on-mouse', tOptionApp(tArrow([tva, tNumber, tNumber, tString], tva))],
       ['on-key', tOptionApp(tArrow([tva, tString], tva))],
+      ['on-event', tOptionApp(tListApp(tApp(tEventHandler, [tva])))],
       ['to-draw', tOptionApp(tArrow([tva], tImage))],
       ['stop-when', tOptionApp(tArrow([tva], tBoolean))],
       ['seconds-per-tick', tOptionApp(tNumber)],

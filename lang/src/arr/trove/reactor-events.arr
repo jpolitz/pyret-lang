@@ -15,6 +15,7 @@ data Event:
   | mouse(x :: Number, y :: Number, kind :: String)
   | keypress(key :: String)
   | raw-key(symbol :: String, code :: Number, key :: String, action :: String, modifiers :: Modifiers)
+  | custom-event(source :: Any, value :: Any)
 end
 
 data RawKeyEventType:

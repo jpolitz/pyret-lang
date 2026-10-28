@@ -1,0 +1,160 @@
+Only in patched/examples: tilt-events.arr
+diff -ru '--exclude=.git' pyret-microbit/microbit.js patched/microbit.js
+--- pyret-microbit/microbit.js	2026-10-28 14:58:04.862741060 -0700
++++ patched/microbit.js	2026-10-28 15:17:31.827107417 -0700
+@@ -1,7 +1,32 @@
+ ({
+-  requires: [],
++  requires: [
++    { "import-type": "builtin", "name": "reactors" }
++  ],
+   provides: {
++    shorthands: {
++      "EventSource": { tag: "name",
++                       origin: { "import-type": "uri", uri: "builtin://reactors" },
++                       name: "EventSource" },
++      "EventHandler": { tag: "name",
++                        origin: { "import-type": "uri", uri: "builtin://reactors" },
++                        name: "EventHandler" }
++    },
+     values: {
++      // Event sources for reactors: `on-event: [list: R.on(MB.tilt, handler)]`.
++      // Each fires from the default connection's sample stream.
++      'sample': ["tyapp", "EventSource", ["Any"]],          // every sample, as the List<Number> above
++      'tilt': ["tyapp", "EventSource", ["Any"]],            // {x, y, z} in milli-g, when any axis moves
++      'temperature': ["tyapp", "EventSource", ["Number"]],  // degrees C, only when it changes
++      'light': ["tyapp", "EventSource", ["Number"]],        // light level, only when it changes
++      'button-a': ["tyapp", "EventSource", ["String"]],     // "down" / "up"
++      'button-b': ["tyapp", "EventSource", ["String"]],
++      // Handler sugar: MB.on-tilt(f) is R.on(MB.tilt, f).
++      'on-sample': ["forall", ["a"], ["arrow", [["arrow", [["tid", "a"], "Any"], ["tid", "a"]]], ["tyapp", "EventHandler", [["tid", "a"]]]]],
++      'on-tilt': ["forall", ["a"], ["arrow", [["arrow", [["tid", "a"], "Any"], ["tid", "a"]]], ["tyapp", "EventHandler", [["tid", "a"]]]]],
++      'on-temperature-change': ["forall", ["a"], ["arrow", [["arrow", [["tid", "a"], "Number"], ["tid", "a"]]], ["tyapp", "EventHandler", [["tid", "a"]]]]],
++      'on-light-change': ["forall", ["a"], ["arrow", [["arrow", [["tid", "a"], "Number"], ["tid", "a"]]], ["tyapp", "EventHandler", [["tid", "a"]]]]],
++      'on-button-a': ["forall", ["a"], ["arrow", [["arrow", [["tid", "a"], "String"], ["tid", "a"]]], ["tyapp", "EventHandler", [["tid", "a"]]]]],
++      'on-button-b': ["forall", ["a"], ["arrow", [["arrow", [["tid", "a"], "String"], ["tid", "a"]]], ["tyapp", "EventHandler", [["tid", "a"]]]]],
+       // Single-board convenience API (operates on one default connection).
+       'connect': ["arrow", [], "String"],
+       'connect-bluetooth': ["arrow", [], "String"],
+@@ -25,7 +50,9 @@
+     types: {}
+   },
+   nativeRequires: [],
+-  theModule: function(runtime, _, uri) {
++  theModule: function(runtime, _, uri, reactors) {
++    const Reactors = runtime.getField(reactors, "internal");
++    const R = runtime.getField(reactors, "values");
+     // All connections live on window, keyed by name, so program re-runs reuse
+     // open ports/devices instead of reconnecting. Each record holds one board.
+     const G = window.__pyretMicrobit = window.__pyretMicrobit || {};
+@@ -50,7 +77,7 @@
+           port: null, reader: null, writer: null,  // serial
+           device: null, txChar: null, rxChar: null, // bluetooth
+           connected: false,
+-          lastLine: "", lastSample: null, count: 0, waiters: [],
++          lastLine: "", lastSample: null, count: 0, waiters: [], listeners: [],
+           outQueue: [], sending: false, lastFrame: null,
+         };
+       }
+@@ -78,9 +105,63 @@
+         const ws = rec.waiters;
+         rec.waiters = [];
+         ws.forEach(function(w) { w.resolve(nums); });
++        const prev = rec.prevSample || null;
++        rec.prevSample = nums;
++        rec.listeners.slice().forEach(function(l) { l(nums, prev); });
+       }
+     }
+ 
++    // --- event sources -------------------------------------------------
++    // A source subscribes a listener on the record's sample stream while a
++    // reactor is running and detaches it when the reactor stops. `derive`
++    // turns (sample, previousSample) into either a Pyret value to emit or
++    // undefined to stay quiet.
++    function sampleSource(rec, name, derive) {
++      return Reactors.makeEventSource(name, function(emit) {
++        const listener = function(nums, prev) {
++          const v = derive(nums, prev);
++          if (v !== undefined) { emit(v); }
++        };
++        rec.listeners.push(listener);
++        return function() {
++          rec.listeners = rec.listeners.filter(function(l) { return l !== listener; });
++        };
++      });
++    }
++    // Sample layout: ax, ay, az, temperatureC, lightLevel, buttonA, buttonB
++    function changedAt(i, toPyret) {
++      return function(nums, prev) {
++        if (nums.length <= i) { return undefined; }
++        if (prev && prev.length > i && prev[i] === nums[i]) { return undefined; }
++        return toPyret(nums[i]);
++      };
++    }
++    const TILT_THRESHOLD = 40; // milli-g; ignore accelerometer noise
++    function makeSources(rec) {
++      const num = runtime.makeNumber;
++      return {
++        sample: sampleSource(rec, rec.name + " sample", function(nums) { return mkNumList(nums); }),
++        tilt: sampleSource(rec, rec.name + " tilt", function(nums, prev) {
++          if (nums.length < 3) { return undefined; }
++          if (prev && prev.length >= 3 &&
++              Math.abs(nums[0] - prev[0]) < TILT_THRESHOLD &&
++              Math.abs(nums[1] - prev[1]) < TILT_THRESHOLD &&
++              Math.abs(nums[2] - prev[2]) < TILT_THRESHOLD) { return undefined; }
++          return runtime.makeObject({ x: num(nums[0]), y: num(nums[1]), z: num(nums[2]) });
++        }),
++        temperature: sampleSource(rec, rec.name + " temperature", changedAt(3, num)),
++        light: sampleSource(rec, rec.name + " light", changedAt(4, num)),
++        "button-a": sampleSource(rec, rec.name + " button-a", changedAt(5, function(b) { return b === 1 ? "down" : "up"; })),
++        "button-b": sampleSource(rec, rec.name + " button-b", changedAt(6, function(b) { return b === 1 ? "down" : "up"; })),
++      };
++    }
++    function onSugar(source, name) {
++      return runtime.makeFunction(function(handler) {
++        runtime.checkArity(1, arguments, name, false);
++        return runtime.getField(R, "on").app(source, handler);
++      }, name);
++    }
++
+     function makeLineAssembler(rec) {
+       const decoder = new TextDecoder();
+       let pending = "";
+@@ -353,7 +434,14 @@
+ 
+     // A Pyret object bound to one connection: ctrl.latest(), ctrl.await-sample(), ...
+     function makeController(rec) {
++      const sources = rec.sources || (rec.sources = makeSources(rec));
+       return runtime.makeObject({
++        "sample": sources.sample,
++        "tilt": sources.tilt,
++        "temperature": sources.temperature,
++        "light": sources.light,
++        "button-a": sources["button-a"],
++        "button-b": sources["button-b"],
+         "name": runtime.makeFunction(function() {
+           runtime.checkArity(0, arguments, "name", false);
+           return runtime.makeString(rec.name);
+@@ -402,7 +490,22 @@
+     }
+ 
+     const DEFAULT = "default";
++    const defaultSources = makeSources(getRecord(DEFAULT));
+     const vals = {
++      // --- event sources (default connection) ---
++      "sample": defaultSources.sample,
++      "tilt": defaultSources.tilt,
++      "temperature": defaultSources.temperature,
++      "light": defaultSources.light,
++      "button-a": defaultSources["button-a"],
++      "button-b": defaultSources["button-b"],
++      "on-sample": onSugar(defaultSources.sample, "on-sample"),
++      "on-tilt": onSugar(defaultSources.tilt, "on-tilt"),
++      "on-temperature-change": onSugar(defaultSources.temperature, "on-temperature-change"),
++      "on-light-change": onSugar(defaultSources.light, "on-light-change"),
++      "on-button-a": onSugar(defaultSources["button-a"], "on-button-a"),
++      "on-button-b": onSugar(defaultSources["button-b"], "on-button-b"),
++
+       // --- single-board convenience (default connection) ---
+       "connect": runtime.makeFunction(function() {
+         runtime.checkArity(0, arguments, "connect", false);

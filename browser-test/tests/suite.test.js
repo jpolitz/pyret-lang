@@ -36,6 +36,7 @@ const SUITES = {
   "rapid-rerun": require("./rapid-rerun"),
   "effective-ids": require("./effective-ids"),
   "fs-rpc-failures": require("./fs-rpc-failures"),
+  "reactor-events": require("./reactor-events"),
 };
 
 if (!ENV || !["cpo", "embed", "embed-static", "vscode", "vscode-ovsx"].includes(ENV)) {

@@ -965,6 +965,45 @@
 
 
 
+    // on_event: ((any -> void) -> (-> void)) CPS(world any -> world) -> handler
+    function on_event(subscribe, receive) {
+      return function(thisWorldIndex) {
+        var unsubscribe = null;
+        var active = false;
+        var queue = [];
+        var draining = false;
+        var drain = function() {
+          if (draining || queue.length === 0) { return; }
+          if (!active || thisWorldIndex != worldIndex) { queue = []; return; }
+          draining = true;
+          var value = queue.shift();
+          change_world(function(w, k) { receive(w, value, k); },
+                       function() { draining = false; drain(); });
+        };
+        var emit = function(value) {
+          if (!active || thisWorldIndex != worldIndex) { return; }
+          queue.push(value);
+          setTimeout(drain, 0);
+        };
+        return {
+          onRegister: function(top) {
+            active = true;
+            draining = false;
+            queue = [];
+            unsubscribe = subscribe(emit);
+          },
+          onUnregister: function(top) {
+            active = false;
+            queue = [];
+            var u = unsubscribe;
+            unsubscribe = null;
+            if (typeof u === "function") { u(); }
+          }
+        };
+      };
+    }
+    Jsworld.on_event = on_event;
+
     StopWhenHandler = function(test, receiver) {
       this.test = test;
       this.receiver = receiver;

@@ -56,6 +56,7 @@ tvh = t-var(A.global-names.make-atom("H"))
 t-image = t-name(module-uri("builtin://image-lib"), A.s-type-global("Image"))
 t-option = t-name(module-uri("builtin://option"), A.s-type-global("Option"))
 t-reactor = t-name(module-uri("builtin://reactors"), A.s-type-global("Reactor"))
+t-event-handler = t-name(module-uri("builtin://reactors"), A.s-type-global("EventHandler"))
 t-equality-result = t-name(module-uri("builtin://equality"), A.s-type-global("EqualityResult"))
 t-value-skeleton = t-name(module-uri("builtin://valueskeleton"), A.s-type-global("ValueSkeleton"))
 t-list = t-name(module-uri("builtin://lists"), A.s-type-global("List"))
@@ -128,6 +129,7 @@ fun make-default-types() block:
         "on-tick", t-option-app(t-arrow([list: tva], tva)),
         "on-mouse", t-option-app(t-arrow([list: tva, t-number, t-number, t-string], tva)),
         "on-key", t-option-app(t-arrow([list: tva, t-string], tva)),
+        "on-event", t-option-app(t-list-app(t-app(t-event-handler, [list: tva]))),
         "to-draw", t-option-app(t-arrow([list: tva], t-image)),
         "stop-when", t-option-app(t-arrow([list: tva], t-boolean)),
         "seconds-per-tick", t-option-app(t-number),
