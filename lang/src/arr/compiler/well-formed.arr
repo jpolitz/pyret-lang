@@ -695,13 +695,28 @@ well-formed-visitor = A.default-iter-visitor.{
     end
     ann.visit(self) and value.visit(self)
   end,
-  method s-event-field(self, l, name, source, value) block:
-    when name <> "on":
-      wf-error([list: ED.text("A reactor option with an argument must be written "),
-          ED.code(ED.text("on(event-source)")), ED.text(", but found one named "),
-          ED.code(ED.text(name)), ED.text(" ")], l)
+  method s-event-field(self, l, name, args, value) block:
+    expected = ask:
+      | name == "on" then: some({"on(event-source)"; 1})
+      | name == "to" then: some({"to(event-sink)"; 1})
+      | name == "on-to" then: some({"on-to(event-source, event-sink)"; 2})
+      | otherwise: none
     end
-    source.visit(self) and value.visit(self)
+    cases(Option) expected:
+      | none =>
+        wf-error([list: ED.text("A reactor option with arguments must be written "),
+            ED.code(ED.text("on(event-source)")), ED.text(", "),
+            ED.code(ED.text("to(event-sink)")), ED.text(", or "),
+            ED.code(ED.text("on-to(event-source, event-sink)")), ED.text(", but found one named "),
+            ED.code(ED.text(name)), ED.text(" ")], l)
+      | some(e) =>
+        when args.length() <> e.{1}:
+          wf-error([list: ED.text("The reactor option "), ED.code(ED.text(name)),
+              ED.text(" must be written "), ED.code(ED.text(e.{0})),
+              ED.text(", but found " + tostring(args.length()) + " arguments ")], l)
+        end
+    end
+    lists.all(_.visit(self), args) and value.visit(self)
   end,
   method s-method(self, l, name, params, args, ann, doc, body, _check-loc, _check, blocky) block:
     old-pbl = parent-block-loc
@@ -1358,8 +1373,8 @@ top-level-visitor = A.default-iter-visitor.{
   method s-mutable-field(_, l :: Loc, name :: String, ann :: A.Ann, value :: A.Expr):
     well-formed-visitor.s-mutable-field(l, name, ann, value)
   end,
-  method s-event-field(_, l :: Loc, name :: String, source :: A.Expr, value :: A.Expr):
-    well-formed-visitor.s-event-field(l, name, source, value)
+  method s-event-field(_, l :: Loc, name :: String, args :: List<A.Expr>, value :: A.Expr):
+    well-formed-visitor.s-event-field(l, name, args, value)
   end,
   method s-method-field(_, l :: Loc, name :: String, params :: List<A.Name>, args :: List<A.Bind>, ann :: A.Ann, doc :: String, body :: A.Expr, _check-loc :: Option<Loc>, _check :: Option<A.Expr>, blocky):
     well-formed-visitor.s-method-field(l, name, params, args, ann, doc, body, _check-loc, _check, blocky)

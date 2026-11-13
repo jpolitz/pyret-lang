@@ -234,7 +234,7 @@ reactor-expr: REACTOR COLON
 END
 reactor-fields: reactor-field (COMMA reactor-field)* [COMMA]
 reactor-field: field | event-field
-event-field: NAME PARENNOSPACE binop-expr RPAREN COLON binop-expr
+event-field: NAME PARENNOSPACE binop-expr (COMMA binop-expr)* RPAREN COLON binop-expr
 
 dot-expr: expr DOT NAME
 bracket-expr: expr LBRACK binop-expr RBRACK

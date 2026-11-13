@@ -662,8 +662,10 @@ export function desugarExpr(expr: A.Expr): A.Expr {
     case 's-reactor': {
       const l = expr.l;
       const eventFields = expr.fields.filter((f) => A.isSEventField(f)) as A.SEventField[];
-      const eventHandlers: A.Expr[] = eventFields.map((f) => new A.SPrimApp(f.l, 'makeEventHandler',
-        [desugarExpr(f.source), desugarExpr(f.value)], flatPrimApp));
+      const eventHandlers: A.Expr[] = eventFields.map((f) => {
+        const primName = f.name === 'to' ? 'makeToHandler' : f.name === 'on-to' ? 'makeOnToHandler' : 'makeEventHandler';
+        return new A.SPrimApp(f.l, primName, [...f.args.map(desugarExpr), desugarExpr(f.value)], flatPrimApp);
+      });
       const plainFields = expr.fields.filter((f) => !A.isSEventField(f));
       const fieldsByName = new Map<string, A.Expr>();
       const initAndNonInit = partition((f: A.Member) => {

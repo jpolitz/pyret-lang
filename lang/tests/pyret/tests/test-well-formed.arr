@@ -244,6 +244,11 @@ check "reactors":
   cwfs("reactor: init: 5, foo(x): 10 end") satisfies sc("must be written `on(event-source)`")
   cwfs("reactor: init: 5, foo(x): 10 end") satisfies sc("found one named `foo`")
   cwfs("reactor: on(x): 10 end") satisfies sc("must have a field named `init`")
+  cwfs("reactor: init: 5, on(x, y): 10 end") satisfies sc("must be written `on(event-source)`, but found 2 arguments")
+  cwfs("reactor: init: 5, to(x, y): 10 end") satisfies sc("must be written `to(event-sink)`, but found 2 arguments")
+  cwfs("reactor: init: 5, on-to(x): 10 end") satisfies sc("must be written `on-to(event-source, event-sink)`, but found 1 arguments")
+  cwfs("reactor: init: 5, on-to(x, y, z): 10 end") satisfies sc("but found 3 arguments")
+  c("x = 5\nreactor: init: 5, on-to(x, _): 10 end") satisfies CS.is-underscore-as-expr
   c("x = 5\nreactor: init: 5, on(x): _ end") satisfies CS.is-underscore-as-expr
   c("reactor: init: 5, on(_): 10 end") satisfies CS.is-underscore-as-expr
 end

@@ -14,6 +14,8 @@ check "parse and print":
   t4.tosource().pretty(80) is [list: "reactor: init: 5, on(MB.tilt): f, on(R.every(2)): lam(w, n): w + n end end"]
   t5 = P.surface-parse("reactor: init: 5, on(src): f, end", "test")
   t5.tosource().pretty(80) is [list: "reactor: init: 5, on(src): f end"]
+  t6 = P.surface-parse("reactor: init: 5, to(MB.leds): show, on-to(HTTP.request, HTTP.respond): lam(w, r): { w; r } end end", "test")
+  t6.tosource().pretty(100) is [list: "reactor: init: 5, to(MB.leds): show, on-to(HTTP.request, HTTP.respond): lam(w, r): { w; r } end end"]
 end
 
 check "reactors":

@@ -1433,10 +1433,11 @@ data Member:
         end
       PP.nest(INDENT, str-mutable + ann-part + str-colonspace + self.value.tosource())
     end,
-  | s-event-field(l :: Loc, name :: String, source :: Expr, value :: Expr) with:
+  | s-event-field(l :: Loc, name :: String, args :: List<Expr>, value :: Expr) with:
     method label(self): "s-event-field" end,
     method tosource(self):
-      key-part = PP.str(self.name) + PP.parens(self.source.tosource())
+      key-part = PP.str(self.name) + PP.parens(PP.nest(INDENT,
+          PP.separate(PP.commabreak, self.args.map(_.tosource()))))
       PP.nest(INDENT, key-part + str-colonspace + self.value.tosource())
     end,
   | s-method-field(
@@ -2381,8 +2382,8 @@ default-map-visitor = {
   method s-mutable-field(self, l :: Loc, name :: String, ann :: Ann, value :: Expr):
     s-mutable-field(l, name, ann.visit(self), value.visit(self))
   end,
-  method s-event-field(self, l :: Loc, name :: String, source :: Expr, value :: Expr):
-    s-event-field(l, name, source.visit(self), value.visit(self))
+  method s-event-field(self, l :: Loc, name :: String, args :: List<Expr>, value :: Expr):
+    s-event-field(l, name, args.map(_.visit(self)), value.visit(self))
   end,
   method s-method-field(
       self,
@@ -3003,8 +3004,8 @@ default-iter-visitor = {
   method s-mutable-field(self, l :: Loc, name :: String, ann :: Ann, value :: Expr):
     ann.visit(self) and value.visit(self)
   end,
-  method s-event-field(self, l :: Loc, name :: String, source :: Expr, value :: Expr):
-    source.visit(self) and value.visit(self)
+  method s-event-field(self, l :: Loc, name :: String, args :: List<Expr>, value :: Expr):
+    lists.all(_.visit(self), args) and value.visit(self)
   end,
   method s-method-field(
       self,
@@ -3621,8 +3622,8 @@ dummy-loc-visitor = {
   method s-mutable-field(self, l :: Loc, name :: String, ann :: Ann, value :: Expr):
     s-mutable-field(dummy-loc, name, ann.visit(self), value.visit(self))
   end,
-  method s-event-field(self, l :: Loc, name :: String, source :: Expr, value :: Expr):
-    s-event-field(dummy-loc, name, source.visit(self), value.visit(self))
+  method s-event-field(self, l :: Loc, name :: String, args :: List<Expr>, value :: Expr):
+    s-event-field(dummy-loc, name, args.map(_.visit(self)), value.visit(self))
   end,
   method s-method-field(
       self,

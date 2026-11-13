@@ -58,6 +58,7 @@ t-option = t-name(module-uri("builtin://option"), A.s-type-global("Option"))
 t-reactor = t-name(module-uri("builtin://reactors"), A.s-type-global("Reactor"))
 t-event-handler = t-name(module-uri("builtin://reactors"), A.s-type-global("EventHandler"))
 t-event-source = t-name(module-uri("builtin://reactors"), A.s-type-global("EventSource"))
+t-event-sink = t-name(module-uri("builtin://reactors"), A.s-type-global("EventSink"))
 t-equality-result = t-name(module-uri("builtin://equality"), A.s-type-global("EqualityResult"))
 t-value-skeleton = t-name(module-uri("builtin://valueskeleton"), A.s-type-global("ValueSkeleton"))
 t-list = t-name(module-uri("builtin://lists"), A.s-type-global("List"))
@@ -141,6 +142,15 @@ fun make-default-types() block:
   default-typs.set-now("makeEventHandler", t-forall([list: tva, tvb], t-arrow([list:
       t-app(t-event-source, [list: tvb]),
       t-arrow([list: tva, tvb], tva)],
+    t-app(t-event-handler, [list: tva]))))
+  default-typs.set-now("makeToHandler", t-forall([list: tva, tvb], t-arrow([list:
+      t-app(t-event-sink, [list: tvb]),
+      t-arrow([list: tva], tvb)],
+    t-app(t-event-handler, [list: tva]))))
+  default-typs.set-now("makeOnToHandler", t-forall([list: tva, tvb, tvc], t-arrow([list:
+      t-app(t-event-source, [list: tvb]),
+      t-app(t-event-sink, [list: tvc]),
+      t-arrow([list: tva, tvb], t-tuple([list: tva, tvc]))],
     t-app(t-event-handler, [list: tva]))))
   default-typs.set-now("hasField", t-arrow([list: t-record([string-dict: ]), t-string], t-boolean))
   default-typs.set-now("makeSrcloc", t-arrow([list: t-srcloc], t-bot))

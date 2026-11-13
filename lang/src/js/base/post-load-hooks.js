@@ -134,6 +134,8 @@ define("pyret-base/js/post-load-hooks", function() {
         var r = runtime.getField(runtime.getField(reactor, "provide-plus-types"), "values");
         runtime.setParam("makeReactor", runtime.getField(r, "make-reactor").app);
         runtime.setParam("makeEventHandler", runtime.getField(r, "on").app);
+        runtime.setParam("makeToHandler", runtime.getField(r, "to").app);
+        runtime.setParam("makeOnToHandler", runtime.getField(r, "on-to").app);
       },
       "builtin://checker": function(checker) {
         var checker = runtime.getField(runtime.getField(checker, "provide-plus-types"), "values");

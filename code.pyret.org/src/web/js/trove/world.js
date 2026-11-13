@@ -154,7 +154,7 @@
       });
     }
 
-    function bigBangFromDict(init, dict, tracer) {
+    function bigBangFromDict(init, dict, tracer, messageTracer) {
       var handlers = [];
       function add(k, constr) {
         if(dict.hasOwnProperty(k)) {
@@ -175,15 +175,22 @@
           handlers.push(runtime.makeOpaque(new OnTick(dict["on-tick"], DEFAULT_TICK_DELAY * 1000)));
         }
       }
+      var sinks = makeSinkSessions(messageTracer);
       if(dict.hasOwnProperty("on-event")) {
         dict["on-event"].forEach(function(binding) {
-          handlers.push(runtime.makeOpaque(new OnEvent(binding.name, binding.subscribe, binding.handler)));
+          var reply = binding.kind === "on-to" ? binding : null;
+          handlers.push(runtime.makeOpaque(new OnEvent(binding.name, binding.subscribe, binding.handler, reply, sinks)));
         });
       }
       add("on-mouse", OnMouse);
       add("on-key", OnKey);
       add("on-raw-key", OnRawKey);
       add("to-draw", ToDraw);
+      if(dict.hasOwnProperty("to-sink")) {
+        dict["to-sink"].forEach(function(binding) {
+          handlers.push(runtime.makeOpaque(new ToSink(binding, sinks)));
+        });
+      }
       add("stop-when", StopWhen);
       add("close-when-stop", CloseWhenStop);
 
@@ -477,11 +484,93 @@
 
 
 
-    var OnEvent = function(name, subscribe, handler) {
+    function makeSinkSessions(messageTracer) {
+      var open = new Map();
+      function failure(binding, what, e) {
+        if(runtime.isPyretException(e)) { return e; }
+        var message = "The event sink " + JSON.stringify(binding.sinkName) + " failed to " + what + ": " + String((e && e.message) || e);
+        return runtime.makePyretFailException(runtime.ffi.makeMessageException(message));
+      }
+      return {
+        acquire: function(binding) {
+          var entry = open.get(binding);
+          if(entry) { entry.count += 1; return; }
+          try {
+            open.set(binding, { count: 1, session: binding.openSink() });
+          } catch(e) {
+            var exn = failure(binding, "start", e);
+            setTimeout(function() { rawJsworld.shutdown({errorShutdown: exn}); }, 0);
+          }
+        },
+        release: function(binding) {
+          var entry = open.get(binding);
+          if(!entry) { return; }
+          entry.count -= 1;
+          if(entry.count > 0) { return; }
+          open.delete(binding);
+          if(typeof entry.session.close === "function") {
+            try { entry.session.close(); } catch(e) { console.error(e); }
+          }
+        },
+        send: function(binding, message, k) {
+          var entry = open.get(binding);
+          if(!entry) { return; }
+          var fail = function(e) {
+            rawJsworld.shutdown({errorShutdown: failure(binding, "send", e)});
+          };
+          if(typeof messageTracer === "function") { messageTracer(binding, message); }
+          var result;
+          try {
+            result = entry.session.send(message);
+          } catch(e) {
+            fail(e);
+            return;
+          }
+          if(result && typeof result.then === "function") {
+            result.then(function() { k(); }, fail);
+          } else {
+            k();
+          }
+        }
+      };
+    }
+
+    function withSink(creator, binding, sinks) {
+      return function(thisWorldIndex) {
+        var h = creator(thisWorldIndex);
+        return {
+          onRegister: function(top) { sinks.acquire(binding); h.onRegister(top); },
+          onUnregister: function(top) { h.onUnregister(top); sinks.release(binding); }
+        };
+      };
+    }
+
+    var ToSink = function(binding, sinks) {
+      WorldConfigOption.call(this, 'to-sink');
+      this.binding = binding;
+      this.sinks = sinks;
+    };
+
+    ToSink.prototype = Object.create(WorldConfigOption.prototype);
+
+    ToSink.prototype.toRawHandler = function(toplevelNode) {
+      var that = this;
+      var project = adaptWorldFunction(that.binding.handler);
+      var creator = rawJsworld.on_world_change(function(w, k) {
+        project(w, function(message) {
+          that.sinks.send(that.binding, message, k);
+        });
+      });
+      return withSink(creator, that.binding, that.sinks);
+    };
+
+    var OnEvent = function(name, subscribe, handler, reply, sinks) {
       WorldConfigOption.call(this, 'on-event');
       this.sourceName = name;
       this.subscribe = subscribe;
       this.handler = handler;
+      this.reply = reply;
+      this.sinks = sinks;
     };
 
     OnEvent.prototype = Object.create(WorldConfigOption.prototype);
@@ -499,9 +588,24 @@
           return null;
         }
       };
-      return rawJsworld.on_event(subscribe, function(w, value, success) {
-        worldFunction(w, value, success);
+      if(!that.reply) {
+        return rawJsworld.on_event(subscribe, function(w, value, success) {
+          worldFunction(w, value, success);
+        });
+      }
+      var creator = rawJsworld.on_event(subscribe, function(w, value, success) {
+        worldFunction(w, value, function(result) {
+          var parts;
+          try {
+            parts = that.reply.splitReply(result);
+          } catch(e) {
+            rawJsworld.shutdown({errorShutdown: e});
+            return;
+          }
+          that.sinks.send(that.reply, parts.message, function() { success(parts.state); });
+        });
       });
+      return withSink(creator, that.reply, that.sinks);
     };
 
     var OutputConfig = function() {}

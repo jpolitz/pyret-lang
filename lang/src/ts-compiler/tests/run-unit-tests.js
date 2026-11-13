@@ -192,8 +192,34 @@ test('parse: on(source): handler is a reactor event field', () => {
   assert.strictEqual(reactor.fields.length, 2);
   assert.strictEqual(reactor.fields[1].$name, 's-event-field');
   assert.strictEqual(reactor.fields[1].name, 'on');
-  assert.strictEqual(reactor.fields[1].source.$name, 's-dot');
+  assert.strictEqual(reactor.fields[1].args.length, 1);
+  assert.strictEqual(reactor.fields[1].args[0].$name, 's-dot');
   assert.strictEqual(reactor.tosource().pretty(80).join('\n'), 'reactor: init: 0, on(MB.tilt): f end');
+});
+
+test('parse: to(sink) and on-to(source, sink) are reactor event fields', () => {
+  const src = 'reactor: init: 0, to(MB.leds): f, on-to(H.request, H.respond): g end';
+  const prog = P.surfaceParse(src + '\n', 'file://test');
+  const reactor = prog.block.stmts[0];
+  assert.strictEqual(reactor.fields[1].name, 'to');
+  assert.strictEqual(reactor.fields[1].args.length, 1);
+  assert.strictEqual(reactor.fields[2].name, 'on-to');
+  assert.strictEqual(reactor.fields[2].args.length, 2);
+  assert.strictEqual(reactor.tosource().pretty(80).join('\n'), src);
+  const res = WF.checkWellFormed(AU.appendNothingIfNecessary(prog));
+  assert.strictEqual(res.$name, 'ok');
+});
+
+test('well-formed: event field names and argument counts', () => {
+  const render = (src) => {
+    const prog = P.surfaceParse(src + '\n', 'file://test');
+    const res = WF.checkWellFormed(AU.appendNothingIfNecessary(prog));
+    assert.strictEqual(res.$name, 'err');
+    return res.problems.map((p) => RED.displayToString(p.renderReason(), String, [])).join('\n');
+  };
+  assert.ok(render('reactor: init: 0, on-to(a): f end').includes('must be written `on-to(event-source, event-sink)`, but found 1 arguments'));
+  assert.ok(render('reactor: init: 0, to(a, b): f end').includes('must be written `to(event-sink)`, but found 2 arguments'));
+  assert.ok(render('reactor: init: 0, onto(a, b): f end').includes('found one named `onto`'));
 });
 
 // ---------- typechecker: record-type identity ----------

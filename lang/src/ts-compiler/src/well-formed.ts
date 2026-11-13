@@ -690,12 +690,24 @@ class WellFormedVisitor extends DefaultIterVisitor {
     return node.value.visit(this);
   }
   sEventField(node: A.SEventField): boolean {
-    if (node.name !== 'on') {
-      wfError([ED.text('A reactor option with an argument must be written '),
-        ED.code(ED.text('on(event-source)')), ED.text(', but found one named '),
+    const forms: { [name: string]: [string, number] } = {
+      'on': ['on(event-source)', 1],
+      'to': ['to(event-sink)', 1],
+      'on-to': ['on-to(event-source, event-sink)', 2],
+    };
+    const expected = Object.prototype.hasOwnProperty.call(forms, node.name) ? forms[node.name] : undefined;
+    if (expected === undefined) {
+      wfError([ED.text('A reactor option with arguments must be written '),
+        ED.code(ED.text('on(event-source)')), ED.text(', '),
+        ED.code(ED.text('to(event-sink)')), ED.text(', or '),
+        ED.code(ED.text('on-to(event-source, event-sink)')), ED.text(', but found one named '),
         ED.code(ED.text(node.name)), ED.text(' ')], node.l);
+    } else if (node.args.length !== expected[1]) {
+      wfError([ED.text('The reactor option '), ED.code(ED.text(node.name)),
+        ED.text(' must be written '), ED.code(ED.text(expected[0])),
+        ED.text(', but found ' + String(node.args.length) + ' arguments ')], node.l);
     }
-    return node.source.visit(this) && node.value.visit(this);
+    return node.args.every((a) => a.visit(this)) && node.value.visit(this);
   }
   sMutableField(node: A.SMutableField): boolean {
     if (reservedNames.has(node.name)) {

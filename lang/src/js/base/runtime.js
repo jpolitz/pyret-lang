@@ -5891,6 +5891,14 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
       if(!thisRuntime.hasParam("makeEventHandler")) { thisRuntime.ffi.throwMessageException("No event handler constructor provided"); }
       return thisRuntime.getParam("makeEventHandler")(source, handler);
     }
+    function makeToHandler(sink, handler) {
+      if(!thisRuntime.hasParam("makeToHandler")) { thisRuntime.ffi.throwMessageException("No event handler constructor provided"); }
+      return thisRuntime.getParam("makeToHandler")(sink, handler);
+    }
+    function makeOnToHandler(source, sink, handler) {
+      if(!thisRuntime.hasParam("makeOnToHandler")) { thisRuntime.ffi.throwMessageException("No event handler constructor provided"); }
+      return thisRuntime.getParam("makeOnToHandler")(source, sink, handler);
+    }
     // MUST BE CALLED WHILE ON PYRET STACK
     function toReprArray(vals, reprMethod) {
       // vals should be an array of {name: String, val: PyretValue, [method: ReprMethod]} objects
@@ -6413,6 +6421,8 @@ function (Namespace, jsnumslib, codePoint, util, exnStackParser, loader, seedran
 
       'makeReactor': makeReactor,
       'makeEventHandler': makeEventHandler,
+      'makeToHandler': makeToHandler,
+      'makeOnToHandler': makeOnToHandler,
 
       'raise': raiseJSJS,
 

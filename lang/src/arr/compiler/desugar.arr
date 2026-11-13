@@ -570,7 +570,12 @@ fun desugar-expr(expr :: A.Expr):
     | s-reactor(l, shadow fields) =>
       event-fields = for filter(f from fields): A.is-s-event-field(f) end
       event-handlers = for map(f from event-fields):
-        A.s-prim-app(f.l, "makeEventHandler", [list: desugar-expr(f.source), desugar-expr(f.value)], flat-prim-app)
+        prim-name = ask:
+          | f.name == "to" then: "makeToHandler"
+          | f.name == "on-to" then: "makeOnToHandler"
+          | otherwise: "makeEventHandler"
+        end
+        A.s-prim-app(f.l, prim-name, f.args.map(desugar-expr) + [list: desugar-expr(f.value)], flat-prim-app)
       end
       shadow fields = for filter(f from fields): not(A.is-s-event-field(f)) end
       fields-by-name = SD.make-mutable-string-dict()

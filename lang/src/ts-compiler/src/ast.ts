@@ -2458,11 +2458,12 @@ export class SMethodField extends MemberBase {
 
 export class SEventField extends MemberBase {
   get $name(): 's-event-field' { return 's-event-field'; }
-  constructor(public l: Loc, public name: string, public source: Expr, public value: Expr) { super(); }
+  constructor(public l: Loc, public name: string, public args: Expr[], public value: Expr) { super(); }
   visit(visitor: any): any { return visitor.sEventField(this); }
   label(): string { return 's-event-field'; }
   tosource(): any {
-    const keyPart = PP.str(this.name).append(PP.parens(this.source.tosource()));
+    const keyPart = PP.str(this.name).append(PP.parens(PP.nest(INDENT,
+      PP.separate(PP.commabreak, this.args.map((a) => a.tosource())))));
     return PP.nest(INDENT, keyPart.append(strColonspace).append(this.value.tosource()));
   }
 }

@@ -1084,8 +1084,9 @@ function translate(node: ParseNode, fileName: string): A.Program {
       return tr(node.kids[0]);
     },
     'event-field': function(node) {
-      // (event-field NAME PARENNOSPACE source RPAREN COLON value)
-      return new A.SEventField(pos(node.pos), symbol(node.kids[0]), tr(node.kids[2]), tr(node.kids[5]));
+      // (event-field NAME PARENNOSPACE arg (COMMA arg)* RPAREN COLON value)
+      return new A.SEventField(pos(node.pos), symbol(node.kids[0]), makeListComma(node.kids, 2, node.kids.length - 3),
+        tr(node.kids[node.kids.length - 1]));
     },
     'table-expr': function(node) {
       // (TABLE table-headers table-rows end)
