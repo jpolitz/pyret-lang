@@ -1560,6 +1560,7 @@ $(function() {
   pyretLoad.setAttribute("crossorigin", "anonymous");
 
   var pyretLoad2 = document.createElement('script');
+  pyretLoad2.setAttribute("crossorigin", "anonymous");
 
   if (window.PYRET_GZIPPED) {
     // The runtime bundle is gzipped and this host serves it WITHOUT an

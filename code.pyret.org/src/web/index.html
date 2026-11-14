@@ -5,7 +5,9 @@
     <title>{{APP_NAME}}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" type="image/png" href="/img/pyret-icon.png">
-    <link rel="prefetch" href="{{&PYRET}}" as="script">
+    <!-- crossorigin must match the editor's CORS request for this file, or the
+         CDN can cache a response without Access-Control-Allow-Origin. -->
+    <link crossorigin="anonymous" rel="prefetch" href="{{&PYRET}}" as="script">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
 
     <!-- Used to w/Google for OAuth verification -->

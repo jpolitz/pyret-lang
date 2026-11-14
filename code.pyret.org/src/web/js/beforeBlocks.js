@@ -1341,11 +1341,13 @@ $(function() {
 
   var pyretLoad = document.createElement('script');
   console.log(primaryPyret);
+  pyretLoad.setAttribute("crossorigin", "anonymous");
   pyretLoad.src = primaryPyret;
   pyretLoad.type = "text/javascript";
   document.body.appendChild(pyretLoad);
 
   var pyretLoad2 = document.createElement('script');
+  pyretLoad2.setAttribute("crossorigin", "anonymous");
 
   var backupStarted = false;
   function startBackupLoad() {
