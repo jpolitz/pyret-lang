@@ -30,8 +30,21 @@ define("js-sha256", [], function () { return jssha256; });
 jsmd5 = require("js-md5");
 define("js-md5", [], function () { return jsmd5; });
 
-canvas = require("canvas");
-define("canvas", [], function () { return canvas; });
+// In the browser, the "canvas" module used by image-lib, make-image, and
+// charts-lib is just the DOM. (On node, lang/ backs it with skia-canvas; see
+// lang/src/js/trove/require-node-dependencies.js.) This replaces the shim we
+// used to get from node-canvas's "browser" field, so CPO no longer needs the
+// native canvas package installed at all.
+define("canvas", [], function () {
+  return {
+    createCanvas: function (width, height) {
+      return Object.assign(document.createElement('canvas'), { width: width, height: height });
+    }
+    // NOTE: deliberately no Canvas/Image here, matching node-canvas's browser
+    // shim: make-image.js falls back to window.Image, and charts-lib.js's
+    // `instanceof canvasLib.Canvas` check stays off in the browser.
+  };
+});
 
 crossfetch = require("cross-fetch");
 define("cross-fetch", [], function() { return crossfetch; });
