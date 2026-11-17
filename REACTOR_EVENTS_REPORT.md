@@ -4,6 +4,12 @@ Agent-written report (Claude Fable 5.1), 2026-10-28. Everything in this file and
 in `reactor-events-report/` is agent prose; the system diff is described in
 "Files changed" below.
 
+Updated 2026-11-13 by Claude Fable 5.2 (also agent prose) where commit `0de67cf37` changed what this
+report describes; those places are marked "(2026-11-13)". Output from reactors (`to(sink)`,
+`on-to(source, sink)`, event sinks, the message trace) is in `REACTOR_SINKS_REPORT.md`. The
+"Files changed" and "Validation" sections are the record of the original two commits and were not
+updated.
+
 ## Summary
 
 Reactors can now subscribe to arbitrary event emitters. A reactor option
@@ -44,8 +50,8 @@ runs the matching handler, so programs that use a device can be tested in
 | `R.on(src, f)` | `(EventSource<E>, (a, E -> a)) -> EventHandler<a>` | bind a handler to a source |
 | `on-event: [list: ...]` | reactor option, `List<EventHandler<a>>` | the reactor's subscriptions |
 | `R.custom-event(src, v)` | `(EventSource<E>, E) -> Event` | an event to feed to `react` programmatically |
-| `R.event-source-name(src)` | `EventSource<E> -> String` | the library-chosen name, used in errors and `torepr` |
-| `R.every(seconds)` | `Number -> EventSource<Number>` | a built-in timer source, emits 1, 2, 3, ... |
+| `R.event-source-name(src)` | `EventSource<E> -> String` | the library-chosen name, used in errors and, unless the library asks for constructor-style printing, in `torepr` |
+| `R.every(seconds)` | `Number -> EventSource<Number>` | a built-in timer source, emits 1, 2, 3, ...; prints as `every(2)` (2026-11-13) |
 
 A handler always takes two arguments, the state and the emitted value, in the
 same shape as `on-key` and `on-mouse`. Several bindings may target one source;
@@ -57,19 +63,23 @@ Grammar: a reactor's body is now `reactor-fields`, where each
 `reactor-field` is either an ordinary `field` or an `event-field`:
 
 ```
-event-field: NAME PARENNOSPACE binop-expr RPAREN COLON binop-expr
+event-field: NAME PARENNOSPACE binop-expr (COMMA binop-expr)* RPAREN COLON binop-expr
 ```
+
+(2026-11-13: the argument list was a single expression originally; `to(sink)` and
+`on-to(source, sink)` use the same production.)
 
 The parentheses are what makes this unambiguous: a bare `tilt: handler`
 could be a misspelled option or a variable named `tilt`, and the compiler
 could not tell, while `on(expr):` says "this key is an expression". The
 production accepts any `NAME` so that `foo(x): v` can get a targeted
 well-formedness error ("must be written `on(event-source)`, but found one
-named `foo`") instead of a parse error; the name must be `on`. The paren must
+named `foo`") instead of a parse error; the name must be `on`, `to` or `on-to` (2026-11-13), with
+1, 1 and 2 arguments. The paren must
 follow `on` directly, as in every Pyret application.
 
-AST: a new `Member` variant `s-event-field(l, name, source, value)` (TS:
-`SEventField`). It can only come from a reactor body, so object literals,
+AST: a new `Member` variant `s-event-field(l, name, args, value)` (TS:
+`SEventField`; `args` was a single `source` expression before 2026-11-13). It can only come from a reactor body, so object literals,
 `extend`, and `data ... with` never see it; the generic visitors in both
 compilers handle it like any other member. `tosource` prints it back as
 `on(source): value`, and the pretty-printer round-trip test covers it.
@@ -81,8 +91,8 @@ Two `on(...)` entries for the same source are allowed (they run in order, as
 two `R.on` bindings do); that cannot be checked statically because the keys
 are expressions.
 
-Desugaring: each `on(e): h` becomes `makeEventHandler(e, check(h, Function))`
-and `makeReactor` gains a third argument, a raw array of those, typed
+Desugaring: each `on(e): h` becomes `makeEventHandler(e, h)` (the handler is passed bare; see the
+note under "Validation") and `makeReactor` gains a third argument, a raw array of those, typed
 `RawArray<EventHandler<a>>`. `makeEventHandler` is a runtime param set to
 `R.on` at load time, like `makeReactor`. `make-reactor` concatenates the
 syntactic bindings (in source order) with any `on-event` list (after them).
@@ -135,8 +145,12 @@ var seconds = Reactors.makeEventSource("wall-clock seconds", function(emit) {
 
 The contract is:
 
-- `subscribe(emit)` is called when a reactor that binds this source starts
-  interacting (once per binding, per `interact()`).
+- `subscribe(emit, context)` is called when a reactor that binds this source starts
+  interacting (once per binding, per `interact()`). `context` (2026-11-13) is `{ paired: false }`
+  under `on(source)` and `{ paired: true, sink: <sink> }` under `on-to(source, sink)`; sources that
+  ignore it are unaffected.
+- A third argument to `makeEventSource`, `{ constr: "name", args: [...] }` (2026-11-13), makes the
+  source print as a constructor call.
 - It returns a function that stops the stream; it is called when the reactor
   stops (`stop-when`, window close, an error in any handler, or the program
   being stopped).
@@ -299,13 +313,13 @@ Not validated: the micro:bit patch against a real board (no hardware here).
 I did not edit the docs. Suggested additions, in prose for the maintainer to
 scribble-ify:
 
-**Grammar** (`forms.scrbl`, reactor expressions):
+**Grammar** (`forms.scrbl`, reactor expressions; `event-field` as of 2026-11-13):
 
 ```
 reactor-expr: REACTOR COLON reactor-fields END
 reactor-fields: reactor-field (COMMA reactor-field)* [COMMA]
 reactor-field: field | event-field
-event-field: NAME PARENNOSPACE binop-expr RPAREN COLON binop-expr
+event-field: NAME PARENNOSPACE binop-expr (COMMA binop-expr)* RPAREN COLON binop-expr
 ```
 
 **`on(source)`** (new subsection after `on-mouse`). A reactor option written
@@ -344,8 +358,9 @@ handlers bound to `src` and raises an error if there are none.
 
 **For library authors** (in `libraries-internal` or the raw-module docs):
 the `reactors` module's `internal` object has
-`makeEventSource(name, subscribe)`, where `subscribe(emit)` returns an
-unsubscribe function and `emit` takes a Pyret value.
+`makeEventSource(name, subscribe)`, where `subscribe(emit, context)` returns an
+unsubscribe function and `emit` takes a Pyret value. Proposed text for `to(sink)`,
+`on-to(source, sink)`, sinks and message traces is in `REACTOR_SINKS_REPORT.md`.
 
 ## Possible follow-ups
 
