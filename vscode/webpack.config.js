@@ -103,4 +103,26 @@ const webExtensionConfig = {
 	},
 };
 
-module.exports = [ webExtensionConfig ];
+/** @type WebpackConfig */
+const nodeExtensionConfig = {
+	mode: 'none',
+	target: 'node',
+	entry: {
+		'extension': './src/nodeExtension.ts'
+	},
+	output: {
+		filename: '[name].js',
+		path: path.join(__dirname, './dist/node'),
+		libraryTarget: 'commonjs',
+		devtoolModuleFilenameTemplate: '../../[resource-path]'
+	},
+	resolve: {
+		extensions: ['.ts', '.js'],
+	},
+	module: webExtensionConfig.module,
+	externals: webExtensionConfig.externals,
+	performance: webExtensionConfig.performance,
+	devtool: 'nosources-source-map',
+};
+
+module.exports = [ webExtensionConfig, nodeExtensionConfig ];

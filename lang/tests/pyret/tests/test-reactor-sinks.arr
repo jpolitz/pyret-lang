@@ -183,7 +183,6 @@ check "interact adds to the message trace":
   messages(t) is [list: some(1), "1", "1", some(5), "6"]
   ticks(t) is [list: 1, 1, 1, 2, 2]
   sinks(t) is [list: "beeper", "lamp", "lamp", "beeper", "lamp"]
-  r.interact() raises "No interaction set up"
 end
 
 check "sources print as the library asks":
@@ -207,7 +206,6 @@ check "sources and sinks are started once per binding and told how they are boun
     "beeper single"]
   ES.sink-open-count() is 0
   ES.subscriber-count() is 0
-  r.interact() raises "No interaction set up"
 end
 
 check "sink bindings check their parts":

@@ -17,10 +17,12 @@
 	"repository": "https://github.com/jpolitz/pyret-parley-vscode",
 	"files": [
 		"dist/web/**/*",
+		"dist/node/**/*",
 		"media/pyret-logo-128.png",
 		"language-configuration.json",
 		"syntaxes/pyret.tmLanguage.json"
 	],
+	"main": "./dist/node/extension.js",
 	"browser": "./dist/web/extension.js",
 	"contributes": {
 		"languages": [

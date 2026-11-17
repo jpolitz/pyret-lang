@@ -136,6 +136,10 @@ define("pyret-base/js/post-load-hooks", function() {
         runtime.setParam("makeEventHandler", runtime.getField(r, "on").app);
         runtime.setParam("makeToHandler", runtime.getField(r, "to").app);
         runtime.setParam("makeOnToHandler", runtime.getField(r, "on-to").app);
+        if(hookOptions.headlessInteract) {
+          var internal = runtime.getField(runtime.getField(reactor, "provide-plus-types"), "internal");
+          internal.setInteract(internal.headlessInteract);
+        }
       },
       "builtin://checker": function(checker) {
         var checker = runtime.getField(runtime.getField(checker, "provide-plus-types"), "values");

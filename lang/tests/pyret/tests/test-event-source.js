@@ -60,7 +60,7 @@
       "beeper": recordingSink("beeper"),
       "attach-log": runtime.makeFunction(function(reactor) {
         attachLog = [];
-        internal.setInteract(function(init, handlers, tracer) {
+        var previous = internal.setInteract(function(init, handlers, tracer) {
           (handlers["on-event"] || []).forEach(function(b) {
             var unsubscribe = b.subscribe(function() {});
             if(b.kind === "on-to") {
@@ -78,12 +78,12 @@
         try {
           runtime.getField(reactor, "interact").app();
         } finally {
-          internal.setInteract(null);
+          internal.setInteract(previous);
         }
         return runtime.ffi.makeList(attachLog.map(runtime.makeString));
       }, "attach-log"),
       "fake-run": runtime.makeFunction(function(reactor, n) {
-        internal.setInteract(function(init, handlers, tracer, messageTracer) {
+        var previous = internal.setInteract(function(init, handlers, tracer, messageTracer) {
           var world = init;
           var toSinks = handlers["to-sink"] || [];
           function changed() {
@@ -106,7 +106,7 @@
         try {
           return runtime.getField(reactor, "interact").app();
         } finally {
-          internal.setInteract(null);
+          internal.setInteract(previous);
         }
       }, "fake-run"),
       "sink-open-count": runtime.makeFunction(function() {

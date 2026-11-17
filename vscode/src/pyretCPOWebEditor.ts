@@ -151,6 +151,12 @@ type PyretPane = {
   reset: () => void;
 }
 
+export type PaneModules = { modules: { [name: string]: { [method: string]: (...args: any[]) => any } }, dispose: () => void };
+const paneModuleFactories: ((pane: vscode.WebviewPanel) => PaneModules)[] = [];
+export function addPaneModules(factory: (pane: vscode.WebviewPanel) => PaneModules) {
+  paneModuleFactories.push(factory);
+}
+
 export function makePyretPane(
   pane : vscode.WebviewPanel,
   context: vscode.ExtensionContext,
@@ -211,6 +217,8 @@ export function makePyretPane(
         'cwd': () => process.cwd()
       }
     }
+    const extraModules = paneModuleFactories.map(f => f(pane));
+    for (const extra of extraModules) { Object.assign(knownModules, extra.modules); }
 
     // Setup initial content for the webview
     pane.webview.options = {
@@ -257,6 +265,7 @@ export function makePyretPane(
     // Make sure we get rid of the listener when our editor is closed.
     pane.onDidDispose(() => {
       changeDocumentSubscription.dispose();
+      extraModules.forEach(extra => extra.dispose());
     });
 
     function updateWebview(contentChanges?: readonly vscode.TextDocumentContentChangeEvent[]) {

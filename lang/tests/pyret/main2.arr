@@ -32,6 +32,7 @@ import file("./tests/test-tuple.arr") as _
 import file("./tests/test-reactor.arr") as _
 import file("./tests/test-reactor-events.arr") as _
 import file("./tests/test-reactor-sinks.arr") as _
+import file("./tests/test-reactor-headless.arr") as _
 import file("./tests/test-tail-call.arr") as _
 import file("./tests/test-parse.arr") as _
 import file("./tests/test-pprint.arr") as _

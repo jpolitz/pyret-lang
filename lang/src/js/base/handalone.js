@@ -61,7 +61,7 @@ requirejs(["pyret-base/js/runtime", "pyret-base/js/post-load-hooks", "pyret-base
     runtime._checkAnn = function() {};
   }
 
-  var postLoadHooks = loadHooksLib.makeDefaultPostLoadHooks(runtime, {main: main, checks: checkFlag("checks"), checksFormat: checkFlag("checksFormat")});
+  var postLoadHooks = loadHooksLib.makeDefaultPostLoadHooks(runtime, {main: main, checks: checkFlag("checks"), checksFormat: checkFlag("checksFormat"), headlessInteract: true});
   postLoadHooks[main] = function(answer) {
     var checks = checkFlag("checks");
     if(checks && checks === "none") { process.exit(EXIT_SUCCESS); }

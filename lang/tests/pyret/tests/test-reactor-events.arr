@@ -103,7 +103,6 @@ check "subscription is not started by react":
   end
   r.react(R.custom-event(ES.counter, 1)).get-value() is 1
   ES.subscriber-count() is 0
-  r.interact() raises "No interaction set up"
 end
 
 check "on(source): handler syntax":

@@ -83,7 +83,7 @@
         "get-trace": ["arrow", [], ["List", ["tid", "a"]]],
         "get-trace-as-table": ["arrow", [], "Any"],
         "react": ["arrow", ["ReactorEvent"], "RofA"],
-        "get-message-trace-as-table": ["arrow", [], "Any"],
+        "get-message-trace-as-table": ["arrow", [], "Table"],
         "is-stopped": ["arrow", [], "Boolean"],
         "_output": ["arrow", [], "ValueSkeleton"]
       }]
@@ -318,9 +318,163 @@
       });
     }
 
+
+    function headlessInteract(init, handlers, tracer, messageTracer) {
+      return runtime.pauseStack(function(restarter) {
+        var state = init;
+        var queue = [];
+        var busy = false;
+        var done = false;
+        var sessions = new Map();
+        var teardowns = [];
+
+        function failMessage(message) {
+          return runtime.makePyretFailException(runtime.ffi.makeMessageException(message));
+        }
+        function teardown() {
+          teardowns.splice(0).reverse().forEach(function(t) {
+            try { t(); } catch(e) { console.error(e); }
+          });
+        }
+        function finish(value) {
+          if(done) { return; }
+          done = true;
+          teardown();
+          restarter.resume(value);
+        }
+        function fail(exn) {
+          if(done) { return; }
+          done = true;
+          teardown();
+          restarter.error(exn);
+        }
+        function callPyret(f, args, k) {
+          runtime.run(function(_, __) {
+            return runtime.safeCall(function() {
+              return f.app.apply(null, args);
+            }, function(result) { return result; }, "interact");
+          }, runtime.namespace, { sync: false }, function(result) {
+            if(done) { return; }
+            if(runtime.isSuccessResult(result)) { k(result.result); }
+            else { fail(result.exn); }
+          });
+        }
+        function send(binding, message, k) {
+          var session = sessions.get(binding);
+          if(!session) { return k(); }
+          if(typeof messageTracer === "function") { messageTracer(binding, message); }
+          var sendFail = function(e) {
+            fail(runtime.isPyretException(e) ? e
+                 : failMessage("The event sink " + JSON.stringify(binding.sinkName) + " failed to send: " + String((e && e.message) || e)));
+          };
+          var result;
+          try { result = session.send(message); }
+          catch(e) { return sendFail(e); }
+          if(result && typeof result.then === "function") {
+            result.then(function() { if(!done) { k(); } }, sendFail);
+          }
+          else { k(); }
+        }
+        function project(i, k) {
+          var tos = handlers["to-sink"] || [];
+          if(i >= tos.length) { return k(); }
+          callPyret(tos[i].handler, [state], function(message) {
+            send(tos[i], message, function() { project(i + 1, k); });
+          });
+        }
+        function checkStop(k) {
+          if(!handlers.hasOwnProperty("stop-when")) { return k(); }
+          callPyret(handlers["stop-when"], [state], function(stop) {
+            if(runtime.isPyretTrue(stop)) { finish(state); }
+            else { k(); }
+          });
+        }
+        function commit(newState, k) {
+          var old = state;
+          state = newState;
+          var after = function() { project(0, function() { checkStop(k); }); };
+          if(typeof tracer === "function") { tracer(newState, old, after); }
+          else { after(); }
+        }
+        function drain() {
+          if(busy || done || queue.length === 0) { return; }
+          busy = true;
+          var item = queue.shift();
+          var next = function() { busy = false; drain(); };
+          if(item.kind === "tick") {
+            callPyret(handlers["on-tick"], [state], function(newState) { commit(newState, next); });
+            return;
+          }
+          var b = item.binding;
+          callPyret(b.handler, [state, item.value], function(result) {
+            if(b.kind !== "on-to") { return commit(result, next); }
+            var parts;
+            try { parts = b.splitReply(result); }
+            catch(e) { return fail(e); }
+            send(b, parts.message, function() { commit(parts.state, next); });
+          });
+        }
+        function enqueue(item) {
+          if(done) { return; }
+          queue.push(item);
+          setTimeout(drain, 0);
+        }
+
+        var allBindings = (handlers["on-event"] || []).concat(handlers["to-sink"] || []);
+        try {
+          allBindings.forEach(function(b) {
+            if(!b.sink || sessions.has(b)) { return; }
+            sessions.set(b, b.openSink());
+            teardowns.push(function() {
+              var session = sessions.get(b);
+              sessions.delete(b);
+              if(session && typeof session.close === "function") { session.close(); }
+            });
+          });
+        } catch(e) {
+          var sinkName = allBindings.filter(function(b) { return b.sink && !sessions.has(b); })[0];
+          return fail(failMessage("The event sink " + JSON.stringify(sinkName ? sinkName.sinkName : "?") + " failed to start: " + String((e && e.message) || e)));
+        }
+        if(typeof process !== "undefined" && typeof process.once === "function") {
+          var onSigint = function() { finish(state); };
+          process.once("SIGINT", onSigint);
+          teardowns.push(function() { process.removeListener("SIGINT", onSigint); });
+        }
+
+        var start = function() {
+          project(0, function() {
+            checkStop(function() {
+              (handlers["on-event"] || []).forEach(function(b) {
+                if(done) { return; }
+                var unsubscribe;
+                try {
+                  unsubscribe = b.subscribe(function(value) { enqueue({ binding: b, value: value }); });
+                } catch(e) {
+                  return fail(failMessage("The event source " + JSON.stringify(b.name) + " failed to start: " + String((e && e.message) || e)));
+                }
+                if(typeof unsubscribe === "function") { teardowns.push(unsubscribe); }
+              });
+              if(!done && handlers.hasOwnProperty("on-tick")) {
+                var seconds = handlers.hasOwnProperty("seconds-per-tick")
+                    ? jsnums.toFixnum(handlers["seconds-per-tick"]) : 1 / 28;
+                var id = setInterval(function() {
+                  if(!queue.some(function(i) { return i.kind === "tick"; })) { enqueue({ kind: "tick" }); }
+                }, seconds * 1000);
+                teardowns.push(function() { clearInterval(id); });
+              }
+            });
+          });
+        };
+        if(typeof tracer === "function") { tracer(init, init, start); }
+        else { start(); }
+      });
+    }
+
     var externalInteractionHandler = null;
     var setInteract = function(newInteract) {
+      var previous = externalInteractionHandler;
       externalInteractionHandler = newInteract;
+      return previous;
     }
     var makeReactor = function(init, fields, eventHandlers) {
       c1("make-reactor", fields, annObject);
@@ -701,6 +855,7 @@
 
     var internal = {
       setInteract: setInteract,
+      headlessInteract: headlessInteract,
       makeEventSource: makeEventSource,
       isEventSource: isEventSource,
       getSourceInfo: getSourceInfo,

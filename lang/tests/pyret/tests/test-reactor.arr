@@ -36,7 +36,6 @@ check "reactors":
   r4.react(R.mouse(4, 5, "buttondown")) raises "No on-mouse handler defined"
   r4.react(R.keypress("left")) raises "No on-key handler defined"
 
-  r4.interact() raises "No interaction set up"
 
   torepr(r1) is "reactor(5)"
   torepr(r4) is "reactor(7)"
@@ -61,7 +60,6 @@ check "reactor-functions":
 
   R.get-trace(r3) is [list: 5, 29]
 
-  R.interact(r3) raises "No interaction set up"
 end
 
 
