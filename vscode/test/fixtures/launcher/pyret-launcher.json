@@ -1,0 +1,5 @@
+{
+  "upstream": "brownplt/pyret-launcher",
+  "folder": "programs",
+  "baseName": "program"
+}
