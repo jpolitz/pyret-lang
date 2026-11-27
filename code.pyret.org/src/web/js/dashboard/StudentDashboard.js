@@ -2,6 +2,7 @@ import React, { Component } from 'react';
 import GoogleAPI from './GoogleAPI.js';
 import {FILE_EXT, APP_NAME} from './config.js';
 import File from './File';
+import { mergeProgramFiles, parseFileIds, chunkArray } from './programFiles.js';
 
 const NOT_SIGNED_IN = 1;
 const WAITING_FOR_SIGNIN = 2;
@@ -11,14 +12,7 @@ const INITIAL_LOAD = 4;
 
 const WAITING_FOR_FILES = [];
 
-// How long to wait after the last keystroke before asking Drive
-const SEARCH_DEBOUNCE_MS = 300;
-
 const PICKER_BATCH_SIZE = 50;
-
-function parseFileIds(text) {
-  return text.split(/[^A-Za-z0-9_-]+/).filter((id) => id.length > 0);
-}
 
 
 class StudentDashboard extends Component {
@@ -28,16 +22,16 @@ class StudentDashboard extends Component {
     this.state = {
       signedIn: INITIAL_LOAD,
       files: [],
+      filesError: false,
       activeTab: 'recent-files',
       newFileName: '',
       searchQuery: '',
-      // Matches from Drive for searchQuery (beyond what's in files), and
-      // whether we're still waiting on Drive for them
-      searchResults: [],
-      searching: false,
       userName: false,
-      addedCount: false,
+      addedMessage: false,
       manageOpen: false,
+      pickerOpen: false,
+      manageBusy: false,
+      manageMessage: null,
       idsPanel: false,
       copiedIds: '',
       copied: false,
@@ -93,51 +87,44 @@ class StudentDashboard extends Component {
     }
   }
 
-  updateRecentFiles = (addedIds) => {
-    this.setState({files: WAITING_FOR_FILES});
+  componentDidMount() {
+    window.addEventListener('keydown', this.handleKeyDown);
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener('keydown', this.handleKeyDown);
+  }
+
+  handleKeyDown = (event) => {
+    if (event.key === 'Escape' && this.state.manageOpen && !this.state.pickerOpen) {
+      this.handleManageCloseClick(event);
+    }
+  }
+
+  updateRecentFiles = () => {
+    this.setState({files: WAITING_FOR_FILES, filesError: false});
     this.api.getRecentFilesByExtAndAppName(APP_NAME, FILE_EXT).then((resp) => {
-      var files = resp.result.files;
-      var missing = (addedIds || []).filter((id) => !files.some((f) => f.id === id));
-      if (missing.length === 0) { return files; }
-      return this.api.getProgramFilesByIds(missing, FILE_EXT).then((added) => {
-        return files.concat(added).sort((a, b) => a.modifiedTime < b.modifiedTime ? 1 : (a.modifiedTime > b.modifiedTime ? -1 : 0));
+      this.setState({files: resp.result.files, filesError: false});
+    }).catch((err) => {
+      console.error("Failed to load files:", err);
+      this.setState({
+        files: [],
+        filesError: 'Could not load files from Google Drive. Try refreshing or signing in again.',
       });
-    }).then((files) => {
-      this.setState({files: files});
-    })
+    });
   }
 
   handleSearchChange = (event) => {
-    const query = event.target.value;
-    const trimmed = query.trim();
-    clearTimeout(this.searchTimer);
-    // Bumping this makes any in-flight response for an older query get dropped
-    const searchId = this.searchId = (this.searchId || 0) + 1;
-    this.setState({searchQuery: query, searchResults: [], searching: trimmed !== ''});
-    if (trimmed === '') { return; }
-    this.searchTimer = setTimeout(() => {
-      const done = (results) => {
-        if (this.searchId !== searchId) { return; }
-        this.setState({searchResults: results, searching: false});
-      };
-      this.api.getRecentFilesByExtAndAppName(APP_NAME, FILE_EXT, trimmed).then(
-        (resp) => done(resp.result.files || []),
-        (err) => {
-          console.error("File search failed: ", err);
-          done([]);
-        });
-    }, SEARCH_DEBOUNCE_MS);
+    this.setState({searchQuery: event.target.value});
   }
 
-  // The loaded files filter instantly as the user types (any substring of
-  // the name); matches Drive finds beyond the loaded page get added after.
+  // All program files are loaded into this.state.files, so filtering locally
+  // covers every file with arbitrary substring matching.
   getVisibleFiles = () => {
+    if (this.state.files === WAITING_FOR_FILES) { return []; }
     const query = this.state.searchQuery.trim().toLowerCase();
     if (query === '') { return this.state.files; }
-    const local = this.state.files.filter((f) => f.name.toLowerCase().includes(query));
-    const seen = {};
-    local.forEach((f) => { seen[f.id] = true; });
-    return local.concat(this.state.searchResults.filter((f) => !seen[f.id]));
+    return this.state.files.filter((f) => f.name.toLowerCase().includes(query));
   }
 
   handleNewFilenameChange = (event) => {
@@ -199,17 +186,31 @@ class StudentDashboard extends Component {
 
   addFiles = (ids) => {
     if (ids.length === 0) { return this.pickBatches([null]); }
+    this.setState({manageBusy: true, manageMessage: null});
     return this.api.getVisibleFileIds().then((visible) => {
-      var needed = ids.filter((id) => visible.indexOf(id) === -1);
-      var batches = [];
-      for (var i = 0; i < needed.length; i += PICKER_BATCH_SIZE) {
-        batches.push(needed.slice(i, i + PICKER_BATCH_SIZE));
+      var visibleSet = new Set(visible);
+      var needed = ids.filter((id) => !visibleSet.has(id));
+      if (needed.length === 0) {
+        var msg = ids.length === 1
+          ? 'That file is already accessible on this server.'
+          : 'All ' + ids.length + ' files are already accessible on this server.';
+        this.setState({manageBusy: false, pastedIds: '', manageMessage: {type: 'info', text: msg}});
+        return 0;
       }
-      return this.pickBatches(batches);
+      return this.pickBatches(chunkArray(needed, PICKER_BATCH_SIZE));
+    }).catch((err) => {
+      console.error("Failed to check existing files:", err);
+      this.setState({
+        manageBusy: false,
+        pickerOpen: false,
+        manageMessage: {type: 'error', text: 'Could not reach Google Drive. Try refreshing or signing in again.'},
+      });
+      return 0;
     });
   }
 
   pickBatches = (batches) => {
+    this.setState({manageBusy: true, pickerOpen: true, manageMessage: null});
     var added = [];
     var pickBatch = (n) => {
       if (n >= batches.length) { return added; }
@@ -220,21 +221,48 @@ class StudentDashboard extends Component {
         return pickBatch(n + 1);
       });
     };
-    return Q(pickBatch(0)).then((ids) => {
-      if (ids.length > 0 || batches.length === 0) {
-        this.setState({addedCount: ids.length, manageOpen: false, idsPanel: false});
-        this.updateRecentFiles(ids);
+    return Q(pickBatch(0)).then((pickedIds) => {
+      var uniqueIds = Array.from(new Set(pickedIds));
+      if (uniqueIds.length === 0) {
+        this.setState({manageBusy: false, pickerOpen: false});
+        return 0;
       }
-      return ids.length;
+      return this.api.getProgramFilesByIds(uniqueIds, APP_NAME, FILE_EXT).then((programFiles) => {
+        var addedMessage = programFiles.length === 0
+          ? 'No new Pyret files were added.'
+          : 'Added ' + programFiles.length + (programFiles.length === 1 ? ' file.' : ' files.');
+        this.setState((prevState) => ({
+          files: prevState.files === WAITING_FOR_FILES
+            ? mergeProgramFiles([], programFiles)
+            : mergeProgramFiles(prevState.files, programFiles),
+          filesError: false,
+          addedMessage: addedMessage,
+          manageOpen: false,
+          pickerOpen: false,
+          manageBusy: false,
+          manageMessage: null,
+          idsPanel: false,
+          pastedIds: '',
+        }));
+        return programFiles.length;
+      });
+    }).catch((err) => {
+      console.error("Failed to add files:", err);
+      this.setState({
+        manageBusy: false,
+        pickerOpen: false,
+        manageMessage: {type: 'error', text: 'Could not add files from Google Drive. Try refreshing or signing in again.'},
+      });
+      return 0;
     });
   }
 
   handleManageClick = (event) => {
-    this.setState({manageOpen: true});
+    this.setState({manageOpen: true, idsPanel: false, manageMessage: null});
   }
 
   handleManageCloseClick = (event) => {
-    this.setState({manageOpen: false, idsPanel: false});
+    this.setState({manageOpen: false, idsPanel: false, manageMessage: null});
   }
 
   handleManageOverlayClick = (event) => {
@@ -242,25 +270,42 @@ class StudentDashboard extends Component {
   }
 
   handleAddFilesClick = (event) => {
+    if (this.state.manageBusy) { return; }
     this.addFiles([]);
   }
 
   handleCopyIdsClick = (event) => {
     event.preventDefault();
+    if (this.state.manageBusy) { return; }
+    this.setState({manageBusy: true, manageMessage: null});
     this.api.getProgramFileIds(APP_NAME, FILE_EXT).then((ids) => {
+      if (ids.length === 0) {
+        this.setState({
+          manageBusy: false,
+          idsPanel: false,
+          manageMessage: {type: 'info', text: 'No Pyret files found on this server to copy.'},
+        });
+        return;
+      }
       var text = ids.join(',');
-      this.setState({idsPanel: 'copy', copiedIds: text, copied: false});
+      this.setState({manageBusy: false, idsPanel: 'copy', copiedIds: text, copied: false});
       if (window.navigator.clipboard) {
         window.navigator.clipboard.writeText(text).then(() => {
           this.setState({copied: true});
         }, () => {});
       }
+    }).catch((err) => {
+      console.error("Failed to copy file IDs:", err);
+      this.setState({
+        manageBusy: false,
+        manageMessage: {type: 'error', text: 'Could not read your file list. Try refreshing or signing in again.'},
+      });
     });
   }
 
   handlePasteIdsClick = (event) => {
     event.preventDefault();
-    this.setState({idsPanel: 'paste'});
+    this.setState({idsPanel: 'paste', manageMessage: null});
   }
 
   handlePastedIdsChange = (event) => {
@@ -269,11 +314,15 @@ class StudentDashboard extends Component {
 
   handleAddPastedIds = (event) => {
     event.preventDefault();
+    if (this.state.manageBusy) { return; }
     var ids = parseFileIds(this.state.pastedIds);
-    if (ids.length === 0) { return; }
-    this.addFiles(ids).then((count) => {
-      if (!this.state.manageOpen) { this.setState({pastedIds: ''}); }
-    });
+    if (ids.length === 0) {
+      this.setState({
+        manageMessage: {type: 'error', text: 'No file IDs found. Paste the comma-separated IDs copied from the other server.'},
+      });
+      return;
+    }
+    this.addFiles(ids);
   }
 
   selectAll = (event) => {
@@ -350,12 +399,9 @@ class StudentDashboard extends Component {
           <div id='file-search' className={(this.state.activeTab === 'new-file') ? 'hidden' : ''}>
             <input id='file-search-input' type='search' placeholder='Search your files by name' aria-label='Search your files by name'
               autoComplete='off' value={this.state.searchQuery} onChange={this.handleSearchChange} />
-            <span id='file-search-status' role='status' className={this.state.searching ? '' : 'hidden'}>
-              <i className='fa fa-circle-o-notch fast-spin fa-fw'></i> Searching all files...
-            </span>
           </div>
           <div id='file-picker-modal-body' className={'modal-body ' + ((this.state.activeTab === 'new-file') ? 'hidden' : '')}>
-            {this.state.addedCount === false ? null : <p id='added-files'>Added {this.state.addedCount} files.</p>}
+            {!this.state.addedMessage ? null : <p id='added-files'>{this.state.addedMessage}</p>}
             {
               this.state.files === WAITING_FOR_FILES ?
               (<div id='loading-spinner'>
@@ -363,12 +409,15 @@ class StudentDashboard extends Component {
                 <i className='fa fa-circle-o-notch fast-spin fa-3x fa-fw'></i>
               </div>)
               :
+                this.state.filesError ?
+                  <p id='files-error' className='files-error'>{this.state.filesError}</p>
+                :
                 visibleFiles.length > 0 ?
                     (<div className='file-list cf'>
                       {visibleFiles.map((f) => {return <File key={f.id} id={f.id} name={f.name} modifiedTime={f.modifiedTime} />;})}
                     </div>)
                   : isSearch ?
-                    (this.state.searching ? <p><em>Searching...</em></p> : <p><em>No files with names matching "{this.state.searchQuery.trim()}".</em></p>)
+                    <p><em>No files with names matching "{this.state.searchQuery.trim()}".</em></p>
                   :
                     <p><em>No Pyret files yet, use New File above to create one.</em></p>
             }
@@ -384,13 +433,15 @@ class StudentDashboard extends Component {
         </div>
         {!this.state.manageOpen ? null :
           <div id='manage-overlay' onClick={this.handleManageOverlayClick}>
-            <div id='manage-modal'>
+            <div id='manage-modal' role='dialog' aria-modal='true'>
               <p>Missing some files?  Working in a different Pyret server?  Try one of these steps:</p>
               <ol id='manage-steps'>
-                <li><button id='add-files' onClick={this.handleAddFilesClick} >Browse</button> your entire Drive to search for the missing files and give this server access to the files you choose</li>
-                <li><button id='copy-ids' onClick={this.handleCopyIdsClick} >Copy</button> to your clipboard all the file IDs that <em>this</em> server can access, or</li>
-                <li><button id='paste-ids' onClick={this.handlePasteIdsClick} >Paste</button> the file IDs from <em>another</em> server and give <em>this</em> server access to them</li>
+                <li><button id='add-files' disabled={this.state.manageBusy} onClick={this.handleAddFilesClick} >Browse</button> your entire Drive to search for the missing files and give this server access to the files you choose</li>
+                <li><button id='copy-ids' disabled={this.state.manageBusy} onClick={this.handleCopyIdsClick} >Copy</button> to your clipboard all the file IDs that <em>this</em> server can access, or</li>
+                <li><button id='paste-ids' disabled={this.state.manageBusy} onClick={this.handlePasteIdsClick} >Paste</button> the file IDs from <em>another</em> server and give <em>this</em> server access to them</li>
               </ol>
+              {!this.state.manageMessage ? null :
+                <p id='manage-message' className={'manage-message ' + this.state.manageMessage.type}>{this.state.manageMessage.text}</p>}
               <div id='file-ids'>
                 {this.state.idsPanel !== 'copy' ? null :
                   <div>
@@ -400,7 +451,7 @@ class StudentDashboard extends Component {
                 {this.state.idsPanel !== 'paste' ? null :
                   <form onSubmit={this.handleAddPastedIds}>
                     <textarea id='pasted-ids' value={this.state.pastedIds} onChange={this.handlePastedIdsChange} />
-                    <input id='add-pasted-ids' className='button' type='submit' value='Add files' />
+                    <input id='add-pasted-ids' className='button' disabled={this.state.manageBusy} type='submit' value='Add files' />
                   </form>}
               </div>
               <p><button id='manage-close' onClick={this.handleManageCloseClick} >Close</button></p>

@@ -1,6 +1,31 @@
+import {
+  PROGRAM_FILE_FIELDS,
+  isProgramFile,
+  buildProgramListQuery,
+  chunkArray,
+} from './programFiles.js';
+
 var FOLDER_MIME = "application/vnd.google-apps.folder";
-var CACHE_FILE_NAME = /^[a-z-]+:\/\//;
 class GoogleAPI {
+  constructor() {
+    this._excludedFolderIds = {};
+  }
+
+  /**
+   * Run a gapi.client.drive request, refreshing the access token once on 401.
+   */
+  callDrive = (makeReq) => {
+    return Q(makeReq()).catch((err) => {
+      var code = err && (err.status || err.code || (err.result && err.result.error && err.result.error.code));
+      if (code === 401) {
+        return window.reauth(true).then((auth) => {
+          if (!auth) { throw new Error("Not signed in"); }
+          return Q(makeReq());
+        });
+      }
+      throw err;
+    });
+  }
   /**
    *  Load the client library. Return a promise to allow .then() in caller
    */
@@ -48,9 +73,36 @@ class GoogleAPI {
   }
 
   getAppSharedFolderID = (appName) => {
-    return window.gapi.client.drive.files.list({
+    return this.callDrive(() => window.gapi.client.drive.files.list({
       q: '("me" in owners) and not trashed and mimeType="application/vnd.google-apps.folder" and name ="' + appName + '.shared"'
-    });
+    }));
+  }
+
+  getAppCompiledFolderID = (appName) => {
+    return this.callDrive(() => window.gapi.client.drive.files.list({
+      q: '("me" in owners) and not trashed and mimeType="application/vnd.google-apps.folder" and name ="' + appName + '.compiled"'
+    }));
+  }
+
+  getExcludedFolderIds = (appName) => {
+    if (!this._excludedFolderIds[appName]) {
+      this._excludedFolderIds[appName] = Q.all([
+        this.getAppSharedFolderID(appName),
+        this.getAppCompiledFolderID(appName),
+      ]).then((resps) => {
+        var ids = [];
+        resps.forEach((resp) => {
+          ((resp.result && resp.result.files) || []).forEach((f) => {
+            if (f && f.id) { ids.push(f.id); }
+          });
+        });
+        return ids;
+      }).catch((err) => {
+        delete this._excludedFolderIds[appName];
+        throw err;
+      });
+    }
+    return this._excludedFolderIds[appName];
   }
 
   createNewFile = (parentFolderId, fileName) => {
@@ -69,32 +121,28 @@ class GoogleAPI {
   listAllFiles = (params) => {
     var files = [];
     var getPage = (pageToken) => {
-      return Q(window.gapi.client.drive.files.list(Object.assign({}, params, {
+      return this.callDrive(() => window.gapi.client.drive.files.list(Object.assign({}, params, {
         fields: "nextPageToken, " + params.fields,
         pageSize: 1000,
         orderBy: "modifiedTime desc",
         pageToken: pageToken,
       }))).then((resp) => {
-        files = files.concat(resp.result.files);
-        return resp.result.nextPageToken ? getPage(resp.result.nextPageToken) : { result: { files: files } };
+        files = files.concat((resp.result && resp.result.files) || []);
+        return resp.result && resp.result.nextPageToken ? getPage(resp.result.nextPageToken) : { result: { files: files } };
       });
     };
     return getPage(undefined);
   }
 
   listProgramFiles = (appName, ext, nameFilter) => {
-    return Q(this.getAppSharedFolderID(appName)).then((resp) => {
-      var sharedFiles = resp.result.files;
-      var isSharedFile = "(appProperties has {key=\'originalProgramFlag\' and value=\'true\'})";
-      if(sharedFiles.length > 0) {
-        isSharedFile += "or '" + sharedFiles[0].id + "' in parents";
-      }
+    return this.getExcludedFolderIds(appName).then((excludedIds) => {
       return this.listAllFiles({
-        fields: "files(id, name, modifiedTime)",
-        q: 'not trashed and not (' + isSharedFile + ') and (mimeType = "text/plain" or fileExtension = "' + ext + '")' + nameFilter,
+        fields: "files(" + PROGRAM_FILE_FIELDS + ")",
+        q: buildProgramListQuery(ext, excludedIds, nameFilter),
+      }).then((resp) => {
+        var filterOpts = { ext: ext, excludedParentIds: excludedIds };
+        return { result: { files: resp.result.files.filter((f) => isProgramFile(f, filterOpts)) } };
       });
-    }).then((resp) => {
-      return { result: { files: resp.result.files.filter((f) => !CACHE_FILE_NAME.test(f.name)) } };
     });
   }
 
@@ -107,24 +155,29 @@ class GoogleAPI {
     return this.listProgramFiles(appName, ext, nameFilter);
   }
 
-  getProgramFilesByIds = (ids, ext) => {
-    var files = [];
-    var getChunk = (start) => {
-      if(start >= ids.length) { return files; }
-      return Q.all(ids.slice(start, start + 20).map((id) => {
-        return Q(window.gapi.client.drive.files.get({
-          fileId: id,
-          fields: "id, name, modifiedTime, mimeType, fileExtension, trashed",
-        })).then((resp) => resp.result, () => null);
-      })).then((chunk) => {
-        files = files.concat(chunk.filter((f) => {
-          return f !== null && !f.trashed && !CACHE_FILE_NAME.test(f.name)
-            && (f.mimeType === "text/plain" || f.fileExtension === ext);
-        }));
-        return getChunk(start + 20);
-      });
-    };
-    return Q(getChunk(0));
+  getProgramFilesByIds = (ids, appName, ext) => {
+    return this.getExcludedFolderIds(appName).then((excludedIds) => {
+      var filterOpts = { ext: ext, excludedParentIds: excludedIds };
+      var chunks = chunkArray(ids, 20);
+      var files = [];
+      var getChunk = (i) => {
+        if (i >= chunks.length) { return files; }
+        return Q.all(chunks[i].map((id) => {
+          return this.callDrive(() => window.gapi.client.drive.files.get({
+            fileId: id,
+            fields: PROGRAM_FILE_FIELDS,
+          })).then((resp) => resp.result, (err) => {
+            var code = err && (err.status || err.code || (err.result && err.result.error && err.result.error.code));
+            if (code === 403 || code === 404) { return null; }
+            throw err;
+          });
+        })).then((chunk) => {
+          files = files.concat(chunk.filter((f) => isProgramFile(f, filterOpts)));
+          return getChunk(i + 1);
+        });
+      };
+      return Q(getChunk(0));
+    });
   }
 
   getVisibleFileIds = () => {
@@ -207,33 +260,39 @@ class GoogleAPI {
     window.reauth(true).then((auth) => {
       if(!auth) { done.reject(new Error("Not signed in")); return; }
       window.gapi.load('picker', () => {
-        var picker = window.google.picker;
-        var listView = (label) => {
-          var view = new picker.DocsView(picker.ViewId.DOCS).setMode(picker.DocsViewMode.LIST);
-          if(view.setLabel) { view.setLabel(label); }
-          return view;
-        };
-        var views = fileIds
-          ? [listView('Files' + batchLabel).setFileIds(fileIds.join(','))]
-          : [listView('Pyret files').setMimeTypes('text/plain').setQuery('.' + ext + ' -title:"shared-gdrive"'), listView('My Drive').setMimeTypes('text/plain').setIncludeFolders(true).setParent('root')];
-        var builder = new picker.PickerBuilder()
-          .enableFeature(picker.Feature.MULTISELECT_ENABLED)
-          .setTitle(title)
-          .setOAuthToken(auth.access_token)
-          .setAppId(window.appId)
-          .setCallback((data) => {
-            var action = data[picker.Response.ACTION];
-            if(action === picker.Action.PICKED) {
-              done.resolve(data[picker.Response.DOCUMENTS].map((d) => d[picker.Document.ID]));
-            }
-            else if(action === picker.Action.CANCEL) {
-              done.resolve(null);
-            }
-          });
-        if(window.apiKey) { builder.setDeveloperKey(window.apiKey); }
-        views.forEach((v) => { builder.addView(v); });
-        builder.build().setVisible(true);
+        try {
+          var picker = window.google.picker;
+          var listView = (label) => {
+            var view = new picker.DocsView(picker.ViewId.DOCS).setMode(picker.DocsViewMode.LIST);
+            if(view.setLabel) { view.setLabel(label); }
+            return view;
+          };
+          var views = fileIds
+            ? [listView('Files' + batchLabel).setFileIds(fileIds.join(','))]
+            : [listView('Pyret files').setMimeTypes('text/plain').setQuery('.' + ext + ' -title:"shared-gdrive"'), listView('My Drive').setMimeTypes('text/plain').setIncludeFolders(true).setParent('root')];
+          var builder = new picker.PickerBuilder()
+            .enableFeature(picker.Feature.MULTISELECT_ENABLED)
+            .setTitle(title)
+            .setOAuthToken(auth.access_token)
+            .setAppId(window.appId)
+            .setCallback((data) => {
+              var action = data[picker.Response.ACTION];
+              if(action === picker.Action.PICKED) {
+                done.resolve((data[picker.Response.DOCUMENTS] || []).map((d) => d[picker.Document.ID]));
+              }
+              else if(action === picker.Action.CANCEL) {
+                done.resolve(null);
+              }
+            });
+          if(window.apiKey) { builder.setDeveloperKey(window.apiKey); }
+          views.forEach((v) => { builder.addView(v); });
+          builder.build().setVisible(true);
+        } catch (err) {
+          done.reject(err);
+        }
       });
+    }, (err) => {
+      done.reject(err);
     });
     return done.promise;
   }

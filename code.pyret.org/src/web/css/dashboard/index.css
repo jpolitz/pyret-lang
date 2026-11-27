@@ -80,6 +80,11 @@ button:hover, .button:hover {
     opacity: .7;
 }
 
+button:disabled, .button:disabled {
+    opacity: .5;
+    cursor: default;
+}
+
 #select-file {
     background: #CA3434;
     margin: 0px 16pt;
@@ -139,6 +144,15 @@ button:hover, .button:hover {
 
 #added-files {
     padding: 4pt;
+}
+
+.manage-message {
+    padding: 6pt 0;
+    font-size: 0.9rem;
+}
+
+.manage-message.error, .files-error {
+    color: #CA3434;
 }
 
 .start-button {
